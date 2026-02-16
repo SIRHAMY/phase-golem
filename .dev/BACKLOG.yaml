@@ -143,7 +143,7 @@ items:
     sizing_rationale: Medium size and complexity because it touches the coordinator-scheduler boundary and may require rethinking ownership patterns. Low risk since it's an internal optimization with no behavioral change. Investigation may conclude it's not worth the added complexity.
   last_phase_commit: a8ccf091769f7578f3edffd893436e6d1d83aea1
 - id: WRK-025
-  title: Clean up stale .orchestrator result files on startup and shutdown
+  title: Clean up stale .phase-golem result files on startup and shutdown
   status: ready
   size: small
   complexity: low
@@ -154,9 +154,9 @@ items:
   updated: 2026-02-13T01:04:42.344661226+00:00
   pipeline_type: feature
   description:
-    context: Phase execution writes result JSON files to .orchestrator/ (e.g. phase_result_WRK-001_build.json). These are cleaned up after successful reads in agent.rs.
+    context: Phase execution writes result JSON files to .phase-golem/ (e.g. phase_result_WRK-001_build.json). These are cleaned up after successful reads in agent.rs.
     problem: If an agent crashes before writing or after writing but before the result is read, stale result files persist on disk indefinitely. Over many runs these accumulate and waste disk space. Worse, a stale result file from a previous run could be mistakenly read as the result of a new execution.
-    solution: On orchestrator startup, delete all .orchestrator/phase_result_*.json files. Optionally also clean up on graceful shutdown. This is safe because result files are ephemeral — they only need to exist between agent write and executor read within a single run.
+    solution: On orchestrator startup, delete all .phase-golem/phase_result_*.json files. Optionally also clean up on graceful shutdown. This is safe because result files are ephemeral — they only need to exist between agent write and executor read within a single run.
     impact: Prevents disk space accumulation and eliminates risk of reading stale results from prior runs.
     sizing_rationale: Small/low — a glob + delete at startup in main.rs. Low impact because the practical risk is minor (stale reads are unlikely but possible).
 - id: WRK-031
@@ -186,9 +186,9 @@ items:
   updated: 2026-02-13T01:17:26.056457544+00:00
   pipeline_type: feature
   description:
-    context: The orchestrator has two modes — fully autonomous (orchestrate run) and manual status manipulation (unblock, advance). When an item is blocked by guardrails (e.g. risk exceeds max_risk), the only options are to raise the guardrail globally, manually edit the YAML to lower the assessment, or unblock and hope it doesn't re-block. There's no paved road for a human to say "I accept the risk, proceed with oversight" or "I did this work myself" or "cancel this item."
+    context: The orchestrator has two modes — fully autonomous (phase-golem run) and manual status manipulation (unblock, advance). When an item is blocked by guardrails (e.g. risk exceeds max_risk), the only options are to raise the guardrail globally, manually edit the YAML to lower the assessment, or unblock and hope it doesn't re-block. There's no paved road for a human to say "I accept the risk, proceed with oversight" or "I did this work myself" or "cancel this item."
     problem: Three scenarios have no supported workflow. (1) Human-in-the-loop execution — human wants the orchestrator to run one phase at a time with explicit approval between steps, bypassing guardrails for that item. This is the primary need when an item is blocked by guardrail thresholds but the human has reviewed and accepts the risk. (2) Human-completed work — human does the work outside the orchestrator (manually writes code, runs their own build) and needs to tell the orchestrator the item is done or should skip to a later phase. Currently requires manual YAML editing. (3) Item cancellation — human decides work is no longer needed. No close/cancel command exists.
-    solution: Add several CLI commands that cover these gaps. (a) orchestrate step <ID> — run exactly one phase for the item, bypassing guardrail checks, and stop. Human reviews output before running step again. Works on blocked items by implicitly unblocking them. (b) orchestrate complete <ID> — mark an item as Done (human performed the work externally). Should prompt for or accept a summary of what was done. (c) orchestrate close <ID> --reason "..." — remove item from active backlog (archive with a "closed" notation rather than "done"). (d) Consider adding --override-guardrails flag to unblock so it sets a per-item guardrail exception that persists through re-triage. All commands should commit their changes to git.
+    solution: Add several CLI commands that cover these gaps. (a) phase-golem step <ID> — run exactly one phase for the item, bypassing guardrail checks, and stop. Human reviews output before running step again. Works on blocked items by implicitly unblocking them. (b) phase-golem complete <ID> — mark an item as Done (human performed the work externally). Should prompt for or accept a summary of what was done. (c) phase-golem close <ID> --reason "..." — remove item from active backlog (archive with a "closed" notation rather than "done"). (d) Consider adding --override-guardrails flag to unblock so it sets a per-item guardrail exception that persists through re-triage. All commands should commit their changes to git.
     impact: Completes the human-orchestrator interaction model. Currently the orchestrator only works well for items that fit within guardrails. This unlocks the full backlog for human-guided execution and gives humans proper off-ramps (complete externally, cancel).
     sizing_rationale: Large because it's 3-4 new CLI commands each with their own state transitions, git commits, and edge cases (e.g. step on an item mid-phase, complete an item that has in-flight work). Medium complexity because each command individually is straightforward but they need to compose well with existing status transitions and the running orchestrator. Low risk since all commands are additive and don't change autonomous behavior. High impact because it's the missing half of the orchestrator's interaction model — without it, blocked items are effectively dead ends.
   phase_pool: pre
@@ -380,7 +380,7 @@ items:
     sizing_rationale: ''
   phase_pool: main
 - id: WRK-051
-  title: Create BACKLOG_INBOX.yaml during orchestrate init
+  title: Create BACKLOG_INBOX.yaml during phase-golem init
   status: ready
   size: small
   complexity: low

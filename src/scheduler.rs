@@ -7,7 +7,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::AgentRunner;
-use crate::config::{ExecutionConfig, OrchestrateConfig, PipelineConfig};
+use crate::config::{ExecutionConfig, PhaseGolemConfig, PipelineConfig};
 use crate::coordinator::CoordinatorHandle;
 use crate::executor;
 use crate::filter;
@@ -509,7 +509,7 @@ pub fn advance_to_next_active_target(
 
 /// Run the scheduler loop.
 ///
-/// This is the main entry point for the v2 orchestrator. It replaces `pipeline::run()`.
+/// This is the main entry point for the phase-golem scheduler.
 ///
 /// The loop:
 /// 1. Get snapshot from coordinator
@@ -523,7 +523,7 @@ pub fn advance_to_next_active_target(
 pub async fn run_scheduler(
     coordinator: CoordinatorHandle,
     runner: Arc<impl AgentRunner + 'static>,
-    config: OrchestrateConfig,
+    config: PhaseGolemConfig,
     params: RunParams,
     cancel: CancellationToken,
 ) -> Result<RunSummary, String> {
@@ -1027,7 +1027,7 @@ async fn handle_task_completion(
     item_id: &str,
     exec_result: PhaseExecutionResult,
     coordinator: &CoordinatorHandle,
-    config: &OrchestrateConfig,
+    config: &PhaseGolemConfig,
     state: &mut SchedulerState,
     previous_summaries: &mut HashMap<String, String>,
 ) -> Result<(), String> {
@@ -1091,7 +1091,7 @@ async fn handle_phase_success(
     item_id: &str,
     phase_result: PhaseResult,
     coordinator: &CoordinatorHandle,
-    config: &OrchestrateConfig,
+    config: &PhaseGolemConfig,
     state: &mut SchedulerState,
     previous_summaries: &mut HashMap<String, String>,
 ) -> Result<(), String> {
@@ -1196,7 +1196,7 @@ async fn handle_subphase_complete(
     item_id: &str,
     phase_result: PhaseResult,
     coordinator: &CoordinatorHandle,
-    config: &OrchestrateConfig,
+    config: &PhaseGolemConfig,
     state: &mut SchedulerState,
     previous_summaries: &mut HashMap<String, String>,
 ) -> Result<(), String> {
@@ -1412,7 +1412,7 @@ async fn handle_triage_success(
     item_id: &str,
     phase_result: &PhaseResult,
     coordinator: &CoordinatorHandle,
-    config: &OrchestrateConfig,
+    config: &PhaseGolemConfig,
     state: &mut SchedulerState,
 ) -> Result<(), String> {
     log_info!(
@@ -1480,7 +1480,7 @@ async fn handle_triage_success(
 async fn handle_promote(
     coordinator: &CoordinatorHandle,
     item_id: &str,
-    config: &OrchestrateConfig,
+    config: &PhaseGolemConfig,
 ) -> Result<(), String> {
     let snapshot = coordinator.get_snapshot().await?;
     let item = snapshot
@@ -1528,7 +1528,7 @@ async fn spawn_triage(
     running: &mut RunningTasks,
     coordinator: &CoordinatorHandle,
     runner: Arc<impl AgentRunner + 'static>,
-    config: &OrchestrateConfig,
+    config: &PhaseGolemConfig,
     item_id: &str,
     root: &Path,
 ) {
@@ -1591,7 +1591,7 @@ pub async fn apply_triage_result(
     coordinator: &CoordinatorHandle,
     item_id: &str,
     result: &PhaseResult,
-    config: &OrchestrateConfig,
+    config: &PhaseGolemConfig,
 ) -> Result<(), String> {
     // Apply assessment updates
     if let Some(ref assessments) = result.updated_assessments {
@@ -1694,7 +1694,7 @@ pub async fn apply_triage_result(
 async fn ingest_follow_ups(
     coordinator: &CoordinatorHandle,
     result: &PhaseResult,
-    _config: &OrchestrateConfig,
+    _config: &PhaseGolemConfig,
 ) -> u32 {
     if result.follow_ups.is_empty() {
         return 0;
@@ -1720,7 +1720,7 @@ async fn drain_join_set(
     running: &mut RunningTasks,
     state: &mut SchedulerState,
     coordinator: &CoordinatorHandle,
-    config: &OrchestrateConfig,
+    config: &PhaseGolemConfig,
     previous_summaries: &mut HashMap<String, String>,
 ) {
     while let Some(result) = join_set.join_next().await {

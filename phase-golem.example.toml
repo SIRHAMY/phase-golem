@@ -1,5 +1,5 @@
-# Orchestrate configuration
-# Copy this file to orchestrate.toml and customize for your project.
+# Phase Golem configuration
+# Copy this file to phase-golem.toml and customize for your project.
 
 [project]
 # Item ID prefix (e.g. WRK-001, WRK-002)

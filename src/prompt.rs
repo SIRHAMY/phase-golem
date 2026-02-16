@@ -26,7 +26,7 @@ pub struct PromptParams<'a> {
 pub fn build_prompt(params: &PromptParams) -> String {
     let preamble = build_preamble(
         "Autonomous Agent",
-        "You are running autonomously as part of the orchestrated changes workflow.\n\
+        "You are running autonomously as part of the phase-golem changes workflow.\n\
         No human is available for questions — use your judgment to make decisions.",
         params.item,
         None,
@@ -331,13 +331,13 @@ fn build_output_suffix(item_id: &str, phase_str: &str, result_path: &Path) -> St
 
 /// Build a structured context preamble for autonomous execution mode.
 ///
-/// This provides the agent with structured metadata about the orchestrator context:
+/// This provides the agent with structured metadata about the phase-golem context:
 /// mode, item metadata, pipeline/phase position, description, and optional
 /// retry/unblock context.
 ///
 /// Output format (markdown):
 /// ```text
-/// ## Orchestrator Context
+/// ## Phase Golem Context
 ///
 /// **Mode:** autonomous
 /// **Item:** WRK-003 — Orchestrator Pipeline Engine v2
@@ -352,7 +352,7 @@ fn build_output_suffix(item_id: &str, phase_str: &str, result_path: &Path) -> St
 /// Attempt 2/3. Previous failure: [error summary]
 ///
 /// ### Unblock Context
-/// [Human's unblock notes from `orchestrate unblock`]
+/// [Human's unblock notes from `phase-golem unblock`]
 /// ```
 /// Staged for Phase 6 (Scheduler) integration — will replace `build_preamble`
 /// when the scheduler calls `execute_phase` with full pipeline context.
@@ -368,7 +368,7 @@ pub fn build_context_preamble(
     let phase_position = format_phase_position(item, pipeline);
 
     let mut sections = vec![format!(
-        "## Orchestrator Context\n\n\
+        "## Phase Golem Context\n\n\
         **Mode:** autonomous\n\
         **Item:** {} — {}\n\
         **Pipeline:** {}\n\

@@ -47,7 +47,7 @@ fn setup_temp_repo() -> TempDir {
 #[test]
 fn check_preconditions_clean_repo() {
     let repo = setup_temp_repo();
-    let result = orchestrate::git::check_preconditions(Some(repo.path()));
+    let result = phase_golem::git::check_preconditions(Some(repo.path()));
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
 }
 
@@ -58,7 +58,7 @@ fn check_preconditions_dirty_tree_fails() {
     // Create an untracked file to dirty the tree
     fs::write(repo.path().join("dirty.txt"), "dirty").expect("Failed to write file");
 
-    let result = orchestrate::git::check_preconditions(Some(repo.path()));
+    let result = phase_golem::git::check_preconditions(Some(repo.path()));
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -86,7 +86,7 @@ fn check_preconditions_detached_head_fails() {
         .output()
         .expect("Failed to detach HEAD");
 
-    let result = orchestrate::git::check_preconditions(Some(repo.path()));
+    let result = phase_golem::git::check_preconditions(Some(repo.path()));
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -100,7 +100,7 @@ fn check_preconditions_detached_head_fails() {
 fn check_preconditions_not_git_repo_fails() {
     let dir = TempDir::new().expect("Failed to create temp dir");
 
-    let result = orchestrate::git::check_preconditions(Some(dir.path()));
+    let result = phase_golem::git::check_preconditions(Some(dir.path()));
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -118,7 +118,7 @@ fn check_preconditions_rebase_in_progress_fails() {
     let rebase_dir = repo.path().join(".git/rebase-merge");
     fs::create_dir_all(&rebase_dir).expect("Failed to create rebase-merge dir");
 
-    let result = orchestrate::git::check_preconditions(Some(repo.path()));
+    let result = phase_golem::git::check_preconditions(Some(repo.path()));
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -136,7 +136,7 @@ fn check_preconditions_merge_in_progress_fails() {
     let merge_head = repo.path().join(".git/MERGE_HEAD");
     fs::write(&merge_head, "abc123").expect("Failed to create MERGE_HEAD");
 
-    let result = orchestrate::git::check_preconditions(Some(repo.path()));
+    let result = phase_golem::git::check_preconditions(Some(repo.path()));
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -149,14 +149,14 @@ fn check_preconditions_merge_in_progress_fails() {
 #[test]
 fn is_git_repo_valid() {
     let repo = setup_temp_repo();
-    let result = orchestrate::git::is_git_repo(Some(repo.path()));
+    let result = phase_golem::git::is_git_repo(Some(repo.path()));
     assert!(result.is_ok(), "Expected Ok for valid git repo");
 }
 
 #[test]
 fn is_git_repo_not_a_repo() {
     let dir = TempDir::new().expect("Failed to create temp dir");
-    let result = orchestrate::git::is_git_repo(Some(dir.path()));
+    let result = phase_golem::git::is_git_repo(Some(dir.path()));
     assert!(result.is_err(), "Expected Err for non-git directory");
 }
 
@@ -167,24 +167,24 @@ fn stage_and_commit() {
     let new_file = repo.path().join("test.txt");
     fs::write(&new_file, "hello").expect("Failed to write file");
 
-    orchestrate::git::stage_paths(&[new_file.as_path()], Some(repo.path()))
+    phase_golem::git::stage_paths(&[new_file.as_path()], Some(repo.path()))
         .expect("Failed to stage");
     let hash =
-        orchestrate::git::commit("Test commit", Some(repo.path())).expect("Failed to commit");
+        phase_golem::git::commit("Test commit", Some(repo.path())).expect("Failed to commit");
     assert!(!hash.is_empty(), "Commit hash should not be empty");
     assert_eq!(hash.len(), 40, "Commit hash should be 40 chars");
 }
 
 #[test]
 fn stage_empty_paths_is_ok() {
-    let result = orchestrate::git::stage_paths(&[], None);
+    let result = phase_golem::git::stage_paths(&[], None);
     assert!(result.is_ok());
 }
 
 #[test]
 fn get_status_clean() {
     let repo = setup_temp_repo();
-    let entries = orchestrate::git::get_status(Some(repo.path())).expect("Failed to get status");
+    let entries = phase_golem::git::get_status(Some(repo.path())).expect("Failed to get status");
     assert!(entries.is_empty(), "Expected empty status for clean repo");
 }
 
@@ -198,7 +198,7 @@ fn get_status_with_changes() {
     // Modify an existing file
     fs::write(repo.path().join("README.md"), "# Modified\n").expect("Failed to modify file");
 
-    let entries = orchestrate::git::get_status(Some(repo.path())).expect("Failed to get status");
+    let entries = phase_golem::git::get_status(Some(repo.path())).expect("Failed to get status");
     assert!(
         entries.len() >= 2,
         "Expected at least 2 status entries, got {}",
@@ -213,7 +213,7 @@ fn get_status_with_changes() {
 #[test]
 fn commit_fails_with_nothing_to_commit() {
     let repo = setup_temp_repo();
-    let result = orchestrate::git::commit("Empty commit", Some(repo.path()));
+    let result = phase_golem::git::commit("Empty commit", Some(repo.path()));
     assert!(result.is_err(), "Expected error for empty commit");
 }
 
@@ -232,7 +232,7 @@ fn get_status_parses_status_codes() {
     // Create another untracked file
     fs::write(repo.path().join("untracked.txt"), "untracked").expect("Failed to write file");
 
-    let entries = orchestrate::git::get_status(Some(repo.path())).expect("Failed to get status");
+    let entries = phase_golem::git::get_status(Some(repo.path())).expect("Failed to get status");
 
     let staged = entries.iter().find(|e| e.path == "staged.txt");
     assert!(staged.is_some(), "Expected staged.txt in status");
@@ -256,7 +256,7 @@ fn get_status_parses_status_codes() {
 #[test]
 fn get_head_sha_returns_40_char_sha() {
     let repo = setup_temp_repo();
-    let sha = orchestrate::git::get_head_sha(repo.path()).expect("Failed to get HEAD SHA");
+    let sha = phase_golem::git::get_head_sha(repo.path()).expect("Failed to get HEAD SHA");
     assert_eq!(sha.len(), 40, "SHA should be 40 characters, got: {}", sha);
     assert!(
         sha.chars().all(|c| c.is_ascii_hexdigit()),
@@ -268,7 +268,7 @@ fn get_head_sha_returns_40_char_sha() {
 #[test]
 fn get_head_sha_changes_after_commit() {
     let repo = setup_temp_repo();
-    let sha1 = orchestrate::git::get_head_sha(repo.path()).unwrap();
+    let sha1 = phase_golem::git::get_head_sha(repo.path()).unwrap();
 
     fs::write(repo.path().join("new.txt"), "content").unwrap();
     Command::new("git")
@@ -282,7 +282,7 @@ fn get_head_sha_changes_after_commit() {
         .output()
         .unwrap();
 
-    let sha2 = orchestrate::git::get_head_sha(repo.path()).unwrap();
+    let sha2 = phase_golem::git::get_head_sha(repo.path()).unwrap();
     assert_ne!(sha1, sha2, "SHA should change after commit");
 }
 
@@ -291,7 +291,7 @@ fn get_head_sha_changes_after_commit() {
 #[test]
 fn is_ancestor_returns_true_for_ancestor() {
     let repo = setup_temp_repo();
-    let sha1 = orchestrate::git::get_head_sha(repo.path()).unwrap();
+    let sha1 = phase_golem::git::get_head_sha(repo.path()).unwrap();
 
     // Create a second commit
     fs::write(repo.path().join("new.txt"), "content").unwrap();
@@ -307,7 +307,7 @@ fn is_ancestor_returns_true_for_ancestor() {
         .unwrap();
 
     let result =
-        orchestrate::git::is_ancestor(&sha1, repo.path()).expect("is_ancestor should succeed");
+        phase_golem::git::is_ancestor(&sha1, repo.path()).expect("is_ancestor should succeed");
     assert!(
         result,
         "First commit should be ancestor of HEAD after second commit"
@@ -346,7 +346,7 @@ fn is_ancestor_returns_false_for_non_ancestor() {
         .current_dir(repo.path())
         .output()
         .unwrap();
-    let sha_a = orchestrate::git::get_head_sha(repo.path()).unwrap();
+    let sha_a = phase_golem::git::get_head_sha(repo.path()).unwrap();
 
     // Go back to default branch, create branch-b with a different commit
     Command::new("git")
@@ -373,7 +373,7 @@ fn is_ancestor_returns_false_for_non_ancestor() {
 
     // sha_a (branch-a tip) is NOT an ancestor of branch-b HEAD
     let result =
-        orchestrate::git::is_ancestor(&sha_a, repo.path()).expect("is_ancestor should succeed");
+        phase_golem::git::is_ancestor(&sha_a, repo.path()).expect("is_ancestor should succeed");
     assert!(
         !result,
         "Branch A commit should not be ancestor of Branch B HEAD"
@@ -385,7 +385,7 @@ fn is_ancestor_unknown_commit_returns_error() {
     let repo = setup_temp_repo();
     let fake_sha = "0000000000000000000000000000000000000000";
 
-    let result = orchestrate::git::is_ancestor(fake_sha, repo.path());
+    let result = phase_golem::git::is_ancestor(fake_sha, repo.path());
     assert!(
         result.is_err(),
         "Unknown commit should return error, got: {:?}",

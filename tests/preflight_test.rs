@@ -2,9 +2,9 @@ mod common;
 
 use std::path::Path;
 
-use orchestrate::config::{OrchestrateConfig, PhaseConfig, PipelineConfig, StalenessAction};
-use orchestrate::preflight::{run_preflight, PreflightError};
-use orchestrate::types::{BacklogItem, ItemStatus, PhasePool};
+use phase_golem::config::{PhaseGolemConfig, PhaseConfig, PipelineConfig, StalenessAction};
+use phase_golem::preflight::{run_preflight, PreflightError};
+use phase_golem::types::{BacklogItem, ItemStatus, PhasePool};
 
 // --- Test helpers ---
 
@@ -32,8 +32,8 @@ fn feature_pipeline_no_workflows() -> PipelineConfig {
     }
 }
 
-fn default_config() -> OrchestrateConfig {
-    let mut config = OrchestrateConfig::default();
+fn default_config() -> PhaseGolemConfig {
+    let mut config = PhaseGolemConfig::default();
     config
         .pipelines
         .insert("feature".to_string(), feature_pipeline_no_workflows());
@@ -197,7 +197,7 @@ fn preflight_errors_contain_config_location() {
 
     let errors = result.unwrap_err();
     let error = &errors[0];
-    assert!(error.config_location.contains("orchestrate.toml"));
+    assert!(error.config_location.contains("phase-golem.toml"));
     assert!(!error.suggested_fix.is_empty());
 }
 
@@ -205,7 +205,7 @@ fn preflight_errors_contain_config_location() {
 fn preflight_error_display_format() {
     let error = PreflightError {
         condition: "max_wip must be >= 1".to_string(),
-        config_location: "orchestrate.toml → execution.max_wip".to_string(),
+        config_location: "phase-golem.toml → execution.max_wip".to_string(),
         suggested_fix: "Set max_wip to at least 1".to_string(),
     };
 
@@ -223,7 +223,7 @@ fn preflight_workflow_files_exist_passes() {
     let root = dir.path();
 
     // Create a minimal config with workflow files that we'll create on disk
-    let mut config = OrchestrateConfig::default();
+    let mut config = PhaseGolemConfig::default();
     let workflow_path = "workflows/build.md";
     std::fs::create_dir_all(root.join("workflows")).unwrap();
     std::fs::write(root.join(workflow_path), "# Build workflow\n").unwrap();
@@ -250,7 +250,7 @@ fn preflight_missing_workflow_files_fails() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
 
-    let mut config = OrchestrateConfig::default();
+    let mut config = PhaseGolemConfig::default();
     config.pipelines.insert(
         "test".to_string(),
         PipelineConfig {

@@ -6,8 +6,8 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-use orchestrate::config::{default_feature_pipeline, OrchestrateConfig};
-use orchestrate::types::{BacklogFile, BacklogItem, ItemStatus};
+use phase_golem::config::{default_feature_pipeline, PhaseGolemConfig};
+use phase_golem::types::{BacklogFile, BacklogItem, ItemStatus};
 
 /// Creates a `BacklogItem` with minimal defaults.
 ///
@@ -89,7 +89,7 @@ pub fn fixture_path(name: &str) -> PathBuf {
 /// The environment includes:
 /// - A git repo with user config (`test@test.com` / `Test`)
 /// - An initial commit with `README.md`
-/// - Directories: `_ideas`, `_worklog`, `changes`, `.orchestrator`
+/// - Directories: `_ideas`, `_worklog`, `changes`, `.phase-golem`
 ///
 /// Returns the `TempDir` handle. The directory is cleaned up when dropped.
 pub fn setup_test_env() -> TempDir {
@@ -128,7 +128,7 @@ pub fn setup_test_env() -> TempDir {
         .output()
         .expect("Failed to commit");
 
-    let dirs = ["_ideas", "_worklog", "changes", ".orchestrator"];
+    let dirs = ["_ideas", "_worklog", "changes", ".phase-golem"];
     for d in &dirs {
         fs::create_dir_all(dir.path().join(d)).expect("Failed to create dir");
     }
@@ -136,13 +136,13 @@ pub fn setup_test_env() -> TempDir {
     dir
 }
 
-/// Creates an `OrchestrateConfig` with a `"feature"` pipeline using the
+/// Creates an `PhaseGolemConfig` with a `"feature"` pipeline using the
 /// default feature pipeline configuration.
 ///
-/// Uses `OrchestrateConfig::default()` as the base, then inserts the
+/// Uses `PhaseGolemConfig::default()` as the base, then inserts the
 /// `default_feature_pipeline()` under the `"feature"` key.
-pub fn default_config() -> OrchestrateConfig {
-    let mut config = OrchestrateConfig::default();
+pub fn default_config() -> PhaseGolemConfig {
+    let mut config = PhaseGolemConfig::default();
     config
         .pipelines
         .insert("feature".to_string(), default_feature_pipeline());

@@ -1,5 +1,5 @@
-use orchestrate::config::*;
-use orchestrate::types::*;
+use phase_golem::config::*;
+use phase_golem::types::*;
 
 // --- backlog_path config tests ---
 
@@ -12,7 +12,7 @@ fn default_backlog_path_is_backlog_yaml() {
 #[test]
 fn custom_backlog_path_parses_from_toml() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(
         &config_path,
         r#"
@@ -55,7 +55,7 @@ fn phase_config_new_matches_serde_defaults() {
 name = "build"
 is_destructive = true
 "#;
-    let config: OrchestrateConfig = toml::from_str(toml_str).unwrap();
+    let config: PhaseGolemConfig = toml::from_str(toml_str).unwrap();
     let deserialized = &config.pipelines["test"].phases[0];
 
     let constructed = PhaseConfig::new("build", true);
@@ -80,7 +80,7 @@ fn load_config_defaults_when_file_missing() {
 #[test]
 fn load_config_full() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(
         &config_path,
         r#"
@@ -114,7 +114,7 @@ default_phase_cap = 50
 #[test]
 fn load_config_partial_uses_defaults_for_missing() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(
         &config_path,
         r#"
@@ -137,7 +137,7 @@ prefix = "CUSTOM"
 #[test]
 fn load_config_empty_file_uses_all_defaults() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(&config_path, "").unwrap();
 
     let config = load_config(dir.path()).unwrap();
@@ -153,7 +153,7 @@ fn load_config_empty_file_uses_all_defaults() {
 #[test]
 fn load_config_invalid_toml_returns_error() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(&config_path, "this is not valid toml [[[").unwrap();
 
     let result = load_config(dir.path());
@@ -164,7 +164,7 @@ fn load_config_invalid_toml_returns_error() {
 #[test]
 fn load_config_invalid_enum_value_returns_error() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(
         &config_path,
         r#"
@@ -183,7 +183,7 @@ max_size = "extra_large"
 #[test]
 fn load_config_with_full_pipeline() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(
         &config_path,
         r#"
@@ -218,7 +218,7 @@ phases = [
 #[test]
 fn load_config_with_partial_pipeline_uses_phase_defaults() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(
         &config_path,
         r#"
@@ -242,7 +242,7 @@ phases = [
 #[test]
 fn load_config_missing_pipelines_section_generates_default() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(
         &config_path,
         r#"
@@ -270,7 +270,7 @@ prefix = "TEST"
 #[test]
 fn load_config_with_explicit_pipelines_does_not_add_default() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(
         &config_path,
         r#"
@@ -292,7 +292,7 @@ phases = [
 #[test]
 fn load_config_with_max_wip_and_max_concurrent() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(
         &config_path,
         r#"
@@ -329,7 +329,7 @@ fn validate_valid_config_passes() {
 
 #[test]
 fn validate_max_wip_zero_fails() {
-    let mut config = OrchestrateConfig::default();
+    let mut config = PhaseGolemConfig::default();
     config.execution.max_wip = 0;
     config.pipelines.insert(
         "test".to_string(),
@@ -347,7 +347,7 @@ fn validate_max_wip_zero_fails() {
 
 #[test]
 fn validate_max_concurrent_zero_fails() {
-    let mut config = OrchestrateConfig::default();
+    let mut config = PhaseGolemConfig::default();
     config.execution.max_concurrent = 0;
     config.pipelines.insert(
         "test".to_string(),
@@ -365,7 +365,7 @@ fn validate_max_concurrent_zero_fails() {
 
 #[test]
 fn validate_pipeline_no_main_phases_fails() {
-    let mut config = OrchestrateConfig::default();
+    let mut config = PhaseGolemConfig::default();
     config.pipelines.insert(
         "empty".to_string(),
         PipelineConfig {
@@ -382,7 +382,7 @@ fn validate_pipeline_no_main_phases_fails() {
 
 #[test]
 fn validate_duplicate_phase_names_fails() {
-    let mut config = OrchestrateConfig::default();
+    let mut config = PhaseGolemConfig::default();
     config.pipelines.insert(
         "dup".to_string(),
         PipelineConfig {
@@ -402,7 +402,7 @@ fn validate_duplicate_phase_names_fails() {
 
 #[test]
 fn validate_destructive_pre_phase_fails() {
-    let mut config = OrchestrateConfig::default();
+    let mut config = PhaseGolemConfig::default();
     config.pipelines.insert(
         "bad".to_string(),
         PipelineConfig {
@@ -419,7 +419,7 @@ fn validate_destructive_pre_phase_fails() {
 
 #[test]
 fn validate_staleness_block_with_max_wip_greater_than_one_fails() {
-    let mut config = OrchestrateConfig::default();
+    let mut config = PhaseGolemConfig::default();
     config.execution.max_wip = 2;
     config.pipelines.insert(
         "risky".to_string(),
@@ -442,7 +442,7 @@ fn validate_staleness_block_with_max_wip_greater_than_one_fails() {
 
 #[test]
 fn validate_staleness_block_with_max_wip_one_passes() {
-    let mut config = OrchestrateConfig::default();
+    let mut config = PhaseGolemConfig::default();
     config.execution.max_wip = 1;
     config.pipelines.insert(
         "ok".to_string(),
@@ -461,7 +461,7 @@ fn validate_staleness_block_with_max_wip_one_passes() {
 
 #[test]
 fn validate_multiple_errors_reported() {
-    let mut config = OrchestrateConfig::default();
+    let mut config = PhaseGolemConfig::default();
     config.execution.max_wip = 0;
     config.execution.max_concurrent = 0;
     config.pipelines.insert(
@@ -486,7 +486,7 @@ fn validate_multiple_errors_reported() {
 #[test]
 fn load_config_validation_failure_returns_error() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("orchestrate.toml");
+    let config_path = dir.path().join("phase-golem.toml");
     std::fs::write(
         &config_path,
         r#"

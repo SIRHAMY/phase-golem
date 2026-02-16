@@ -5,13 +5,13 @@ use std::process::Command;
 
 use tokio_util::sync::CancellationToken;
 
-use orchestrate::agent::MockAgentRunner;
-use orchestrate::config::{GuardrailsConfig, PhaseConfig, PipelineConfig, StalenessAction};
-use orchestrate::coordinator::spawn_coordinator;
-use orchestrate::executor::{
+use phase_golem::agent::MockAgentRunner;
+use phase_golem::config::{GuardrailsConfig, PhaseConfig, PipelineConfig, StalenessAction};
+use phase_golem::coordinator::spawn_coordinator;
+use phase_golem::executor::{
     check_staleness, execute_phase, passes_guardrails, resolve_transition, StalenessResult,
 };
-use orchestrate::types::{
+use phase_golem::types::{
     BacklogItem, DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult, PhasePool,
     PhaseResult, ResultCode, SizeLevel,
 };
@@ -627,7 +627,7 @@ async fn execute_phase_success_returns_success() {
     let item = make_in_progress_item("WRK-001", "prd");
     let backlog = common::make_backlog(vec![item.clone()]);
 
-    orchestrate::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
+    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
 
     let (handle, _coord_task) = spawn_coordinator(
         backlog,
@@ -682,7 +682,7 @@ async fn execute_phase_failure_with_retry_returns_failed_after_exhaustion() {
     let item = make_in_progress_item("WRK-001", "prd");
     let backlog = common::make_backlog(vec![item.clone()]);
 
-    orchestrate::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
+    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
 
     let (handle, _coord_task) = spawn_coordinator(
         backlog,
@@ -754,7 +754,7 @@ async fn execute_phase_subphase_complete_returns_immediately() {
     let item = make_in_progress_item("WRK-001", "build");
     let backlog = common::make_backlog(vec![item.clone()]);
 
-    orchestrate::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
+    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
 
     let (handle, _coord_task) = spawn_coordinator(
         backlog,
@@ -809,7 +809,7 @@ async fn execute_phase_cancellation_returns_cancelled() {
     let item = make_in_progress_item("WRK-001", "prd");
     let backlog = common::make_backlog(vec![item.clone()]);
 
-    orchestrate::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
+    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
 
     let (handle, _coord_task) = spawn_coordinator(
         backlog,
@@ -848,7 +848,7 @@ async fn execute_phase_blocked_result_returns_blocked() {
     let item = make_in_progress_item("WRK-001", "prd");
     let backlog = common::make_backlog(vec![item.clone()]);
 
-    orchestrate::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
+    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
 
     let (handle, _coord_task) = spawn_coordinator(
         backlog,
@@ -903,7 +903,7 @@ async fn execute_phase_agent_error_retries_and_fails() {
     let item = make_in_progress_item("WRK-001", "prd");
     let backlog = common::make_backlog(vec![item.clone()]);
 
-    orchestrate::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
+    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
 
     let (handle, _coord_task) = spawn_coordinator(
         backlog,
@@ -978,7 +978,7 @@ async fn execute_phase_staleness_blocks_destructive_phase() {
     item.last_phase_commit = Some(head_sha);
 
     let backlog = common::make_backlog(vec![item.clone()]);
-    orchestrate::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
+    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
 
     let (handle, _coord_task) = spawn_coordinator(
         backlog,

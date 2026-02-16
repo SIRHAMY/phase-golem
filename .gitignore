@@ -1,4 +1,4 @@
 /target
-.orchestrator/
+.phase-golem/
 *.rlib
-orchestrate.toml
+phase-golem.toml

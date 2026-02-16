@@ -6,25 +6,25 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use tokio_util::sync::CancellationToken;
 
-use orchestrate::agent::{
+use phase_golem::agent::{
     install_signal_handlers, is_shutdown_requested, kill_all_children, AgentRunner, CliAgentRunner,
 };
-use orchestrate::backlog;
-use orchestrate::config;
-use orchestrate::coordinator;
-use orchestrate::filter;
-use orchestrate::lock;
-use orchestrate::log::parse_log_level;
-use orchestrate::preflight;
-use orchestrate::prompt;
-use orchestrate::scheduler;
-use orchestrate::types::{parse_dimension_level, parse_size_level, DimensionLevel, ItemStatus};
-use orchestrate::{log_error, log_info, log_warn};
+use phase_golem::backlog;
+use phase_golem::config;
+use phase_golem::coordinator;
+use phase_golem::filter;
+use phase_golem::lock;
+use phase_golem::log::parse_log_level;
+use phase_golem::preflight;
+use phase_golem::prompt;
+use phase_golem::scheduler;
+use phase_golem::types::{parse_dimension_level, parse_size_level, DimensionLevel, ItemStatus};
+use phase_golem::{log_error, log_info, log_warn};
 
 const MAX_BACKLOG_PREVIEW_ITEMS: usize = 3;
 
 #[derive(Parser)]
-#[command(name = "orchestrate", about = "Changes workflow orchestrator")]
+#[command(name = "phase-golem", about = "Autonomous changes workflow engine")]
 struct Cli {
     /// Project root directory (defaults to current directory)
     #[arg(long, default_value = ".")]
@@ -40,13 +40,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize orchestrator directories and config
+    /// Initialize phase-golem directories and config
     Init {
         /// Project prefix for item IDs (e.g., WRK)
         #[arg(long, default_value = "WRK")]
         prefix: String,
     },
-    /// Run the orchestration pipeline
+    /// Run the phase-golem pipeline
     Run {
         /// Target specific backlog items by ID (can be specified multiple times for sequential processing)
         #[arg(long, action = clap::ArgAction::Append)]
@@ -99,7 +99,7 @@ async fn main() {
     let cli = Cli::parse();
 
     match parse_log_level(&cli.log_level) {
-        Ok(level) => orchestrate::log::set_log_level(level),
+        Ok(level) => phase_golem::log::set_log_level(level),
         Err(e) => {
             eprintln!("Error: {}", e);
             std::process::exit(1);
@@ -129,11 +129,11 @@ async fn main() {
     }
 }
 
-fn resolve_backlog_path(root: &Path, config: &config::OrchestrateConfig) -> PathBuf {
+fn resolve_backlog_path(root: &Path, config: &config::PhaseGolemConfig) -> PathBuf {
     root.join(&config.project.backlog_path)
 }
 
-fn resolve_inbox_path(root: &Path, config: &config::OrchestrateConfig) -> PathBuf {
+fn resolve_inbox_path(root: &Path, config: &config::PhaseGolemConfig) -> PathBuf {
     let backlog = resolve_backlog_path(root, config);
     backlog.parent().unwrap_or(root).join("BACKLOG_INBOX.yaml")
 }
@@ -151,11 +151,11 @@ fn handle_init(root: &Path, prefix: &str) -> Result<(), String> {
     }
 
     // Only check that a git repo exists -- init doesn't require clean tree or branch
-    orchestrate::git::is_git_repo(None)
+    phase_golem::git::is_git_repo(None)
         .map_err(|_| "Not a git repository. Run `git init` first.".to_string())?;
 
     // Create directories
-    let dirs = ["_ideas", "_worklog", "changes", ".orchestrator"];
+    let dirs = ["_ideas", "_worklog", "changes", ".phase-golem"];
     for dir in &dirs {
         let dir_path = root.join(dir);
         fs::create_dir_all(&dir_path)
@@ -165,16 +165,16 @@ fn handle_init(root: &Path, prefix: &str) -> Result<(), String> {
     // Create BACKLOG.yaml if it doesn't exist (uses default path; config doesn't exist yet)
     let backlog = root.join("BACKLOG.yaml");
     if !backlog.exists() {
-        let empty_backlog = orchestrate::types::BacklogFile {
+        let empty_backlog = phase_golem::types::BacklogFile {
             schema_version: 3,
             items: Vec::new(),
             next_item_id: 0,
         };
-        orchestrate::backlog::save(&backlog, &empty_backlog)?;
+        phase_golem::backlog::save(&backlog, &empty_backlog)?;
     }
 
-    // Create orchestrate.toml if it doesn't exist (with default pipelines section)
-    let config_path = root.join("orchestrate.toml");
+    // Create phase-golem.toml if it doesn't exist (with default pipelines section)
+    let config_path = root.join("phase-golem.toml");
     if !config_path.exists() {
         let config_contents = format!(
             r#"[project]
@@ -212,9 +212,9 @@ phases = [
             .map_err(|e| format!("Failed to write {}: {}", config_path.display(), e))?;
     }
 
-    // Append .orchestrator/ to .gitignore if not already present
+    // Append .phase-golem/ to .gitignore if not already present
     let gitignore_path = root.join(".gitignore");
-    let gitignore_entry = ".orchestrator/";
+    let gitignore_entry = ".phase-golem/";
     let existing_gitignore = if gitignore_path.exists() {
         fs::read_to_string(&gitignore_path)
             .map_err(|e| format!("Failed to read .gitignore: {}", e))?
@@ -238,9 +238,9 @@ phases = [
             .map_err(|e| format!("Failed to write .gitignore: {}", e))?;
     }
 
-    println!("Initialized orchestrator in {}", root.display());
-    println!("  Created: _ideas/, _worklog/, changes/, .orchestrator/");
-    println!("  Created: BACKLOG.yaml, orchestrate.toml");
+    println!("Initialized phase-golem in {}", root.display());
+    println!("  Created: _ideas/, _worklog/, changes/, .phase-golem/");
+    println!("  Created: BACKLOG.yaml, phase-golem.toml");
     println!("  Updated: .gitignore");
 
     Ok(())
@@ -255,17 +255,17 @@ async fn handle_run(
     // Install signal handlers for graceful shutdown
     install_signal_handlers()?;
 
-    log_info!("--- Orchestrator ---");
+    log_info!("--- Phase Golem ---");
     log_info!("");
 
     // Prechecks
     log_info!("[pre] Verifying Claude CLI...");
     CliAgentRunner::verify_cli_available()?;
     log_info!("[pre] Acquiring lock...");
-    let orchestrator_dir = root.join(".orchestrator");
-    let _lock = lock::try_acquire(&orchestrator_dir)?;
+    let runtime_dir = root.join(".phase-golem");
+    let _lock = lock::try_acquire(&runtime_dir)?;
     log_info!("[pre] Checking git preconditions...");
-    orchestrate::git::check_preconditions(Some(root))?;
+    phase_golem::git::check_preconditions(Some(root))?;
 
     // Load
     let config = config::load_config(root)?;
@@ -395,7 +395,7 @@ async fn handle_run(
     }
 
     // Backlog summary
-    use orchestrate::types::ItemStatus;
+    use phase_golem::types::ItemStatus;
     let new_count = backlog
         .items
         .iter()
@@ -439,7 +439,7 @@ async fn handle_run(
     );
 
     // Queue preview — show first few actionable items
-    let actionable: Vec<&orchestrate::types::BacklogItem> = backlog
+    let actionable: Vec<&phase_golem::types::BacklogItem> = backlog
         .items
         .iter()
         .filter(|i| {
@@ -569,7 +569,7 @@ async fn handle_run(
         let halt_reason_display = format!("{:?}", summary.halt_reason);
 
         let commit_result = tokio::task::spawn_blocking(move || {
-            let status = match orchestrate::git::get_status(Some(&root_for_commit)) {
+            let status = match phase_golem::git::get_status(Some(&root_for_commit)) {
                 Ok(s) => s,
                 Err(err) => {
                     return Err(format!("get_status failed: {}", err));
@@ -588,7 +588,7 @@ async fn handle_run(
                 return Ok(None);
             }
 
-            if let Err(err) = orchestrate::git::stage_paths(
+            if let Err(err) = phase_golem::git::stage_paths(
                 &[backlog_path_for_commit.as_path()],
                 Some(&root_for_commit),
             ) {
@@ -596,10 +596,10 @@ async fn handle_run(
             }
 
             let message = format!(
-                "[orchestrator] Save backlog state on halt ({})",
+                "[phase-golem] Save backlog state on halt ({})",
                 halt_reason_display
             );
-            match orchestrate::git::commit(&message, Some(&root_for_commit)) {
+            match phase_golem::git::commit(&message, Some(&root_for_commit)) {
                 Ok(sha) => Ok(Some(sha)),
                 Err(err) => Err(format!("commit failed: {}", err)),
             }
@@ -666,11 +666,11 @@ async fn handle_triage(root: &Path) -> Result<(), String> {
     CliAgentRunner::verify_cli_available()?;
 
     // Acquire lock
-    let orchestrator_dir = root.join(".orchestrator");
-    let _lock = lock::try_acquire(&orchestrator_dir)?;
+    let runtime_dir = root.join(".phase-golem");
+    let _lock = lock::try_acquire(&runtime_dir)?;
 
     // Check git preconditions
-    orchestrate::git::check_preconditions(Some(root))?;
+    phase_golem::git::check_preconditions(Some(root))?;
 
     // Load config and backlog
     let config = config::load_config(root)?;
@@ -714,7 +714,7 @@ async fn handle_triage(root: &Path) -> Result<(), String> {
 
         log_info!("[{}][TRIAGE] Starting triage", item_id);
 
-        let result_path = orchestrate::executor::result_file_path(root, item_id, "triage");
+        let result_path = phase_golem::executor::result_file_path(root, item_id, "triage");
         let current_snapshot = coordinator_handle.get_snapshot().await?;
         let item = current_snapshot
             .items
@@ -821,7 +821,7 @@ fn handle_status(root: &Path) -> Result<(), String> {
         return Ok(());
     }
 
-    let mut items: Vec<&orchestrate::types::BacklogItem> = backlog.items.iter().collect();
+    let mut items: Vec<&phase_golem::types::BacklogItem> = backlog.items.iter().collect();
 
     // Sort: in_progress first, then blocked, ready by impact desc, then scoping, new
     items.sort_by(|a, b| {
@@ -902,7 +902,7 @@ fn handle_advance(root: &Path, item_id: &str, to: Option<String>) -> Result<(), 
                 ));
             }
             item.phase = Some(target_phase.clone());
-            item.phase_pool = Some(orchestrate::types::PhasePool::Main);
+            item.phase_pool = Some(phase_golem::types::PhasePool::Main);
             item.updated = chrono::Utc::now().to_rfc3339();
             println!("Advanced {} to {}", item_id, target_phase);
         }

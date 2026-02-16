@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
-use orchestrate::agent::{AgentRunner, CliAgentRunner};
-use orchestrate::types::ResultCode;
+use phase_golem::agent::{AgentRunner, CliAgentRunner};
+use phase_golem::types::ResultCode;
 
 #[tokio::test]
 #[ignore] // requires real claude CLI — run explicitly

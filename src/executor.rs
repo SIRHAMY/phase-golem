@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent::AgentRunner;
 use crate::config::{
-    GuardrailsConfig, OrchestrateConfig, PhaseConfig, PipelineConfig, StalenessAction,
+    GuardrailsConfig, PhaseGolemConfig, PhaseConfig, PipelineConfig, StalenessAction,
 };
 use crate::coordinator::CoordinatorHandle;
 use crate::prompt;
@@ -270,7 +270,7 @@ fn dimension_level_value(level: &DimensionLevel) -> u8 {
 pub async fn execute_phase(
     item: &BacklogItem,
     phase_config: &PhaseConfig,
-    config: &OrchestrateConfig,
+    config: &PhaseGolemConfig,
     coordinator: &CoordinatorHandle,
     runner: &impl AgentRunner,
     cancel: &CancellationToken,
@@ -454,7 +454,7 @@ fn build_executor_prompt(
 
 /// Generate the result file path for a phase.
 pub fn result_file_path(root: &Path, item_id: &str, phase: &str) -> PathBuf {
-    root.join(".orchestrator")
+    root.join(".phase-golem")
         .join(format!("phase_result_{}_{}.json", item_id, phase))
 }
 

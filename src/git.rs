@@ -24,7 +24,7 @@ pub fn is_git_repo(repo_dir: Option<&Path>) -> Result<(), String> {
     Ok(())
 }
 
-/// Verify git preconditions for safe orchestrator operation.
+/// Verify git preconditions for safe phase-golem operation.
 ///
 /// Checks:
 /// - Git repo exists (`git rev-parse --git-dir`)
@@ -39,7 +39,7 @@ pub fn check_preconditions(repo_dir: Option<&Path>) -> Result<(), String> {
     let status_output = run_git_command(&["status", "--porcelain"], repo_dir)?;
     if !status_output.trim().is_empty() {
         return Err(
-            "Working tree is not clean. Commit or stash changes before running the orchestrator."
+            "Working tree is not clean. Commit or stash changes before running phase-golem."
                 .to_string(),
         );
     }
@@ -48,7 +48,7 @@ pub fn check_preconditions(repo_dir: Option<&Path>) -> Result<(), String> {
     let head_check = run_git_command(&["symbolic-ref", "--quiet", "HEAD"], repo_dir);
     if head_check.is_err() {
         return Err(
-            "Detached HEAD state detected. Check out a branch before running the orchestrator."
+            "Detached HEAD state detected. Check out a branch before running phase-golem."
                 .to_string(),
         );
     }
@@ -62,14 +62,14 @@ pub fn check_preconditions(repo_dir: Option<&Path>) -> Result<(), String> {
 
     if git_dir_path.join("rebase-merge").exists() || git_dir_path.join("rebase-apply").exists() {
         return Err(
-            "Rebase in progress. Complete or abort the rebase before running the orchestrator."
+            "Rebase in progress. Complete or abort the rebase before running phase-golem."
                 .to_string(),
         );
     }
 
     if git_dir_path.join("MERGE_HEAD").exists() {
         return Err(
-            "Merge in progress. Complete or abort the merge before running the orchestrator."
+            "Merge in progress. Complete or abort the merge before running phase-golem."
                 .to_string(),
         );
     }

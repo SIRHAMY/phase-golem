@@ -4,18 +4,18 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use orchestrate::agent::MockAgentRunner;
-use orchestrate::backlog;
-use orchestrate::config::{
-    default_feature_pipeline, ExecutionConfig, OrchestrateConfig, PhaseConfig, PipelineConfig,
+use phase_golem::agent::MockAgentRunner;
+use phase_golem::backlog;
+use phase_golem::config::{
+    default_feature_pipeline, ExecutionConfig, PhaseGolemConfig, PhaseConfig, PipelineConfig,
 };
-use orchestrate::coordinator;
-use orchestrate::filter;
-use orchestrate::scheduler::{
+use phase_golem::coordinator;
+use phase_golem::filter;
+use phase_golem::scheduler::{
     self, advance_to_next_active_target, select_actions, select_targeted_actions,
     unmet_dep_summary, HaltReason, RunParams, RunningTasks,
 };
-use orchestrate::types::{
+use phase_golem::types::{
     BacklogFile, BacklogItem, DimensionLevel, FollowUp, ItemStatus, PhasePool, PhaseResult,
     ResultCode, SchedulerAction, SizeLevel, UpdatedAssessments,
 };
@@ -57,8 +57,8 @@ fn make_ready_item(id: &str, title: &str, impact: Option<DimensionLevel>) -> Bac
     item
 }
 
-fn default_config() -> OrchestrateConfig {
-    let mut config = OrchestrateConfig::default();
+fn default_config() -> PhaseGolemConfig {
+    let mut config = PhaseGolemConfig::default();
     if config.pipelines.is_empty() {
         config
             .pipelines

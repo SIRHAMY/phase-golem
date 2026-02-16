@@ -4,9 +4,9 @@ use std::fs;
 
 use tempfile::TempDir;
 
-use orchestrate::config::default_feature_pipeline;
-use orchestrate::migration::{migrate_v1_to_v2, migrate_v2_to_v3, parse_description};
-use orchestrate::types::{ItemStatus, PhasePool, StructuredDescription};
+use phase_golem::config::default_feature_pipeline;
+use phase_golem::migration::{migrate_v1_to_v2, migrate_v2_to_v3, parse_description};
+use phase_golem::types::{ItemStatus, PhasePool, StructuredDescription};
 
 // --- Full v1 fixture migration ---
 
@@ -279,7 +279,7 @@ fn migrate_missing_file_returns_error() {
 
 #[test]
 fn migrate_v1_invalid_phase_cleared_by_validation() {
-    use orchestrate::config::{PhaseConfig, PipelineConfig};
+    use phase_golem::config::{PhaseConfig, PipelineConfig};
 
     let dir = TempDir::new().unwrap();
     let target = dir.path().join("BACKLOG.yaml");
@@ -326,7 +326,7 @@ items:
 
 #[test]
 fn migrate_v1_none_phase_skips_validation() {
-    use orchestrate::config::{PhaseConfig, PipelineConfig};
+    use phase_golem::config::{PhaseConfig, PipelineConfig};
 
     let dir = TempDir::new().unwrap();
     let target = dir.path().join("BACKLOG.yaml");
@@ -664,7 +664,7 @@ fn migrate_v2_persisted_file_is_valid_v3() {
     );
 
     // Should be loadable as current schema
-    let reloaded = orchestrate::backlog::load(&target, target.parent().unwrap()).unwrap();
+    let reloaded = phase_golem::backlog::load(&target, target.parent().unwrap()).unwrap();
     assert_eq!(reloaded.schema_version, 3);
 }
 
@@ -749,12 +749,12 @@ fn migrate_chain_v1_to_v3_via_load() {
     let v1_fixture = common::fixtures_dir().join("backlog_v1_full.yaml");
     fs::copy(&v1_fixture, &target).unwrap();
 
-    // Create a minimal .orchestrator.toml so load() can find the feature pipeline
-    let config_path = dir.path().join(".orchestrator.toml");
+    // Create a minimal phase-golem.toml so load() can find the feature pipeline
+    let config_path = dir.path().join("phase-golem.toml");
     fs::write(&config_path, "").unwrap();
 
     // load() should chain v1→v2→v3 automatically
-    let backlog = orchestrate::backlog::load(&target, dir.path()).unwrap();
+    let backlog = phase_golem::backlog::load(&target, dir.path()).unwrap();
 
     assert_eq!(backlog.schema_version, 3);
     assert_eq!(backlog.items.len(), 5);

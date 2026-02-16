@@ -7,7 +7,7 @@ use crate::types::{DimensionLevel, SizeLevel};
 
 #[derive(Default, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
-pub struct OrchestrateConfig {
+pub struct PhaseGolemConfig {
     pub project: ProjectConfig,
     pub guardrails: GuardrailsConfig,
     pub execution: ExecutionConfig,
@@ -159,7 +159,7 @@ pub fn default_feature_pipeline() -> PipelineConfig {
     }
 }
 
-pub fn validate(config: &OrchestrateConfig) -> Result<(), Vec<String>> {
+pub fn validate(config: &PhaseGolemConfig) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
 
     if config.execution.max_wip < 1 {
@@ -219,11 +219,11 @@ pub fn validate(config: &OrchestrateConfig) -> Result<(), Vec<String>> {
     }
 }
 
-pub fn load_config(project_root: &Path) -> Result<OrchestrateConfig, String> {
-    let config_path = project_root.join("orchestrate.toml");
+pub fn load_config(project_root: &Path) -> Result<PhaseGolemConfig, String> {
+    let config_path = project_root.join("phase-golem.toml");
 
     if !config_path.exists() {
-        let mut config = OrchestrateConfig::default();
+        let mut config = PhaseGolemConfig::default();
         populate_default_pipelines(&mut config);
         return Ok(config);
     }
@@ -231,7 +231,7 @@ pub fn load_config(project_root: &Path) -> Result<OrchestrateConfig, String> {
     let contents = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read {}: {}", config_path.display(), e))?;
 
-    let mut config: OrchestrateConfig = toml::from_str(&contents)
+    let mut config: PhaseGolemConfig = toml::from_str(&contents)
         .map_err(|e| format!("Failed to parse {}: {}", config_path.display(), e))?;
 
     populate_default_pipelines(&mut config);
@@ -250,7 +250,7 @@ pub fn load_config(project_root: &Path) -> Result<OrchestrateConfig, String> {
     Ok(config)
 }
 
-fn populate_default_pipelines(config: &mut OrchestrateConfig) {
+fn populate_default_pipelines(config: &mut PhaseGolemConfig) {
     if config.pipelines.is_empty() {
         config
             .pipelines

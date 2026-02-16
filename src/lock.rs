@@ -33,20 +33,20 @@ impl Drop for LockGuard {
     }
 }
 
-/// Attempts to acquire the orchestrator lock.
+/// Attempts to acquire the phase-golem lock.
 ///
-/// Creates the `.orchestrator/` directory if it doesn't exist.
+/// Creates the `.phase-golem/` directory if it doesn't exist.
 /// Acquires the file lock first (atomic mutual exclusion), then writes a PID
 /// file for diagnostics. On contention, checks the PID file to provide
 /// actionable error messages about the holding process.
 ///
 /// Returns a `LockGuard` that automatically releases on drop.
-pub fn try_acquire(orchestrator_dir: &Path) -> Result<LockGuard, String> {
-    fs::create_dir_all(orchestrator_dir)
-        .map_err(|e| format!("Failed to create {}: {}", orchestrator_dir.display(), e))?;
+pub fn try_acquire(runtime_dir: &Path) -> Result<LockGuard, String> {
+    fs::create_dir_all(runtime_dir)
+        .map_err(|e| format!("Failed to create {}: {}", runtime_dir.display(), e))?;
 
-    let lock_path = orchestrator_dir.join("orchestrator.lock");
-    let pid_path = orchestrator_dir.join("orchestrator.pid");
+    let lock_path = runtime_dir.join("phase-golem.lock");
+    let pid_path = runtime_dir.join("phase-golem.pid");
 
     let mut lock = fslock::LockFile::open(&lock_path)
         .map_err(|e| format!("Failed to open lock file {}: {}", lock_path.display(), e))?;
@@ -63,7 +63,7 @@ pub fn try_acquire(orchestrator_dir: &Path) -> Result<LockGuard, String> {
 
         return match holder_info {
             Some(pid) if is_pid_alive(pid) => Err(format!(
-                "Another orchestrator instance is running (PID {})",
+                "Another phase-golem instance is running (PID {})",
                 pid
             )),
             Some(pid) => {
@@ -79,7 +79,7 @@ pub fn try_acquire(orchestrator_dir: &Path) -> Result<LockGuard, String> {
                 ))
             }
             None => Err(format!(
-                "Another orchestrator instance holds the lock. \
+                "Another phase-golem instance holds the lock. \
                  If this is stale, remove {}",
                 lock_path.display()
             )),

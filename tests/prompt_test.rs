@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use orchestrate::config::{PhaseConfig, PipelineConfig};
-use orchestrate::prompt::{self, PromptParams};
-use orchestrate::types::{
+use phase_golem::config::{PhaseConfig, PipelineConfig};
+use phase_golem::prompt::{self, PromptParams};
+use phase_golem::types::{
     BacklogItem, DimensionLevel, ItemStatus, PhasePool, SizeLevel, StructuredDescription,
 };
 
@@ -42,7 +42,7 @@ fn default_pipelines() -> HashMap<String, PipelineConfig> {
     let mut map = HashMap::new();
     map.insert(
         "feature".to_string(),
-        orchestrate::config::default_feature_pipeline(),
+        phase_golem::config::default_feature_pipeline(),
     );
     map
 }
@@ -113,7 +113,7 @@ fn build_prompt_contains_correct_skill_command_for_each_phase() {
 
     for (phase_name, phase_config, expected_cmd) in &cases {
         let item = make_item("WRK-001", "Test feature");
-        let result_path = Path::new(".orchestrator/result.json");
+        let result_path = Path::new(".phase-golem/result.json");
         let change_folder = Path::new("changes/WRK-001_test");
 
         let prompt_text = prompt::build_prompt(&PromptParams {
@@ -140,7 +140,7 @@ fn build_prompt_contains_correct_skill_command_for_each_phase() {
 #[test]
 fn build_prompt_includes_result_file_path_in_suffix() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_prd.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = default_prd_config();
 
@@ -155,13 +155,13 @@ fn build_prompt_includes_result_file_path_in_suffix() {
         failure_context: None,
     });
 
-    assert!(prompt_text.contains(".orchestrator/phase_result_WRK-001_prd.json"));
+    assert!(prompt_text.contains(".phase-golem/phase_result_WRK-001_prd.json"));
 }
 
 #[test]
 fn build_prompt_includes_previous_summary_when_provided() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_research.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_research.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = PhaseConfig {
         workflows: vec![
@@ -188,7 +188,7 @@ fn build_prompt_includes_previous_summary_when_provided() {
 #[test]
 fn build_prompt_excludes_previous_summary_when_none() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_prd.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = default_prd_config();
 
@@ -209,7 +209,7 @@ fn build_prompt_excludes_previous_summary_when_none() {
 #[test]
 fn build_prompt_includes_unblock_notes_when_provided() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_design.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_design.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = PhaseConfig {
         workflows: vec![".claude/skills/changes/workflows/2-design/design.md".to_string()],
@@ -234,7 +234,7 @@ fn build_prompt_includes_unblock_notes_when_provided() {
 #[test]
 fn build_prompt_excludes_unblock_notes_when_none() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_prd.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = default_prd_config();
 
@@ -255,7 +255,7 @@ fn build_prompt_excludes_unblock_notes_when_none() {
 #[test]
 fn build_prompt_includes_failure_context_when_retrying() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_prd.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = default_prd_config();
 
@@ -278,7 +278,7 @@ fn build_prompt_includes_failure_context_when_retrying() {
 #[test]
 fn build_prompt_excludes_failure_context_when_none() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_prd.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = default_prd_config();
 
@@ -299,7 +299,7 @@ fn build_prompt_excludes_failure_context_when_none() {
 #[test]
 fn build_prompt_includes_assumptions_instruction_in_preamble() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_prd.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = default_prd_config();
 
@@ -321,7 +321,7 @@ fn build_prompt_includes_assumptions_instruction_in_preamble() {
 #[test]
 fn build_prompt_includes_assessments_when_present() {
     let item = make_item_with_assessments();
-    let result_path = Path::new(".orchestrator/phase_result_WRK-005_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-005_prd.json");
     let change_folder = Path::new("changes/WRK-005_add-dark-mode");
     let phase_config = default_prd_config();
 
@@ -350,7 +350,7 @@ fn build_prompt_includes_partial_assessments() {
         risk: Some(DimensionLevel::High),
         ..make_item("WRK-007", "Partial assessments")
     };
-    let result_path = Path::new(".orchestrator/result.json");
+    let result_path = Path::new(".phase-golem/result.json");
     let change_folder = Path::new("changes/WRK-007_partial");
     let phase_config = default_prd_config();
 
@@ -374,7 +374,7 @@ fn build_prompt_includes_partial_assessments() {
 #[test]
 fn build_prompt_excludes_assessments_when_none() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_prd.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = default_prd_config();
 
@@ -395,7 +395,7 @@ fn build_prompt_excludes_assessments_when_none() {
 #[test]
 fn build_prompt_contains_json_schema_in_suffix() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_prd.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = default_prd_config();
 
@@ -424,7 +424,7 @@ fn build_prompt_contains_json_schema_in_suffix() {
 #[test]
 fn build_prompt_item_id_embedded_in_schema() {
     let item = make_item("WRK-042", "Custom ID");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-042_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-042_prd.json");
     let change_folder = Path::new("changes/WRK-042_custom-id");
     let phase_config = default_prd_config();
 
@@ -448,7 +448,7 @@ fn build_prompt_item_id_embedded_in_schema() {
 #[test]
 fn triage_prompt_contains_assessment_instructions() {
     let item = make_item("WRK-010", "Fix login bug");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-010_triage.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
 
     let prompt_text = prompt::build_triage_prompt(&item, result_path, &default_pipelines(), None);
 
@@ -463,7 +463,7 @@ fn triage_prompt_contains_assessment_instructions() {
 #[test]
 fn triage_prompt_contains_item_info() {
     let item = make_item("WRK-010", "Fix login bug");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-010_triage.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
 
     let prompt_text = prompt::build_triage_prompt(&item, result_path, &default_pipelines(), None);
 
@@ -474,17 +474,17 @@ fn triage_prompt_contains_item_info() {
 #[test]
 fn triage_prompt_contains_result_path() {
     let item = make_item("WRK-010", "Fix login bug");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-010_triage.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
 
     let prompt_text = prompt::build_triage_prompt(&item, result_path, &default_pipelines(), None);
 
-    assert!(prompt_text.contains(".orchestrator/phase_result_WRK-010_triage.json"));
+    assert!(prompt_text.contains(".phase-golem/phase_result_WRK-010_triage.json"));
 }
 
 #[test]
 fn triage_prompt_contains_routing_instructions() {
     let item = make_item("WRK-010", "Fix login bug");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-010_triage.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
 
     let prompt_text = prompt::build_triage_prompt(&item, result_path, &default_pipelines(), None);
 
@@ -496,7 +496,7 @@ fn triage_prompt_contains_routing_instructions() {
 #[test]
 fn triage_prompt_uses_triage_phase_string() {
     let item = make_item("WRK-010", "Fix login bug");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-010_triage.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
 
     let prompt_text = prompt::build_triage_prompt(&item, result_path, &default_pipelines(), None);
 
@@ -506,7 +506,7 @@ fn triage_prompt_uses_triage_phase_string() {
 #[test]
 fn triage_prompt_uses_item_to_triage_heading() {
     let item = make_item("WRK-010", "Fix login bug");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-010_triage.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
 
     let prompt_text = prompt::build_triage_prompt(&item, result_path, &default_pipelines(), None);
 
@@ -534,7 +534,7 @@ fn build_prompt_embeds_correct_phase_string_for_each_phase() {
             workflows: vec!["some-skill".to_string()],
             ..PhaseConfig::new(phase_name, false)
         };
-        let result_path_str = format!(".orchestrator/phase_result_WRK-001_{}.json", expected_str);
+        let result_path_str = format!(".phase-golem/phase_result_WRK-001_{}.json", expected_str);
         let result_path = Path::new(&result_path_str);
 
         let prompt_text = prompt::build_prompt(&PromptParams {
@@ -564,7 +564,7 @@ fn build_prompt_embeds_correct_phase_string_for_each_phase() {
 #[test]
 fn build_prompt_contains_autonomous_preamble() {
     let item = make_item("WRK-001", "Test feature");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-001_prd.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-001_prd.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = default_prd_config();
 
@@ -591,7 +591,7 @@ fn build_prompt_contains_autonomous_preamble() {
 #[test]
 fn build_prompt_with_all_optional_sections() {
     let item = make_item_with_assessments();
-    let result_path = Path::new(".orchestrator/phase_result_WRK-005_design.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-005_design.json");
     let change_folder = Path::new("changes/WRK-005_add-dark-mode");
     let phase_config = PhaseConfig {
         workflows: vec![".claude/skills/changes/workflows/2-design/design.md".to_string()],
@@ -635,7 +635,7 @@ fn build_prompt_includes_structured_description() {
         impact: "Better night-time UX".to_string(),
         sizing_rationale: "Small — UI only".to_string(),
     });
-    let result_path = Path::new(".orchestrator/result.json");
+    let result_path = Path::new(".phase-golem/result.json");
     let change_folder = Path::new("changes/WRK-005_add-dark-mode");
     let phase_config = default_prd_config();
 
@@ -668,7 +668,7 @@ fn build_prompt_skips_empty_description_fields() {
         impact: String::new(),
         sizing_rationale: String::new(),
     });
-    let result_path = Path::new(".orchestrator/result.json");
+    let result_path = Path::new(".phase-golem/result.json");
     let change_folder = Path::new("changes/WRK-001_test");
     let phase_config = default_prd_config();
 
@@ -700,7 +700,7 @@ fn build_prompt_omits_description_section_when_all_empty() {
         impact: String::new(),
         sizing_rationale: String::new(),
     });
-    let result_path = Path::new(".orchestrator/result.json");
+    let result_path = Path::new(".phase-golem/result.json");
     let change_folder = Path::new("changes/WRK-001_test");
     let phase_config = default_prd_config();
 
@@ -722,7 +722,7 @@ fn build_prompt_omits_description_section_when_all_empty() {
 fn build_prompt_excludes_description_when_none() {
     let item = make_item("WRK-001", "Test");
     assert_eq!(item.description, None);
-    let result_path = Path::new(".orchestrator/result.json");
+    let result_path = Path::new(".phase-golem/result.json");
     let change_folder = Path::new("changes/WRK-001_test");
     let phase_config = default_prd_config();
 
@@ -749,7 +749,7 @@ fn context_preamble_contains_mode_and_item() {
     item.phase = Some("build".to_string());
     item.phase_pool = Some(PhasePool::Main);
 
-    let pipeline = orchestrate::config::default_feature_pipeline();
+    let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(&item, &pipeline, None, None, None);
 
     assert!(preamble.contains("**Mode:** autonomous"));
@@ -765,7 +765,7 @@ fn context_preamble_shows_phase_position() {
     item.phase = Some("build".to_string());
     item.phase_pool = Some(PhasePool::Main);
 
-    let pipeline = orchestrate::config::default_feature_pipeline();
+    let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(&item, &pipeline, None, None, None);
 
     // build is 5th of 6 main phases
@@ -779,7 +779,7 @@ fn context_preamble_shows_pre_phase_position() {
     item.phase = Some("research".to_string());
     item.phase_pool = Some(PhasePool::Pre);
 
-    let pipeline = orchestrate::config::default_feature_pipeline();
+    let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(&item, &pipeline, None, None, None);
 
     // research is 1st of 1 pre_phases
@@ -800,7 +800,7 @@ fn context_preamble_includes_description() {
         sizing_rationale: String::new(),
     });
 
-    let pipeline = orchestrate::config::default_feature_pipeline();
+    let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(&item, &pipeline, None, None, None);
 
     assert!(preamble.contains("### Description"));
@@ -818,7 +818,7 @@ fn context_preamble_includes_previous_summary() {
     item.phase = Some("design".to_string());
     item.phase_pool = Some(PhasePool::Main);
 
-    let pipeline = orchestrate::config::default_feature_pipeline();
+    let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(
         &item,
         &pipeline,
@@ -837,7 +837,7 @@ fn context_preamble_includes_failure_context() {
     item.phase = Some("build".to_string());
     item.phase_pool = Some(PhasePool::Main);
 
-    let pipeline = orchestrate::config::default_feature_pipeline();
+    let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(
         &item,
         &pipeline,
@@ -856,7 +856,7 @@ fn context_preamble_includes_unblock_notes() {
     item.phase = Some("build".to_string());
     item.phase_pool = Some(PhasePool::Main);
 
-    let pipeline = orchestrate::config::default_feature_pipeline();
+    let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(
         &item,
         &pipeline,
@@ -875,7 +875,7 @@ fn context_preamble_omits_empty_optional_sections() {
     item.phase = Some("prd".to_string());
     item.phase_pool = Some(PhasePool::Main);
 
-    let pipeline = orchestrate::config::default_feature_pipeline();
+    let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(&item, &pipeline, None, None, None);
 
     assert!(!preamble.contains("### Previous Phase Summary"));
@@ -889,7 +889,7 @@ fn context_preamble_omits_empty_optional_sections() {
 #[test]
 fn triage_prompt_includes_available_pipeline_types() {
     let item = make_item("WRK-010", "Fix login bug");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-010_triage.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
     let pipelines = default_pipelines();
 
     let prompt_text = prompt::build_triage_prompt(&item, result_path, &pipelines, None);
@@ -902,7 +902,7 @@ fn triage_prompt_includes_available_pipeline_types() {
 #[test]
 fn triage_prompt_with_multiple_pipelines_lists_all() {
     let item = make_item("WRK-010", "Write blog post");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-010_triage.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
     let mut pipelines = default_pipelines();
     pipelines.insert(
         "blog-post".to_string(),
@@ -966,7 +966,7 @@ fn backlog_summary_includes_status() {
 #[test]
 fn triage_prompt_includes_backlog_section_when_provided() {
     let item = make_item("WRK-010", "Fix login bug");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-010_triage.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
     let pipelines = default_pipelines();
     let summary = "- WRK-001: Add auth [inprogress]\n- WRK-005: Refactor DB [new]";
 
@@ -981,7 +981,7 @@ fn triage_prompt_includes_backlog_section_when_provided() {
 #[test]
 fn triage_prompt_omits_backlog_section_when_none() {
     let item = make_item("WRK-010", "Fix login bug");
-    let result_path = Path::new(".orchestrator/phase_result_WRK-010_triage.json");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
     let pipelines = default_pipelines();
 
     let prompt_text = prompt::build_triage_prompt(&item, result_path, &pipelines, None);

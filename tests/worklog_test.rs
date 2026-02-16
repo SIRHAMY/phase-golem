@@ -2,7 +2,7 @@ use std::fs;
 
 use tempfile::TempDir;
 
-use orchestrate::types::{BacklogItem, ItemStatus};
+use phase_golem::types::{BacklogItem, ItemStatus};
 
 fn make_test_item() -> BacklogItem {
     BacklogItem {
@@ -22,7 +22,7 @@ fn write_entry_creates_file() {
     let worklog_dir = dir.path().join("_worklog");
 
     let item = make_test_item();
-    orchestrate::worklog::write_entry(&worklog_dir, &item, "Review", "Complete", "All tests pass")
+    phase_golem::worklog::write_entry(&worklog_dir, &item, "Review", "Complete", "All tests pass")
         .expect("Failed to write entry");
 
     // Check that the worklog directory was created
@@ -59,7 +59,7 @@ fn write_entry_contains_expected_fields() {
     let worklog_dir = dir.path().join("_worklog");
 
     let item = make_test_item();
-    orchestrate::worklog::write_entry(
+    phase_golem::worklog::write_entry(
         &worklog_dir,
         &item,
         "Build",
@@ -99,11 +99,11 @@ fn write_entry_appends_chronologically() {
     item2.title = "Second item".to_string();
 
     // Write first entry
-    orchestrate::worklog::write_entry(&worklog_dir, &item1, "Build", "Complete", "First entry")
+    phase_golem::worklog::write_entry(&worklog_dir, &item1, "Build", "Complete", "First entry")
         .expect("Failed to write first entry");
 
     // Write second entry
-    orchestrate::worklog::write_entry(&worklog_dir, &item2, "Review", "Complete", "Second entry")
+    phase_golem::worklog::write_entry(&worklog_dir, &item2, "Review", "Complete", "Second entry")
         .expect("Failed to write second entry");
 
     // Read the file
@@ -132,7 +132,7 @@ fn write_entry_creates_parent_dirs() {
     let worklog_dir = dir.path().join("deep").join("nested").join("_worklog");
 
     let item = make_test_item();
-    orchestrate::worklog::write_entry(
+    phase_golem::worklog::write_entry(
         &worklog_dir,
         &item,
         "Design",

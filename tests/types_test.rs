@@ -1,4 +1,4 @@
-use orchestrate::types::*;
+use phase_golem::types::*;
 
 // --- Default impl verification ---
 

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::config::OrchestrateConfig;
+use crate::config::PhaseGolemConfig;
 use crate::types::{BacklogFile, BacklogItem, ItemStatus, PhasePool};
 
 /// A single preflight validation error with actionable context.
@@ -36,7 +36,7 @@ impl std::fmt::Display for PreflightError {
 ///
 /// Returns `Ok(())` if all checks pass, or `Err(Vec<PreflightError>)` with all errors.
 pub fn run_preflight(
-    config: &OrchestrateConfig,
+    config: &PhaseGolemConfig,
     backlog: &BacklogFile,
     project_root: &Path,
 ) -> Result<(), Vec<PreflightError>> {
@@ -72,13 +72,13 @@ pub fn run_preflight(
 ///
 /// This is richer than `config::validate()` — each error includes the config
 /// location and a suggested fix.
-fn validate_structure(config: &OrchestrateConfig) -> Vec<PreflightError> {
+fn validate_structure(config: &PhaseGolemConfig) -> Vec<PreflightError> {
     let mut errors = Vec::new();
 
     if config.execution.max_wip < 1 {
         errors.push(PreflightError {
             condition: "max_wip must be >= 1".to_string(),
-            config_location: "orchestrate.toml → execution.max_wip".to_string(),
+            config_location: "phase-golem.toml → execution.max_wip".to_string(),
             suggested_fix: "Set max_wip to at least 1".to_string(),
         });
     }
@@ -86,7 +86,7 @@ fn validate_structure(config: &OrchestrateConfig) -> Vec<PreflightError> {
     if config.execution.max_concurrent < 1 {
         errors.push(PreflightError {
             condition: "max_concurrent must be >= 1".to_string(),
-            config_location: "orchestrate.toml → execution.max_concurrent".to_string(),
+            config_location: "phase-golem.toml → execution.max_concurrent".to_string(),
             suggested_fix: "Set max_concurrent to at least 1".to_string(),
         });
     }
@@ -95,7 +95,7 @@ fn validate_structure(config: &OrchestrateConfig) -> Vec<PreflightError> {
         if pipeline.phases.is_empty() {
             errors.push(PreflightError {
                 condition: format!("Pipeline \"{}\" has no main phases", pipeline_name),
-                config_location: format!("orchestrate.toml → pipelines.{}.phases", pipeline_name),
+                config_location: format!("phase-golem.toml → pipelines.{}.phases", pipeline_name),
                 suggested_fix: "Add at least one phase to the phases array".to_string(),
             });
         }
@@ -110,7 +110,7 @@ fn validate_structure(config: &OrchestrateConfig) -> Vec<PreflightError> {
                         phase.name, pipeline_name
                     ),
                     config_location: format!(
-                        "orchestrate.toml → pipelines.{}.pre_phases[{}]",
+                        "phase-golem.toml → pipelines.{}.pre_phases[{}]",
                         pipeline_name, idx
                     ),
                     suggested_fix: "Use unique phase names within a pipeline".to_string(),
@@ -125,7 +125,7 @@ fn validate_structure(config: &OrchestrateConfig) -> Vec<PreflightError> {
                         phase.name, pipeline_name
                     ),
                     config_location: format!(
-                        "orchestrate.toml → pipelines.{}.phases[{}]",
+                        "phase-golem.toml → pipelines.{}.phases[{}]",
                         pipeline_name, idx
                     ),
                     suggested_fix: "Use unique phase names within a pipeline".to_string(),
@@ -142,7 +142,7 @@ fn validate_structure(config: &OrchestrateConfig) -> Vec<PreflightError> {
                         phase.name, pipeline_name
                     ),
                     config_location: format!(
-                        "orchestrate.toml → pipelines.{}.pre_phases[{}].destructive",
+                        "phase-golem.toml → pipelines.{}.pre_phases[{}].destructive",
                         pipeline_name, idx
                     ),
                     suggested_fix: "Remove the destructive flag from pre_phases (only main phases can be destructive)".to_string(),
@@ -160,7 +160,7 @@ fn validate_structure(config: &OrchestrateConfig) -> Vec<PreflightError> {
                             phase.name, pipeline_name
                         ),
                         config_location: format!(
-                            "orchestrate.toml → pipelines.{} → phase \"{}\" staleness + execution.max_wip",
+                            "phase-golem.toml → pipelines.{} → phase \"{}\" staleness + execution.max_wip",
                             pipeline_name, phase.name
                         ),
                         suggested_fix: "Either set max_wip to 1 or change staleness to \"warn\" or \"ignore\"".to_string(),
@@ -176,7 +176,7 @@ fn validate_structure(config: &OrchestrateConfig) -> Vec<PreflightError> {
 // --- Phase 2: Workflow file probe ---
 
 /// Collect all unique workflow file paths across all pipelines.
-fn collect_unique_workflows(config: &OrchestrateConfig) -> Vec<String> {
+fn collect_unique_workflows(config: &PhaseGolemConfig) -> Vec<String> {
     let mut workflows = HashSet::new();
     for pipeline in config.pipelines.values() {
         for phase in pipeline.pre_phases.iter().chain(pipeline.phases.iter()) {
@@ -194,7 +194,7 @@ fn collect_unique_workflows(config: &OrchestrateConfig) -> Vec<String> {
 ///
 /// Each workflow entry is a relative file path (relative to project root).
 /// Preflight checks that the file exists and is readable.
-fn probe_workflows(config: &OrchestrateConfig, project_root: &Path) -> Vec<PreflightError> {
+fn probe_workflows(config: &PhaseGolemConfig, project_root: &Path) -> Vec<PreflightError> {
     let workflows = collect_unique_workflows(config);
     let mut errors = Vec::new();
 
@@ -203,7 +203,7 @@ fn probe_workflows(config: &OrchestrateConfig, project_root: &Path) -> Vec<Prefl
         if !absolute_path.exists() {
             errors.push(PreflightError {
                 condition: format!("Workflow file not found: {}", workflow_path),
-                config_location: "orchestrate.toml → pipelines → workflows".to_string(),
+                config_location: "phase-golem.toml → pipelines → workflows".to_string(),
                 suggested_fix: format!(
                     "Create the workflow file at {} or update the path",
                     workflow_path
@@ -218,7 +218,7 @@ fn probe_workflows(config: &OrchestrateConfig, project_root: &Path) -> Vec<Prefl
 // --- Phase 3: Item validation ---
 
 /// Validate that in-progress and scoping items reference valid pipeline/phase combos.
-fn validate_items(config: &OrchestrateConfig, backlog: &BacklogFile) -> Vec<PreflightError> {
+fn validate_items(config: &PhaseGolemConfig, backlog: &BacklogFile) -> Vec<PreflightError> {
     let mut errors = Vec::new();
 
     for item in &backlog.items {
@@ -239,7 +239,7 @@ fn validate_items(config: &OrchestrateConfig, backlog: &BacklogFile) -> Vec<Pref
                     ),
                     config_location: format!("BACKLOG.yaml → item {} → pipeline_type", item.id),
                     suggested_fix: format!(
-                        "Add a [pipelines.{}] section to orchestrate.toml or update the item's pipeline_type",
+                        "Add a [pipelines.{}] section to phase-golem.toml or update the item's pipeline_type",
                         pipeline_type
                     ),
                 });

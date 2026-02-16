@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
-use orchestrate::agent::{read_result_file, run_subprocess_agent, AgentRunner, MockAgentRunner};
-use orchestrate::types::{PhaseResult, ResultCode};
+use phase_golem::agent::{read_result_file, run_subprocess_agent, AgentRunner, MockAgentRunner};
+use phase_golem::types::{PhaseResult, ResultCode};
 
 /// Create a valid PhaseResult JSON string.
 fn valid_result_json() -> String {
@@ -312,7 +312,7 @@ async fn mock_runner_empty_sequence() {
 
 #[test]
 fn install_signal_handlers_succeeds() {
-    let result = orchestrate::agent::install_signal_handlers();
+    let result = phase_golem::agent::install_signal_handlers();
     assert!(
         result.is_ok(),
         "Signal handler installation should succeed: {:?}",

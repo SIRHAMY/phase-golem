@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use orchestrate::backlog;
-use orchestrate::coordinator::spawn_coordinator;
-use orchestrate::types::{
+use phase_golem::backlog;
+use phase_golem::coordinator::spawn_coordinator;
+use phase_golem::types::{
     BacklogFile, BacklogItem, DimensionLevel, FollowUp, ItemStatus, ItemUpdate, PhasePool,
     PhaseResult, ResultCode, SizeLevel, StructuredDescription, UpdatedAssessments,
 };
@@ -1644,7 +1644,7 @@ async fn ingest_inbox_clear_failure_still_returns_success() {
 // These test the predicate used in handle_run()'s shutdown commit logic:
 //   entry.path.trim_matches('"') == "BACKLOG.yaml"
 
-use orchestrate::git::StatusEntry;
+use phase_golem::git::StatusEntry;
 
 fn is_backlog_dirty(entries: &[StatusEntry]) -> bool {
     entries
@@ -1764,7 +1764,7 @@ async fn shutdown_no_commit_when_backlog_clean() {
 
     // BACKLOG.yaml should be clean: coordinator's save_backlog writes the same
     // state that was already committed, so get_status should show no changes.
-    let status = orchestrate::git::get_status(Some(dir.path())).expect("get_status");
+    let status = phase_golem::git::get_status(Some(dir.path())).expect("get_status");
     let is_backlog_dirty = status
         .iter()
         .any(|entry| entry.path.trim_matches('"') == "BACKLOG.yaml");
@@ -1792,77 +1792,77 @@ async fn shutdown_no_commit_when_backlog_clean() {
 // Commit message format tests
 // =============================================================================
 
-use orchestrate::scheduler::HaltReason;
+use phase_golem::scheduler::HaltReason;
 
 #[test]
 fn halt_commit_message_cap_reached() {
     let msg = format!(
-        "[orchestrator] Save backlog state on halt ({:?})",
+        "[phase-golem] Save backlog state on halt ({:?})",
         HaltReason::CapReached
     );
     assert_eq!(
         msg,
-        "[orchestrator] Save backlog state on halt (CapReached)"
+        "[phase-golem] Save backlog state on halt (CapReached)"
     );
 }
 
 #[test]
 fn halt_commit_message_all_done_or_blocked() {
     let msg = format!(
-        "[orchestrator] Save backlog state on halt ({:?})",
+        "[phase-golem] Save backlog state on halt ({:?})",
         HaltReason::AllDoneOrBlocked
     );
     assert_eq!(
         msg,
-        "[orchestrator] Save backlog state on halt (AllDoneOrBlocked)"
+        "[phase-golem] Save backlog state on halt (AllDoneOrBlocked)"
     );
 }
 
 #[test]
 fn halt_commit_message_shutdown_requested() {
     let msg = format!(
-        "[orchestrator] Save backlog state on halt ({:?})",
+        "[phase-golem] Save backlog state on halt ({:?})",
         HaltReason::ShutdownRequested
     );
     assert_eq!(
         msg,
-        "[orchestrator] Save backlog state on halt (ShutdownRequested)"
+        "[phase-golem] Save backlog state on halt (ShutdownRequested)"
     );
 }
 
 #[test]
 fn halt_commit_message_circuit_breaker() {
     let msg = format!(
-        "[orchestrator] Save backlog state on halt ({:?})",
+        "[phase-golem] Save backlog state on halt ({:?})",
         HaltReason::CircuitBreakerTripped
     );
     assert_eq!(
         msg,
-        "[orchestrator] Save backlog state on halt (CircuitBreakerTripped)"
+        "[phase-golem] Save backlog state on halt (CircuitBreakerTripped)"
     );
 }
 
 #[test]
 fn halt_commit_message_target_completed() {
     let msg = format!(
-        "[orchestrator] Save backlog state on halt ({:?})",
+        "[phase-golem] Save backlog state on halt ({:?})",
         HaltReason::TargetCompleted
     );
     assert_eq!(
         msg,
-        "[orchestrator] Save backlog state on halt (TargetCompleted)"
+        "[phase-golem] Save backlog state on halt (TargetCompleted)"
     );
 }
 
 #[test]
 fn halt_commit_message_filter_exhausted() {
     let msg = format!(
-        "[orchestrator] Save backlog state on halt ({:?})",
+        "[phase-golem] Save backlog state on halt ({:?})",
         HaltReason::FilterExhausted
     );
     assert_eq!(
         msg,
-        "[orchestrator] Save backlog state on halt (FilterExhausted)"
+        "[phase-golem] Save backlog state on halt (FilterExhausted)"
     );
 }
 

@@ -1,4 +1,4 @@
-# Orchestrator
+# Phase Golem
 
 A Rust CLI that autonomously manages a backlog of changes and executes configured workflow phases using AI agents without human intervention.
 
@@ -18,29 +18,29 @@ cd phase-golem
 cargo build --release
 
 # Copy to somewhere on your PATH
-cp target/release/orchestrate ~/.local/bin/
+cp target/release/phase-golem ~/.local/bin/
 ```
 
 ## Quick Start
 
 ```bash
 # 1. Initialize in your project root
-orchestrate init --prefix WRK
+phase-golem init --prefix WRK
 
 # 2. Add work items
-orchestrate add "Build user authentication" --size medium --risk low
+phase-golem add "Build user authentication" --size medium --risk low
 
 # 3. Run the pipeline
-orchestrate run
+phase-golem run
 ```
 
-That's it. The orchestrator triages new items, promotes them through phases, spawns Claude subagents for each phase, commits results, and stops when everything is done or blocked.
+That's it. Phase Golem triages new items, promotes them through phases, spawns Claude subagents for each phase, commits results, and stops when everything is done or blocked.
 
 ## Commands
 
 | Command | What it does |
 |---------|-------------|
-| `init --prefix <PREFIX>` | Create `BACKLOG.yaml`, `orchestrate.toml`, and working directories |
+| `init --prefix <PREFIX>` | Create `BACKLOG.yaml`, `phase-golem.toml`, and working directories |
 | `add "<title>" [--size S] [--risk R]` | Add a new item to the backlog |
 | `run [--target ID] [--cap N]` | Execute phases until halted (optionally target one item or cap phase count) |
 | `status` | Show the backlog sorted by priority |
@@ -66,7 +66,7 @@ Any phase can block an item if it needs a human decision. Use `unblock` to resum
 
 ### The Run Loop
 
-When you call `orchestrate run`, this happens in a loop:
+When you call `phase-golem run`, this happens in a loop:
 
 1. **Snapshot** the current backlog state
 2. **Schedule** next actions via a pure function (`select_actions`) that picks work based on:
@@ -86,11 +86,11 @@ The loop stops when:
 - SIGTERM/SIGINT received
 - Target item finished (`--target`)
 
-**Important**: The backlog is loaded into memory once at startup and is the source of truth for the entire run. Manual edits to `BACKLOG.yaml` while the orchestrator is running will not be picked up and may be overwritten when the orchestrator saves state (e.g., after ingesting follow-ups or completing a phase). Stop the orchestrator before editing the backlog file. To add items while the orchestrator is running, use the inbox file (see below).
+**Important**: The backlog is loaded into memory once at startup and is the source of truth for the entire run. Manual edits to `BACKLOG.yaml` while phase-golem is running will not be picked up and may be overwritten when it saves state (e.g., after ingesting follow-ups or completing a phase). Stop phase-golem before editing the backlog file. To add items while it is running, use the inbox file (see below).
 
 ### Adding Items While Running (`BACKLOG_INBOX.yaml`)
 
-To add new work items without stopping a running orchestrator, create a `BACKLOG_INBOX.yaml` file in the project root. The orchestrator checks for this file at the top of each scheduler loop iteration and ingests any items it finds.
+To add new work items without stopping a running instance, create a `BACKLOG_INBOX.yaml` file in the project root. Phase Golem checks for this file at the top of each scheduler loop iteration and ingests any items it finds.
 
 **Format:**
 
@@ -122,17 +122,17 @@ items:
 - Items are assigned IDs automatically from the backlog's `next_item_id` counter.
 - All inbox items start as `status: New` and go through the normal triage process.
 - The inbox file is **deleted** after successful ingestion. Create a new file for the next batch.
-- If the YAML is malformed, the file is left intact (your input is not lost) and the orchestrator logs a warning.
+- If the YAML is malformed, the file is left intact (your input is not lost) and phase-golem logs a warning.
 
 ### Key Concepts
 
-**Pipelines** define the sequence of phases for a type of work. A `feature` pipeline might be: triage -> prd -> build -> review. Pipelines are configured in `orchestrate.toml`.
+**Pipelines** define the sequence of phases for a type of work. A `feature` pipeline might be: triage -> prd -> build -> review. Pipelines are configured in `phase-golem.toml`.
 
 **Destructive vs non-destructive phases**: Destructive phases modify code (e.g., `build`) and must run exclusively -- no other phases run concurrently. Non-destructive phases (e.g., `prd`) can batch together.
 
-**Staleness detection**: Before running a destructive phase, the orchestrator checks that the prior phase's commit SHA is still in git history. If a rebase invalidated it, the phase blocks rather than building on stale artifacts.
+**Staleness detection**: Before running a destructive phase, phase-golem checks that the prior phase's commit SHA is still in git history. If a rebase invalidated it, the phase blocks rather than building on stale artifacts.
 
-**Guardrails** set thresholds (max size, complexity, risk) in `orchestrate.toml`. Items exceeding guardrails during triage get flagged for human review instead of auto-promoting.
+**Guardrails** set thresholds (max size, complexity, risk) in `phase-golem.toml`. Items exceeding guardrails during triage get flagged for human review instead of auto-promoting.
 
 **Follow-ups**: Phases can output discovered issues or improvements. These get ingested as new backlog items automatically.
 
@@ -142,7 +142,7 @@ After `init`, your project gets:
 
 ```
 project-root/
-├── orchestrate.toml     # Pipeline definitions, guardrails, execution config
+├── phase-golem.toml     # Pipeline definitions, guardrails, execution config
 ├── BACKLOG.yaml         # Work items and their state (schema v3)
 ├── BACKLOG_INBOX.yaml   # (optional) Drop-in file for adding items while running
 ├── changes/             # Per-item directories with PRDs, specs, designs
@@ -152,12 +152,12 @@ project-root/
 │       └── ...
 ├── _ideas/              # Early-stage idea files for larger items
 ├── _worklog/            # Monthly archives of completed items
-└── .orchestrator/       # Lock file and PID (git-ignored)
+└── .phase-golem/       # Lock file and PID (git-ignored)
 ```
 
 ## Configuration
 
-All configuration lives in `orchestrate.toml` at the project root. See [`orchestrate.example.toml`](orchestrate.example.toml) for an annotated starting point.
+All configuration lives in `phase-golem.toml` at the project root. See [`phase-golem.example.toml`](phase-golem.example.toml) for an annotated starting point.
 
 ### `[project]`
 

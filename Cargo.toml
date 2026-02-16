@@ -1,5 +1,5 @@
 [package]
-name = "orchestrate"
+name = "phase-golem"
 version = "0.1.0"
 edition = "2021"
 description = "A CLI that autonomously manages backlogs and executes multi-phase workflows via Claude AI"
@@ -9,7 +9,7 @@ keywords = ["cli", "orchestration", "workflow", "ai", "backlog"]
 categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
-name = "orchestrate"
+name = "phase-golem"
 path = "src/main.rs"
 
 [dependencies]

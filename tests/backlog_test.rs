@@ -2,8 +2,8 @@ mod common;
 
 use std::fs;
 
-use orchestrate::backlog;
-use orchestrate::types::{
+use phase_golem::backlog;
+use phase_golem::types::{
     BacklogFile, BlockType, DimensionLevel, FollowUp, InboxItem, ItemStatus, SizeLevel,
     UpdatedAssessments,
 };
@@ -1363,7 +1363,7 @@ fn merge_item_target_not_found_errors() {
 
 #[test]
 fn merge_item_appends_to_existing_description() {
-    use orchestrate::types::StructuredDescription;
+    use phase_golem::types::StructuredDescription;
 
     let mut backlog = common::empty_backlog();
     let mut target = common::make_item("WRK-001", ItemStatus::New);
