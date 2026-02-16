@@ -1,6 +1,6 @@
 # Orchestrator
 
-A Rust CLI that autonomously manages a backlog of changes and executes their workflow phases (PRD, research, design, spec, build, review) without human intervention.
+A Rust CLI that autonomously manages a backlog of changes and executes configured workflow phases using AI agents without human intervention.
 
 ## Prerequisites
 
