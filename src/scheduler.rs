@@ -65,15 +65,14 @@ struct RunningTaskInfo {
 }
 
 /// Tracks currently running executor tasks.
+#[derive(Default)]
 pub struct RunningTasks {
     active: HashMap<String, RunningTaskInfo>,
 }
 
 impl RunningTasks {
     pub fn new() -> Self {
-        Self {
-            active: HashMap::new(),
-        }
+        Self::default()
     }
 
     fn has_destructive(&self) -> bool {
@@ -241,7 +240,11 @@ pub fn select_actions(
         match &action {
             SchedulerAction::RunPhase { is_destructive, .. } if *is_destructive => {
                 // Destructive must be the ONLY running task
-                if running.is_empty() && actions.iter().all(|a| matches!(a, SchedulerAction::Promote(_))) {
+                if running.is_empty()
+                    && actions
+                        .iter()
+                        .all(|a| matches!(a, SchedulerAction::Promote(_)))
+                {
                     // Only promotions so far (no executor tasks) and nothing running — safe
                     actions.push(action);
                     break; // No more actions after destructive
@@ -252,10 +255,15 @@ pub fn select_actions(
             }
             _ => {
                 // Non-destructive: check that no destructive is already queued
-                let has_queued_destructive = actions.iter().any(|a| matches!(
-                    a,
-                    SchedulerAction::RunPhase { is_destructive: true, .. }
-                ));
+                let has_queued_destructive = actions.iter().any(|a| {
+                    matches!(
+                        a,
+                        SchedulerAction::RunPhase {
+                            is_destructive: true,
+                            ..
+                        }
+                    )
+                });
                 if has_queued_destructive {
                     break; // Can't add anything after a destructive action
                 }
@@ -318,9 +326,7 @@ fn sorted_scoping_items<'a>(
     scoping.sort_by(|a, b| {
         let idx_a = phase_index(a, pipelines);
         let idx_b = phase_index(b, pipelines);
-        idx_b
-            .cmp(&idx_a)
-            .then_with(|| a.created.cmp(&b.created))
+        idx_b.cmp(&idx_a).then_with(|| a.created.cmp(&b.created))
     });
     scoping
 }
@@ -348,7 +354,8 @@ pub fn unmet_dep_summary(item: &BacklogItem, all_items: &[BacklogItem]) -> Optio
     if item.dependencies.is_empty() {
         return None;
     }
-    let unmet: Vec<String> = item.dependencies
+    let unmet: Vec<String> = item
+        .dependencies
         .iter()
         .filter_map(|dep_id| {
             match all_items.iter().find(|i| i.id == *dep_id) {
@@ -393,13 +400,11 @@ fn phase_index(item: &BacklogItem, pipelines: &HashMap<String, PipelineConfig>) 
 
     let pool = item.phase_pool.as_ref();
     match pool {
-        Some(PhasePool::Pre) => {
-            pipeline
-                .pre_phases
-                .iter()
-                .position(|p| p.name == phase_name)
-                .unwrap_or(0)
-        }
+        Some(PhasePool::Pre) => pipeline
+            .pre_phases
+            .iter()
+            .position(|p| p.name == phase_name)
+            .unwrap_or(0),
         Some(PhasePool::Main) | None => {
             let pre_count = pipeline.pre_phases.len();
             let main_idx = pipeline
@@ -436,10 +441,7 @@ fn build_run_phase_action(
         .chain(pipeline.phases.iter())
         .find(|p| p.name == phase_name)?;
 
-    let phase_pool = item
-        .phase_pool
-        .clone()
-        .unwrap_or(PhasePool::Main);
+    let phase_pool = item.phase_pool.clone().unwrap_or(PhasePool::Main);
 
     Some(SchedulerAction::RunPhase {
         item_id: item.id.clone(),
@@ -541,19 +543,42 @@ pub async fn run_scheduler(
     // Track previous summaries per item for context passing
     let mut previous_summaries: HashMap<String, String> = HashMap::new();
 
-    log_info!("Scheduler started (max_wip={}, max_concurrent={}).", config.execution.max_wip, config.execution.max_concurrent);
+    log_info!(
+        "Scheduler started (max_wip={}, max_concurrent={}).",
+        config.execution.max_wip,
+        config.execution.max_concurrent
+    );
 
     loop {
         if cancel.is_cancelled() {
             // Drain remaining tasks and commit before exiting
-            drain_join_set(&mut join_set, &mut running, &mut state, &coordinator, &config, &mut previous_summaries).await;
+            drain_join_set(
+                &mut join_set,
+                &mut running,
+                &mut state,
+                &coordinator,
+                &config,
+                &mut previous_summaries,
+            )
+            .await;
             let _ = coordinator.batch_commit().await;
             return Ok(build_summary(state, HaltReason::ShutdownRequested));
         }
 
         if state.is_circuit_breaker_tripped() {
-            log_warn!("Circuit breaker tripped: {} consecutive items exhausted retries", CIRCUIT_BREAKER_THRESHOLD);
-            drain_join_set(&mut join_set, &mut running, &mut state, &coordinator, &config, &mut previous_summaries).await;
+            log_warn!(
+                "Circuit breaker tripped: {} consecutive items exhausted retries",
+                CIRCUIT_BREAKER_THRESHOLD
+            );
+            drain_join_set(
+                &mut join_set,
+                &mut running,
+                &mut state,
+                &coordinator,
+                &config,
+                &mut previous_summaries,
+            )
+            .await;
             let _ = coordinator.batch_commit().await;
             return Ok(build_summary(state, HaltReason::CircuitBreakerTripped));
         }
@@ -561,7 +586,11 @@ pub async fn run_scheduler(
         // Ingest inbox items before snapshot so new items are persisted first
         match coordinator.ingest_inbox().await {
             Ok(new_ids) if !new_ids.is_empty() => {
-                log_info!("Ingested {} items from inbox: {}", new_ids.len(), new_ids.join(", "));
+                log_info!(
+                    "Ingested {} items from inbox: {}",
+                    new_ids.len(),
+                    new_ids.join(", ")
+                );
             }
             Err(e) => {
                 log_warn!("Inbox ingestion failed: {}", e);
@@ -584,7 +613,15 @@ pub async fn run_scheduler(
                         state.current_target_index + 1,
                         params.targets.len()
                     );
-                    drain_join_set(&mut join_set, &mut running, &mut state, &coordinator, &config, &mut previous_summaries).await;
+                    drain_join_set(
+                        &mut join_set,
+                        &mut running,
+                        &mut state,
+                        &coordinator,
+                        &config,
+                        &mut previous_summaries,
+                    )
+                    .await;
                     let _ = coordinator.batch_commit().await;
                     return Ok(build_summary(state, HaltReason::TargetBlocked));
                 }
@@ -597,7 +634,15 @@ pub async fn run_scheduler(
                 &snapshot,
             );
             if state.current_target_index >= params.targets.len() {
-                drain_join_set(&mut join_set, &mut running, &mut state, &coordinator, &config, &mut previous_summaries).await;
+                drain_join_set(
+                    &mut join_set,
+                    &mut running,
+                    &mut state,
+                    &coordinator,
+                    &config,
+                    &mut previous_summaries,
+                )
+                .await;
                 let _ = coordinator.batch_commit().await;
                 return Ok(build_summary(state, HaltReason::TargetCompleted));
             }
@@ -611,29 +656,62 @@ pub async fn run_scheduler(
                 // Determine if no items match at all, or all matching are Done/Blocked/archived.
                 // Check both the current snapshot and items we've already completed/blocked
                 // (which may have been archived and removed from the snapshot).
-                let any_match_in_snapshot = snapshot.items.iter().any(|item| {
-                    filter::matches_item(criterion, item)
-                });
-                let has_prior_progress = !state.items_completed.is_empty() || !state.items_blocked.is_empty();
+                let any_match_in_snapshot = snapshot
+                    .items
+                    .iter()
+                    .any(|item| filter::matches_item(criterion, item));
+                let has_prior_progress =
+                    !state.items_completed.is_empty() || !state.items_blocked.is_empty();
                 if !any_match_in_snapshot && !has_prior_progress {
                     log_info!("[filter] No items match filter criteria: {}", criterion);
-                    drain_join_set(&mut join_set, &mut running, &mut state, &coordinator, &config, &mut previous_summaries).await;
+                    drain_join_set(
+                        &mut join_set,
+                        &mut running,
+                        &mut state,
+                        &coordinator,
+                        &config,
+                        &mut previous_summaries,
+                    )
+                    .await;
                     let _ = coordinator.batch_commit().await;
                     return Ok(build_summary(state, HaltReason::NoMatchingItems));
                 } else {
-                    log_info!("[filter] All items matching {} are done or blocked.", criterion);
-                    drain_join_set(&mut join_set, &mut running, &mut state, &coordinator, &config, &mut previous_summaries).await;
+                    log_info!(
+                        "[filter] All items matching {} are done or blocked.",
+                        criterion
+                    );
+                    drain_join_set(
+                        &mut join_set,
+                        &mut running,
+                        &mut state,
+                        &coordinator,
+                        &config,
+                        &mut previous_summaries,
+                    )
+                    .await;
                     let _ = coordinator.batch_commit().await;
                     return Ok(build_summary(state, HaltReason::FilterExhausted));
                 }
             }
             // Check if all remaining filtered items are Done or Blocked
-            let all_done_or_blocked = filtered.items.iter().all(|i| {
-                matches!(i.status, ItemStatus::Done | ItemStatus::Blocked)
-            });
+            let all_done_or_blocked = filtered
+                .items
+                .iter()
+                .all(|i| matches!(i.status, ItemStatus::Done | ItemStatus::Blocked));
             if all_done_or_blocked {
-                log_info!("[filter] All items matching {} are done or blocked.", criterion);
-                drain_join_set(&mut join_set, &mut running, &mut state, &coordinator, &config, &mut previous_summaries).await;
+                log_info!(
+                    "[filter] All items matching {} are done or blocked.",
+                    criterion
+                );
+                drain_join_set(
+                    &mut join_set,
+                    &mut running,
+                    &mut state,
+                    &coordinator,
+                    &config,
+                    &mut previous_summaries,
+                )
+                .await;
                 let _ = coordinator.batch_commit().await;
                 return Ok(build_summary(state, HaltReason::FilterExhausted));
             }
@@ -644,7 +722,13 @@ pub async fn run_scheduler(
 
         // Select actions (three-way dispatch: targets, filter, normal)
         let actions = if !params.targets.is_empty() {
-            select_targeted_actions(&snapshot, &running, &config.execution, &config.pipelines, &params.targets[state.current_target_index])
+            select_targeted_actions(
+                &snapshot,
+                &running,
+                &config.execution,
+                &config.pipelines,
+                &params.targets[state.current_target_index],
+            )
         } else if let Some(ref filtered) = filtered_snapshot {
             select_actions(filtered, &running, &config.execution, &config.pipelines)
         } else {
@@ -664,18 +748,26 @@ pub async fn run_scheduler(
                 })
                 .collect();
             if !dep_blocked.is_empty() {
-                log_info!("Items blocked by unmet dependencies: {}", dep_blocked.join("; "));
+                log_info!(
+                    "Items blocked by unmet dependencies: {}",
+                    dep_blocked.join("; ")
+                );
             }
             log_info!("No actionable items — all done or blocked.");
             return Ok(build_summary(state, HaltReason::AllDoneOrBlocked));
         }
 
         if !actions.is_empty() {
-            let action_descriptions: Vec<String> = actions.iter().map(|a| match a {
-                SchedulerAction::Promote(id) => format!("promote {}", id),
-                SchedulerAction::Triage(id) => format!("triage {}", id),
-                SchedulerAction::RunPhase { item_id, phase, .. } => format!("{} → {}", item_id, phase),
-            }).collect();
+            let action_descriptions: Vec<String> = actions
+                .iter()
+                .map(|a| match a {
+                    SchedulerAction::Promote(id) => format!("promote {}", id),
+                    SchedulerAction::Triage(id) => format!("triage {}", id),
+                    SchedulerAction::RunPhase { item_id, phase, .. } => {
+                        format!("{} → {}", item_id, phase)
+                    }
+                })
+                .collect();
             log_info!("\nScheduling: [{}]", action_descriptions.join(", "));
         }
 
@@ -716,11 +808,16 @@ pub async fn run_scheduler(
                         "[{}][{}] Starting phase ({})",
                         item_id,
                         phase.to_uppercase(),
-                        if is_destructive { "destructive" } else { "non-destructive" }
+                        if is_destructive {
+                            "destructive"
+                        } else {
+                            "non-destructive"
+                        }
                     );
                     log_debug!(
                         "Progress: {}/{} phases used",
-                        state.phases_executed, state.cap
+                        state.phases_executed,
+                        state.cap
                     );
 
                     running.insert(
@@ -743,17 +840,40 @@ pub async fn run_scheduler(
                         // Get a fresh snapshot of the item for execution
                         let snap = match coord.get_snapshot().await {
                             Ok(s) => s,
-                            Err(e) => return (item_id, PhaseExecutionResult::Failed(format!("Failed to get snapshot: {}", e))),
+                            Err(e) => {
+                                return (
+                                    item_id,
+                                    PhaseExecutionResult::Failed(format!(
+                                        "Failed to get snapshot: {}",
+                                        e
+                                    )),
+                                )
+                            }
                         };
                         let item = match snap.items.iter().find(|i| i.id == item_id) {
                             Some(i) => i.clone(),
-                            None => return (item_id, PhaseExecutionResult::Failed("Item not found in snapshot".to_string())),
+                            None => {
+                                return (
+                                    item_id,
+                                    PhaseExecutionResult::Failed(
+                                        "Item not found in snapshot".to_string(),
+                                    ),
+                                )
+                            }
                         };
 
                         let pipeline_type = item.pipeline_type.as_deref().unwrap_or("feature");
                         let pipeline = match cfg.pipelines.get(pipeline_type) {
                             Some(p) => p,
-                            None => return (item_id, PhaseExecutionResult::Failed(format!("Pipeline '{}' not found", pipeline_type))),
+                            None => {
+                                return (
+                                    item_id,
+                                    PhaseExecutionResult::Failed(format!(
+                                        "Pipeline '{}' not found",
+                                        pipeline_type
+                                    )),
+                                )
+                            }
                         };
 
                         let phase_config = match pipeline
@@ -763,7 +883,15 @@ pub async fn run_scheduler(
                             .find(|p| p.name == phase)
                         {
                             Some(pc) => pc,
-                            None => return (item_id, PhaseExecutionResult::Failed(format!("Phase '{}' not found in pipeline", phase))),
+                            None => {
+                                return (
+                                    item_id,
+                                    PhaseExecutionResult::Failed(format!(
+                                        "Phase '{}' not found in pipeline",
+                                        phase
+                                    )),
+                                )
+                            }
                         };
 
                         let result = executor::execute_phase(
@@ -855,7 +983,9 @@ pub fn select_targeted_actions(
     }
 
     // If target is done or blocked and not running, nothing to do
-    if matches!(target.status, ItemStatus::Done | ItemStatus::Blocked) && !running.is_item_running(target_id) {
+    if matches!(target.status, ItemStatus::Done | ItemStatus::Blocked)
+        && !running.is_item_running(target_id)
+    {
         return Vec::new();
     }
 
@@ -906,11 +1036,27 @@ async fn handle_task_completion(
             if phase_result.phase == "triage" {
                 handle_triage_success(item_id, &phase_result, coordinator, config, state).await
             } else {
-                handle_phase_success(item_id, phase_result, coordinator, config, state, previous_summaries).await
+                handle_phase_success(
+                    item_id,
+                    phase_result,
+                    coordinator,
+                    config,
+                    state,
+                    previous_summaries,
+                )
+                .await
             }
         }
         PhaseExecutionResult::SubphaseComplete(phase_result) => {
-            handle_subphase_complete(item_id, phase_result, coordinator, config, state, previous_summaries).await
+            handle_subphase_complete(
+                item_id,
+                phase_result,
+                coordinator,
+                config,
+                state,
+                previous_summaries,
+            )
+            .await
         }
         PhaseExecutionResult::Failed(reason) => {
             handle_phase_failed(item_id, &reason, coordinator, state, previous_summaries).await
@@ -1355,7 +1501,10 @@ async fn handle_promote(
         .ok_or_else(|| format!("Pipeline '{}' has no main phases", pipeline_type))?;
 
     coordinator
-        .update_item(item_id, ItemUpdate::TransitionStatus(ItemStatus::InProgress))
+        .update_item(
+            item_id,
+            ItemUpdate::TransitionStatus(ItemStatus::InProgress),
+        )
         .await?;
     coordinator
         .update_item(item_id, ItemUpdate::SetPhase(first_phase.name.clone()))
@@ -1364,7 +1513,11 @@ async fn handle_promote(
         .update_item(item_id, ItemUpdate::SetPhasePool(PhasePool::Main))
         .await?;
 
-    log_info!("{} → in_progress (starting at {})", item_id, first_phase.name);
+    log_info!(
+        "{} → in_progress (starting at {})",
+        item_id,
+        first_phase.name
+    );
     Ok(())
 }
 
@@ -1398,7 +1551,12 @@ async fn spawn_triage(
     join_set.spawn(async move {
         let snap = match coord.get_snapshot().await {
             Ok(s) => s,
-            Err(e) => return (item_id, PhaseExecutionResult::Failed(format!("Failed to get snapshot: {}", e))),
+            Err(e) => {
+                return (
+                    item_id,
+                    PhaseExecutionResult::Failed(format!("Failed to get snapshot: {}", e)),
+                )
+            }
         };
         let item = match snap.items.iter().find(|i| i.id == item_id) {
             Some(i) => i.clone(),
@@ -1457,7 +1615,12 @@ pub async fn apply_triage_result(
                     ItemUpdate::SetBlocked(format!(
                         "Triage assigned invalid pipeline type '{}'. Available: {}",
                         pipeline_type,
-                        config.pipelines.keys().cloned().collect::<Vec<_>>().join(", ")
+                        config
+                            .pipelines
+                            .keys()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     )),
                 )
                 .await?;

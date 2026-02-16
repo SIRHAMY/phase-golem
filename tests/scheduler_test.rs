@@ -11,10 +11,13 @@ use orchestrate::config::{
 };
 use orchestrate::coordinator;
 use orchestrate::filter;
-use orchestrate::scheduler::{self, advance_to_next_active_target, HaltReason, RunParams, RunningTasks, select_actions, select_targeted_actions, unmet_dep_summary};
+use orchestrate::scheduler::{
+    self, advance_to_next_active_target, select_actions, select_targeted_actions,
+    unmet_dep_summary, HaltReason, RunParams, RunningTasks,
+};
 use orchestrate::types::{
-    BacklogFile, BacklogItem, DimensionLevel, FollowUp, ItemStatus, PhasePool,
-    PhaseResult, ResultCode, SchedulerAction, SizeLevel, UpdatedAssessments,
+    BacklogFile, BacklogItem, DimensionLevel, FollowUp, ItemStatus, PhasePool, PhaseResult,
+    ResultCode, SchedulerAction, SizeLevel, UpdatedAssessments,
 };
 
 // --- Test helpers ---
@@ -241,9 +244,9 @@ fn select_actions_all_blocked_returns_empty() {
 #[test]
 fn select_actions_promotes_ready_items_when_under_max_wip() {
     let snapshot = make_backlog(vec![
-            make_ready_item("WRK-001", "Task A", Some(DimensionLevel::High)),
-            make_ready_item("WRK-002", "Task B", Some(DimensionLevel::Low)),
-        ]);
+        make_ready_item("WRK-001", "Task A", Some(DimensionLevel::High)),
+        make_ready_item("WRK-002", "Task B", Some(DimensionLevel::Low)),
+    ]);
     let running = RunningTasks::new();
     let config = default_execution_config(); // max_wip=2
     let pipelines = default_pipelines();
@@ -264,10 +267,14 @@ fn select_actions_promotes_ready_items_when_under_max_wip() {
 #[test]
 fn select_actions_respects_max_wip_limit() {
     let snapshot = make_backlog(vec![
-            make_in_progress_item("WRK-001", "Running", "prd"),
-            make_in_progress_item("WRK-002", "Running 2", "build"),
-            make_ready_item("WRK-003", "Ready but blocked by WIP", Some(DimensionLevel::High)),
-        ]);
+        make_in_progress_item("WRK-001", "Running", "prd"),
+        make_in_progress_item("WRK-002", "Running 2", "build"),
+        make_ready_item(
+            "WRK-003",
+            "Ready but blocked by WIP",
+            Some(DimensionLevel::High),
+        ),
+    ]);
     let running = RunningTasks::new();
     let config = default_execution_config(); // max_wip=2
     let pipelines = default_pipelines();
@@ -287,9 +294,9 @@ fn select_actions_in_progress_advance_furthest_first() {
     // WRK-001 at "prd" (index 0), WRK-002 at "spec" (index 3)
     // Should pick WRK-002 first (furthest-first)
     let snapshot = make_backlog(vec![
-            make_in_progress_item("WRK-001", "Early task", "prd"),
-            make_in_progress_item("WRK-002", "Late task", "spec"),
-        ]);
+        make_in_progress_item("WRK-001", "Early task", "prd"),
+        make_in_progress_item("WRK-002", "Late task", "spec"),
+    ]);
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -315,9 +322,9 @@ fn select_actions_in_progress_advance_furthest_first() {
 fn select_actions_in_progress_before_scoping() {
     // InProgress items should be scheduled before Scoping items
     let snapshot = make_backlog(vec![
-            make_scoping_item("WRK-001", "Scoping task", "research"),
-            make_in_progress_item("WRK-002", "Active task", "prd"),
-        ]);
+        make_scoping_item("WRK-001", "Scoping task", "research"),
+        make_in_progress_item("WRK-002", "Active task", "prd"),
+    ]);
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -342,9 +349,9 @@ fn select_actions_in_progress_before_scoping() {
 fn select_actions_triage_after_phases() {
     // Triage is lowest priority — should come after InProgress phases
     let snapshot = make_backlog(vec![
-            make_item("WRK-001", "New item", ItemStatus::New),
-            make_in_progress_item("WRK-002", "Active task", "prd"),
-        ]);
+        make_item("WRK-001", "New item", ItemStatus::New),
+        make_in_progress_item("WRK-002", "Active task", "prd"),
+    ]);
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -379,9 +386,9 @@ fn select_actions_triage_after_phases() {
 fn select_actions_destructive_phase_is_exclusive() {
     // An item at "build" (destructive) should block all other phases
     let snapshot = make_backlog(vec![
-            make_in_progress_item("WRK-001", "Build task", "build"),
-            make_in_progress_item("WRK-002", "Other task", "prd"),
-        ]);
+        make_in_progress_item("WRK-001", "Build task", "build"),
+        make_in_progress_item("WRK-002", "Other task", "prd"),
+    ]);
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -406,9 +413,9 @@ fn select_actions_destructive_phase_is_exclusive() {
 #[test]
 fn select_actions_destructive_running_blocks_all() {
     let snapshot = make_backlog(vec![
-            make_in_progress_item("WRK-001", "Build running", "build"),
-            make_in_progress_item("WRK-002", "Other task", "prd"),
-        ]);
+        make_in_progress_item("WRK-001", "Build running", "build"),
+        make_in_progress_item("WRK-002", "Other task", "prd"),
+    ]);
     let mut running = RunningTasks::new();
     running.insert_destructive("WRK-001", "build");
     let config = default_execution_config();
@@ -419,7 +426,12 @@ fn select_actions_destructive_running_blocks_all() {
     // Nothing should be scheduled while destructive is running
     let run_phases: Vec<&SchedulerAction> = actions
         .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. } | SchedulerAction::Triage(_)))
+        .filter(|a| {
+            matches!(
+                a,
+                SchedulerAction::RunPhase { .. } | SchedulerAction::Triage(_)
+            )
+        })
         .collect();
     assert_eq!(run_phases.len(), 0);
 }
@@ -428,9 +440,9 @@ fn select_actions_destructive_running_blocks_all() {
 fn select_actions_respects_max_concurrent() {
     // With max_concurrent=1, only one phase action
     let snapshot = make_backlog(vec![
-            make_in_progress_item("WRK-001", "Task A", "prd"),
-            make_in_progress_item("WRK-002", "Task B", "spec"),
-        ]);
+        make_in_progress_item("WRK-001", "Task A", "prd"),
+        make_in_progress_item("WRK-002", "Task B", "spec"),
+    ]);
     let running = RunningTasks::new();
     let config = ExecutionConfig {
         max_concurrent: 1,
@@ -443,7 +455,12 @@ fn select_actions_respects_max_concurrent() {
 
     let executor_actions: Vec<&SchedulerAction> = actions
         .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. } | SchedulerAction::Triage(_)))
+        .filter(|a| {
+            matches!(
+                a,
+                SchedulerAction::RunPhase { .. } | SchedulerAction::Triage(_)
+            )
+        })
         .collect();
     assert_eq!(executor_actions.len(), 1);
 }
@@ -451,9 +468,9 @@ fn select_actions_respects_max_concurrent() {
 #[test]
 fn select_actions_skips_already_running_items() {
     let snapshot = make_backlog(vec![
-            make_in_progress_item("WRK-001", "Running task", "prd"),
-            make_in_progress_item("WRK-002", "Idle task", "spec"),
-        ]);
+        make_in_progress_item("WRK-001", "Running task", "prd"),
+        make_in_progress_item("WRK-002", "Idle task", "spec"),
+    ]);
     let mut running = RunningTasks::new();
     running.insert_non_destructive("WRK-001", "prd");
     let config = default_execution_config();
@@ -478,9 +495,9 @@ fn select_actions_skips_already_running_items() {
 #[test]
 fn select_actions_new_items_trigger_triage() {
     let snapshot = make_backlog(vec![
-            make_item("WRK-001", "New task 1", ItemStatus::New),
-            make_item("WRK-002", "New task 2", ItemStatus::New),
-        ]);
+        make_item("WRK-001", "New task 1", ItemStatus::New),
+        make_item("WRK-002", "New task 2", ItemStatus::New),
+    ]);
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -498,10 +515,10 @@ fn select_actions_new_items_trigger_triage() {
 #[test]
 fn select_actions_promotion_tiebreaks_by_impact() {
     let snapshot = make_backlog(vec![
-            make_ready_item("WRK-001", "Low impact", Some(DimensionLevel::Low)),
-            make_ready_item("WRK-002", "High impact", Some(DimensionLevel::High)),
-            make_ready_item("WRK-003", "Medium impact", Some(DimensionLevel::Medium)),
-        ]);
+        make_ready_item("WRK-001", "Low impact", Some(DimensionLevel::Low)),
+        make_ready_item("WRK-002", "High impact", Some(DimensionLevel::High)),
+        make_ready_item("WRK-003", "Medium impact", Some(DimensionLevel::Medium)),
+    ]);
     let running = RunningTasks::new();
     let config = ExecutionConfig {
         max_wip: 3,
@@ -528,9 +545,11 @@ fn select_actions_promotion_tiebreaks_by_impact() {
 #[test]
 fn select_actions_no_destructive_when_non_destructive_running() {
     // build (destructive) should NOT be scheduled if non-destructive tasks are already running
-    let snapshot = make_backlog(vec![
-            make_in_progress_item("WRK-001", "Build task", "build"),
-        ]);
+    let snapshot = make_backlog(vec![make_in_progress_item(
+        "WRK-001",
+        "Build task",
+        "build",
+    )]);
     let mut running = RunningTasks::new();
     running.insert_non_destructive("WRK-099", "prd"); // something else running
     let config = default_execution_config();
@@ -548,9 +567,11 @@ fn select_actions_no_destructive_when_non_destructive_running() {
 
 #[test]
 fn select_actions_scoping_items_with_pre_phases() {
-    let snapshot = make_backlog(vec![
-            make_scoping_item("WRK-001", "Scoping item", "research"),
-        ]);
+    let snapshot = make_backlog(vec![make_scoping_item(
+        "WRK-001",
+        "Scoping item",
+        "research",
+    )]);
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -564,7 +585,12 @@ fn select_actions_scoping_items_with_pre_phases() {
 
     assert_eq!(run_phases.len(), 1);
     match &run_phases[0] {
-        SchedulerAction::RunPhase { item_id, phase, phase_pool, .. } => {
+        SchedulerAction::RunPhase {
+            item_id,
+            phase,
+            phase_pool,
+            ..
+        } => {
             assert_eq!(item_id, "WRK-001");
             assert_eq!(phase, "research");
             assert_eq!(phase_pool, &PhasePool::Pre);
@@ -632,9 +658,7 @@ async fn scheduler_blocked_result_blocks_item() {
     let backlog = common::make_backlog(vec![item]);
     backlog::save(&backlog_path(root), &backlog).unwrap();
 
-    let runner = MockAgentRunner::new(vec![
-        Ok(blocked_result("WRK-001", "build")),
-    ]);
+    let runner = MockAgentRunner::new(vec![Ok(blocked_result("WRK-001", "build"))]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
@@ -650,9 +674,10 @@ async fn scheduler_blocked_result_blocks_item() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.items_completed.is_empty());
     assert_eq!(summary.items_blocked, vec!["WRK-001"]);
@@ -691,9 +716,10 @@ async fn scheduler_retry_then_success() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
 }
@@ -728,9 +754,10 @@ async fn scheduler_retry_exhaustion_blocks_item() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.items_completed.is_empty());
     assert_eq!(summary.items_blocked, vec!["WRK-001"]);
@@ -764,9 +791,10 @@ async fn scheduler_cap_limits_phase_execution() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 1); // cap=1
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.halt_reason, HaltReason::CapReached);
     assert_eq!(summary.phases_executed, 1);
@@ -777,9 +805,7 @@ async fn scheduler_no_actionable_items_exits() {
     let dir = common::setup_test_env();
     let root = dir.path();
 
-    let backlog = common::make_backlog(vec![
-        make_item("WRK-001", "Done item", ItemStatus::Done),
-    ]);
+    let backlog = common::make_backlog(vec![make_item("WRK-001", "Done item", ItemStatus::Done)]);
     backlog::save(&backlog_path(root), &backlog).unwrap();
 
     let runner = MockAgentRunner::new(vec![]);
@@ -797,9 +823,10 @@ async fn scheduler_no_actionable_items_exits() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.halt_reason, HaltReason::AllDoneOrBlocked);
     assert_eq!(summary.phases_executed, 0);
@@ -833,9 +860,10 @@ async fn scheduler_target_mode_completes_specific_item() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, Some("WRK-001"), 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
@@ -871,9 +899,10 @@ async fn scheduler_subphase_complete_re_executes_phase() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
 }
@@ -914,9 +943,10 @@ async fn scheduler_follow_ups_are_ingested() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.follow_ups_created >= 1);
 }
@@ -1058,7 +1088,11 @@ async fn triage_with_invalid_pipeline_type_blocks() {
     let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
 
     assert_eq!(item.status, ItemStatus::Blocked);
-    assert!(item.blocked_reason.as_ref().unwrap().contains("nonexistent_pipeline"));
+    assert!(item
+        .blocked_reason
+        .as_ref()
+        .unwrap()
+        .contains("nonexistent_pipeline"));
 }
 
 // ============================================================
@@ -1090,7 +1124,11 @@ fn select_actions_destructive_pending_blocks_new_non_destructive() {
         .iter()
         .filter(|a| matches!(a, SchedulerAction::RunPhase { .. }))
         .collect();
-    assert_eq!(run_phases.len(), 0, "No phases should be scheduled when destructive is pending but can't run");
+    assert_eq!(
+        run_phases.len(),
+        0,
+        "No phases should be scheduled when destructive is pending but can't run"
+    );
 }
 
 #[test]
@@ -1111,9 +1149,18 @@ fn select_actions_destructive_pending_blocks_triage() {
 
     let executor_actions: Vec<&SchedulerAction> = actions
         .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. } | SchedulerAction::Triage(_)))
+        .filter(|a| {
+            matches!(
+                a,
+                SchedulerAction::RunPhase { .. } | SchedulerAction::Triage(_)
+            )
+        })
         .collect();
-    assert_eq!(executor_actions.len(), 0, "No executor actions should be scheduled when destructive is pending but can't run");
+    assert_eq!(
+        executor_actions.len(),
+        0,
+        "No executor actions should be scheduled when destructive is pending but can't run"
+    );
 }
 
 // ============================================================
@@ -1156,9 +1203,10 @@ async fn scheduler_circuit_breaker_trips_after_consecutive_exhaustions() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.halt_reason, HaltReason::CircuitBreakerTripped);
 }
@@ -1189,7 +1237,10 @@ fn test_ready_item_with_unmet_dep_not_promoted() {
         .collect();
 
     // WRK-001 should NOT be promoted (dep WRK-002 is Ready, not Done)
-    assert!(!promotions.contains(&"WRK-001".to_string()), "Item with unmet dep should not be promoted");
+    assert!(
+        !promotions.contains(&"WRK-001".to_string()),
+        "Item with unmet dep should not be promoted"
+    );
 }
 
 #[test]
@@ -1213,12 +1264,19 @@ fn test_ready_item_with_met_dep_promoted() {
         })
         .collect();
 
-    assert!(promotions.contains(&"WRK-001".to_string()), "Item with met dep should be promoted");
+    assert!(
+        promotions.contains(&"WRK-001".to_string()),
+        "Item with met dep should be promoted"
+    );
 }
 
 #[test]
 fn test_ready_item_with_absent_dep_promoted() {
-    let mut item_a = make_ready_item("WRK-001", "Depends on archived item", Some(DimensionLevel::High));
+    let mut item_a = make_ready_item(
+        "WRK-001",
+        "Depends on archived item",
+        Some(DimensionLevel::High),
+    );
     item_a.dependencies = vec!["WRK-ARCHIVED".to_string()];
 
     let snapshot = make_backlog(vec![item_a]);
@@ -1236,7 +1294,10 @@ fn test_ready_item_with_absent_dep_promoted() {
         })
         .collect();
 
-    assert!(promotions.contains(&"WRK-001".to_string()), "Item with absent dep should be promoted (absent = archived = met)");
+    assert!(
+        promotions.contains(&"WRK-001".to_string()),
+        "Item with absent dep should be promoted (absent = archived = met)"
+    );
 }
 
 #[test]
@@ -1261,7 +1322,10 @@ fn test_ready_item_with_partial_deps_not_promoted() {
         })
         .collect();
 
-    assert!(!promotions.contains(&"WRK-001".to_string()), "Item with partially met deps should not be promoted");
+    assert!(
+        !promotions.contains(&"WRK-001".to_string()),
+        "Item with partially met deps should not be promoted"
+    );
 }
 
 #[test]
@@ -1287,12 +1351,19 @@ fn test_ready_item_with_blocked_dep_not_promoted() {
         })
         .collect();
 
-    assert!(!promotions.contains(&"WRK-001".to_string()), "Item with Blocked dep should not be promoted");
+    assert!(
+        !promotions.contains(&"WRK-001".to_string()),
+        "Item with Blocked dep should not be promoted"
+    );
 }
 
 #[test]
 fn test_ready_item_with_in_progress_dep_not_promoted() {
-    let mut item_a = make_ready_item("WRK-001", "Depends on in-progress", Some(DimensionLevel::High));
+    let mut item_a = make_ready_item(
+        "WRK-001",
+        "Depends on in-progress",
+        Some(DimensionLevel::High),
+    );
     item_a.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_in_progress_item("WRK-002", "In-progress dep", "build");
 
@@ -1311,7 +1382,10 @@ fn test_ready_item_with_in_progress_dep_not_promoted() {
         })
         .collect();
 
-    assert!(!promotions.contains(&"WRK-001".to_string()), "Item with InProgress dep should not be promoted");
+    assert!(
+        !promotions.contains(&"WRK-001".to_string()),
+        "Item with InProgress dep should not be promoted"
+    );
 }
 
 #[test]
@@ -1332,7 +1406,10 @@ fn test_in_progress_with_unmet_dep_no_phase_action() {
         .filter(|a| matches!(a, SchedulerAction::RunPhase { item_id, .. } if item_id == "WRK-001"))
         .collect();
 
-    assert!(run_phases.is_empty(), "InProgress item with unmet dep should not get RunPhase action");
+    assert!(
+        run_phases.is_empty(),
+        "InProgress item with unmet dep should not get RunPhase action"
+    );
 }
 
 #[test]
@@ -1353,7 +1430,11 @@ fn test_in_progress_with_met_dep_gets_phase_action() {
         .filter(|a| matches!(a, SchedulerAction::RunPhase { item_id, .. } if item_id == "WRK-001"))
         .collect();
 
-    assert_eq!(run_phases.len(), 1, "InProgress item with met dep should get RunPhase action");
+    assert_eq!(
+        run_phases.len(),
+        1,
+        "InProgress item with met dep should get RunPhase action"
+    );
 }
 
 #[test]
@@ -1374,7 +1455,10 @@ fn test_scoping_with_unmet_dep_no_phase_action() {
         .filter(|a| matches!(a, SchedulerAction::RunPhase { item_id, .. } if item_id == "WRK-001"))
         .collect();
 
-    assert!(run_phases.is_empty(), "Scoping item with unmet dep should not get RunPhase action");
+    assert!(
+        run_phases.is_empty(),
+        "Scoping item with unmet dep should not get RunPhase action"
+    );
 }
 
 #[test]
@@ -1395,7 +1479,10 @@ fn test_new_item_with_unmet_dep_not_triaged() {
         .filter(|a| matches!(a, SchedulerAction::Triage(id) if id == "WRK-001"))
         .collect();
 
-    assert!(triages.is_empty(), "New item with unmet dep should not be triaged");
+    assert!(
+        triages.is_empty(),
+        "New item with unmet dep should not be triaged"
+    );
 }
 
 #[test]
@@ -1438,7 +1525,10 @@ fn test_no_deps_scheduled_normally() {
         })
         .collect();
 
-    assert!(promotions.contains(&"WRK-001".to_string()), "Item with no deps should be scheduled normally");
+    assert!(
+        promotions.contains(&"WRK-001".to_string()),
+        "Item with no deps should be scheduled normally"
+    );
 }
 
 #[test]
@@ -1469,7 +1559,10 @@ fn test_unmet_dep_does_not_consume_wip_slot() {
         .collect();
 
     assert_eq!(promotions.len(), 1, "Exactly one item should be promoted");
-    assert_eq!(promotions[0], "WRK-002", "Item without unmet deps should be promoted, not the one with unmet deps");
+    assert_eq!(
+        promotions[0], "WRK-002",
+        "Item without unmet deps should be promoted, not the one with unmet deps"
+    );
 }
 
 // ============================================================
@@ -1489,7 +1582,10 @@ fn test_targeted_with_unmet_dep_returns_empty() {
 
     let actions = select_targeted_actions(&snapshot, &running, &config, &pipelines, "WRK-001");
 
-    assert!(actions.is_empty(), "Targeted item with unmet dep should return empty actions");
+    assert!(
+        actions.is_empty(),
+        "Targeted item with unmet dep should return empty actions"
+    );
 }
 
 #[test]
@@ -1505,7 +1601,10 @@ fn test_targeted_with_met_dep_returns_action() {
 
     let actions = select_targeted_actions(&snapshot, &running, &config, &pipelines, "WRK-001");
 
-    assert!(!actions.is_empty(), "Targeted item with met dep should return actions");
+    assert!(
+        !actions.is_empty(),
+        "Targeted item with met dep should return actions"
+    );
 }
 
 #[test]
@@ -1520,7 +1619,10 @@ fn test_targeted_with_absent_dep_returns_action() {
 
     let actions = select_targeted_actions(&snapshot, &running, &config, &pipelines, "WRK-001");
 
-    assert!(!actions.is_empty(), "Targeted item with absent dep should return actions (absent = archived = met)");
+    assert!(
+        !actions.is_empty(),
+        "Targeted item with absent dep should return actions (absent = archived = met)"
+    );
 }
 
 // ============================================================
@@ -1546,7 +1648,10 @@ fn test_unmet_dep_summary_single_unmet_dep() {
 
     let result = unmet_dep_summary(&item, &[item.clone(), dep]);
     let summary = result.expect("Should return Some for unmet deps");
-    assert!(summary.contains("WRK-002"), "Should contain the unmet dep ID");
+    assert!(
+        summary.contains("WRK-002"),
+        "Should contain the unmet dep ID"
+    );
     assert!(summary.contains("Ready"), "Should contain the dep status");
 }
 
@@ -1559,15 +1664,28 @@ fn test_unmet_dep_summary_multiple_unmet_deps() {
 
     let result = unmet_dep_summary(&item, &[item.clone(), dep_a, dep_b]);
     let summary = result.expect("Should return Some for unmet deps");
-    assert!(summary.contains("WRK-002"), "Should contain first unmet dep");
-    assert!(summary.contains("WRK-003"), "Should contain second unmet dep");
-    assert!(summary.contains(", "), "Multiple deps should be comma-separated");
+    assert!(
+        summary.contains("WRK-002"),
+        "Should contain first unmet dep"
+    );
+    assert!(
+        summary.contains("WRK-003"),
+        "Should contain second unmet dep"
+    );
+    assert!(
+        summary.contains(", "),
+        "Multiple deps should be comma-separated"
+    );
 }
 
 #[test]
 fn test_unmet_dep_summary_mix_of_met_and_unmet() {
     let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
-    item.dependencies = vec!["WRK-002".to_string(), "WRK-003".to_string(), "WRK-004".to_string()];
+    item.dependencies = vec![
+        "WRK-002".to_string(),
+        "WRK-003".to_string(),
+        "WRK-004".to_string(),
+    ];
     let dep_done = make_item("WRK-002", "Done dep", ItemStatus::Done);
     let dep_ready = make_item("WRK-003", "Ready dep", ItemStatus::Ready);
     // WRK-004 is absent (not in the list) → met
@@ -1577,7 +1695,10 @@ fn test_unmet_dep_summary_mix_of_met_and_unmet() {
     assert!(!summary.contains("WRK-002"), "Done dep should not appear");
     assert!(!summary.contains("WRK-004"), "Absent dep should not appear");
     assert!(summary.contains("WRK-003"), "Unmet Ready dep should appear");
-    assert!(!summary.contains(", "), "Only one unmet dep so no comma separator");
+    assert!(
+        !summary.contains(", "),
+        "Only one unmet dep so no comma separator"
+    );
 }
 
 // ============================================================
@@ -1596,7 +1717,10 @@ fn test_advance_skips_done_targets() {
         &[],
         &snapshot,
     );
-    assert_eq!(result, 1, "Should skip Done WRK-001 and return index 1 for active WRK-002");
+    assert_eq!(
+        result, 1,
+        "Should skip Done WRK-001 and return index 1 for active WRK-002"
+    );
 }
 
 #[test]
@@ -1625,7 +1749,10 @@ fn test_advance_all_exhausted() {
         &[],
         &snapshot,
     );
-    assert!(result >= 2, "Should return index >= len when all targets exhausted");
+    assert!(
+        result >= 2,
+        "Should return index >= len when all targets exhausted"
+    );
 }
 
 #[test]
@@ -1633,12 +1760,7 @@ fn test_advance_first_is_active() {
     let active_item = make_in_progress_item("WRK-001", "Active", "build");
     let snapshot = make_backlog(vec![active_item]);
 
-    let result = advance_to_next_active_target(
-        &["WRK-001".to_string()],
-        0,
-        &[],
-        &snapshot,
-    );
+    let result = advance_to_next_active_target(&["WRK-001".to_string()], 0, &[], &snapshot);
     assert_eq!(result, 0, "Should return 0 when first target is active");
 }
 
@@ -1650,7 +1772,11 @@ fn test_advance_mixed_states() {
     let snapshot = make_backlog(vec![done_item, active_item]);
 
     let result = advance_to_next_active_target(
-        &["WRK-001".to_string(), "WRK-002".to_string(), "WRK-003".to_string()],
+        &[
+            "WRK-001".to_string(),
+            "WRK-002".to_string(),
+            "WRK-003".to_string(),
+        ],
         0,
         &[],
         &snapshot,
@@ -1663,7 +1789,10 @@ fn test_advance_empty_targets() {
     let snapshot = make_backlog(vec![]);
 
     let result = advance_to_next_active_target(&[], 0, &[], &snapshot);
-    assert_eq!(result, 0, "Empty targets should return 0 (immediately >= len)");
+    assert_eq!(
+        result, 0,
+        "Empty targets should return 0 (immediately >= len)"
+    );
 }
 
 #[test]
@@ -1680,7 +1809,10 @@ fn test_advance_skips_pre_blocked_targets() {
         &[],
         &snapshot,
     );
-    assert_eq!(result, 1, "Should skip pre-Blocked WRK-001 and return index 1 for active WRK-002");
+    assert_eq!(
+        result, 1,
+        "Should skip pre-Blocked WRK-001 and return index 1 for active WRK-002"
+    );
 }
 
 #[test]
@@ -1739,9 +1871,10 @@ async fn test_multi_target_processes_in_order() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.items_completed.contains(&"WRK-001".to_string()));
     assert!(summary.items_completed.contains(&"WRK-002".to_string()));
@@ -1783,9 +1916,10 @@ async fn test_multi_target_halts_on_block() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.items_completed.contains(&"WRK-001".to_string()));
     assert!(summary.items_blocked.contains(&"WRK-002".to_string()));
@@ -1823,9 +1957,10 @@ async fn test_multi_target_all_done_at_startup() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
     assert_eq!(summary.phases_executed, 0);
@@ -1865,9 +2000,10 @@ async fn test_multi_target_skips_done_targets() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.items_completed.contains(&"WRK-002".to_string()));
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
@@ -1907,9 +2043,10 @@ async fn test_multi_target_single_element_backward_compat() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
@@ -1950,9 +2087,10 @@ async fn test_multi_target_target_archived_during_run() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.items_completed.contains(&"WRK-002".to_string()));
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
@@ -1994,9 +2132,10 @@ async fn test_multi_target_skips_pre_blocked_targets() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.items_completed.contains(&"WRK-002".to_string()));
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
@@ -2042,9 +2181,10 @@ async fn test_filter_restricts_scheduler_to_matching_items() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     // Only WRK-001 (high impact) should be processed
     assert!(summary.items_completed.contains(&"WRK-001".to_string()));
@@ -2083,9 +2223,10 @@ async fn test_filter_no_matching_items_halts() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.halt_reason, HaltReason::NoMatchingItems);
     assert_eq!(summary.phases_executed, 0);
@@ -2122,9 +2263,10 @@ async fn test_filter_all_exhausted_halts() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.halt_reason, HaltReason::FilterExhausted);
     assert_eq!(summary.phases_executed, 0);
@@ -2169,15 +2311,19 @@ async fn test_integration_single_target_backward_compat() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
     assert!(summary.items_blocked.is_empty());
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
     // All phases of the single target should have been executed
-    assert!(summary.phases_executed >= 2, "Both build and review phases should execute");
+    assert!(
+        summary.phases_executed >= 2,
+        "Both build and review phases should execute"
+    );
 }
 
 #[tokio::test]
@@ -2214,22 +2360,30 @@ async fn test_integration_multi_target_sequential() {
 
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string(), "WRK-003".to_string()],
+        targets: vec![
+            "WRK-001".to_string(),
+            "WRK-002".to_string(),
+            "WRK-003".to_string(),
+        ],
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     // All three items completed in order
     assert!(summary.items_completed.contains(&"WRK-001".to_string()));
     assert!(summary.items_completed.contains(&"WRK-002".to_string()));
     assert!(summary.items_completed.contains(&"WRK-003".to_string()));
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-    assert!(summary.phases_executed >= 6, "All 6 phases should execute (2 per item × 3 items)");
+    assert!(
+        summary.phases_executed >= 6,
+        "All 6 phases should execute (2 per item × 3 items)"
+    );
 }
 
 #[tokio::test]
@@ -2268,9 +2422,10 @@ async fn test_integration_multi_target_with_block() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.items_completed.contains(&"WRK-001".to_string()));
     assert!(summary.items_blocked.contains(&"WRK-002".to_string()));
@@ -2320,9 +2475,10 @@ async fn test_integration_filter_impact_high() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     // Only WRK-001 and WRK-002 (high impact) should be processed
     assert!(summary.items_completed.contains(&"WRK-001".to_string()));
@@ -2366,9 +2522,10 @@ async fn test_integration_filter_no_matches() {
         root: root.to_path_buf(),
     };
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.halt_reason, HaltReason::NoMatchingItems);
     assert_eq!(summary.phases_executed, 0);
@@ -2424,9 +2581,10 @@ async fn cleanup_done_via_handle_phase_success() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
     assert!(summary.items_blocked.is_empty());
@@ -2443,9 +2601,7 @@ async fn cleanup_blocked_via_handle_phase_failed() {
     backlog::save(&backlog_path(root), &backlog).unwrap();
 
     // Single attempt (max_retries=0) that fails → handle_phase_failed
-    let runner = MockAgentRunner::new(vec![
-        Ok(failed_result("WRK-001", "build")),
-    ]);
+    let runner = MockAgentRunner::new(vec![Ok(failed_result("WRK-001", "build"))]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
@@ -2463,9 +2619,10 @@ async fn cleanup_blocked_via_handle_phase_failed() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.items_completed.is_empty());
     assert_eq!(summary.items_blocked, vec!["WRK-001"]);
@@ -2480,9 +2637,7 @@ async fn cleanup_blocked_via_handle_phase_blocked() {
     let backlog = common::make_backlog(vec![item]);
     backlog::save(&backlog_path(root), &backlog).unwrap();
 
-    let runner = MockAgentRunner::new(vec![
-        Ok(blocked_result("WRK-001", "build")),
-    ]);
+    let runner = MockAgentRunner::new(vec![Ok(blocked_result("WRK-001", "build"))]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
@@ -2498,9 +2653,10 @@ async fn cleanup_blocked_via_handle_phase_blocked() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert!(summary.items_completed.is_empty());
     assert_eq!(summary.items_blocked, vec!["WRK-001"]);
@@ -2538,9 +2694,10 @@ async fn non_terminal_phase_retains_summary() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
     assert_eq!(summary.phases_executed, 3);
@@ -2586,9 +2743,10 @@ async fn many_items_complete_with_bounded_summaries() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.items_completed.len(), 4);
     assert!(summary.items_blocked.is_empty());
@@ -2626,9 +2784,10 @@ async fn retry_then_success_summary_persists() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(root, None, 100);
 
-    let summary = scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-        .await
-        .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
     assert!(summary.items_blocked.is_empty());

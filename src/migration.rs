@@ -176,8 +176,8 @@ fn map_v1_item(v1: &V1BacklogItem) -> BacklogItem {
 /// StructuredDescription via parse_description (returns a BacklogFile
 /// with the on-disk schema_version, not necessarily v2).
 pub fn migrate_v1_to_v2(path: &Path, pipeline: &PipelineConfig) -> Result<BacklogFile, String> {
-    let contents =
-        fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let contents = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
 
     // Check if already v2 by parsing the version field
     let version_check: serde_yaml_ng::Value = serde_yaml_ng::from_str(&contents)
@@ -232,14 +232,23 @@ pub fn migrate_v1_to_v2(path: &Path, pipeline: &PipelineConfig) -> Result<Backlo
         let v2_status_name = format!("{:?}", v2_item.status);
         let status_changed = v1_status_name != v2_status_name;
         if status_changed {
-            log_info!("  {}: status {} → {}", v1_item.id, v1_status_name, v2_status_name);
+            log_info!(
+                "  {}: status {} → {}",
+                v1_item.id,
+                v1_status_name,
+                v2_status_name
+            );
             status_changes += 1;
         }
 
         let mut phase_cleared = false;
         if let Some(ref old_phase) = v1_item.phase {
             if v2_item.phase.is_none() {
-                log_info!("  {}: phase cleared (was '{}')", v1_item.id, old_phase.as_str());
+                log_info!(
+                    "  {}: phase cleared (was '{}')",
+                    v1_item.id,
+                    old_phase.as_str()
+                );
                 phase_clears += 1;
                 phase_cleared = true;
             }
@@ -320,8 +329,7 @@ pub fn migrate_v1_to_v2(path: &Path, pipeline: &PipelineConfig) -> Result<Backlo
     let temp_file = NamedTempFile::new_in(parent)
         .map_err(|e| format!("Failed to create temp file in {}: {}", parent.display(), e))?;
 
-    fs::write(temp_file.path(), &yaml)
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+    fs::write(temp_file.path(), &yaml).map_err(|e| format!("Failed to write temp file: {}", e))?;
 
     let file = fs::File::open(temp_file.path())
         .map_err(|e| format!("Failed to open temp file for sync: {}", e))?;
@@ -444,8 +452,8 @@ fn map_v2_item(v2: &V2BacklogItem) -> BacklogItem {
 /// Reads the file, parses as v2, transforms descriptions via `parse_description`,
 /// writes back as v3. Uses atomic write-temp-rename pattern.
 pub fn migrate_v2_to_v3(path: &Path) -> Result<BacklogFile, String> {
-    let contents =
-        fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let contents = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
 
     let version_check: serde_yaml_ng::Value = serde_yaml_ng::from_str(&contents)
         .map_err(|e| format!("Failed to parse YAML from {}: {}", path.display(), e))?;
@@ -491,8 +499,7 @@ pub fn migrate_v2_to_v3(path: &Path) -> Result<BacklogFile, String> {
     let temp_file = NamedTempFile::new_in(parent)
         .map_err(|e| format!("Failed to create temp file in {}: {}", parent.display(), e))?;
 
-    fs::write(temp_file.path(), &yaml)
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+    fs::write(temp_file.path(), &yaml).map_err(|e| format!("Failed to write temp file: {}", e))?;
 
     let file = fs::File::open(temp_file.path())
         .map_err(|e| format!("Failed to open temp file for sync: {}", e))?;
@@ -542,13 +549,16 @@ pub fn parse_description(text: &str) -> StructuredDescription {
         let trimmed = line.trim();
         let trimmed_lower = trimmed.to_lowercase();
 
-        let matched_section = SECTION_HEADERS.iter().enumerate().find_map(|(i, &(header, _))| {
-            if trimmed_lower.starts_with(header) {
-                Some((i, header.len()))
-            } else {
-                None
-            }
-        });
+        let matched_section = SECTION_HEADERS
+            .iter()
+            .enumerate()
+            .find_map(|(i, &(header, _))| {
+                if trimmed_lower.starts_with(header) {
+                    Some((i, header.len()))
+                } else {
+                    None
+                }
+            });
 
         if let Some((section_idx, header_len)) = matched_section {
             any_header_found = true;

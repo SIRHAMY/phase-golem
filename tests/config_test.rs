@@ -1,6 +1,31 @@
 use orchestrate::config::*;
 use orchestrate::types::*;
 
+// --- backlog_path config tests ---
+
+#[test]
+fn default_backlog_path_is_backlog_yaml() {
+    let config = ProjectConfig::default();
+    assert_eq!(config.backlog_path, "BACKLOG.yaml");
+}
+
+#[test]
+fn custom_backlog_path_parses_from_toml() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("orchestrate.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[project]
+backlog_path = ".dev/BACKLOG.yaml"
+"#,
+    )
+    .unwrap();
+
+    let config = load_config(dir.path()).unwrap();
+    assert_eq!(config.project.backlog_path, ".dev/BACKLOG.yaml");
+}
+
 // --- PhaseConfig::new() constructor tests ---
 
 #[test]
@@ -306,12 +331,13 @@ fn validate_valid_config_passes() {
 fn validate_max_wip_zero_fails() {
     let mut config = OrchestrateConfig::default();
     config.execution.max_wip = 0;
-    config
-        .pipelines
-        .insert("test".to_string(), PipelineConfig {
+    config.pipelines.insert(
+        "test".to_string(),
+        PipelineConfig {
             pre_phases: vec![],
             phases: vec![PhaseConfig::new("build", false)],
-        });
+        },
+    );
 
     let result = validate(&config);
     assert!(result.is_err());
@@ -323,12 +349,13 @@ fn validate_max_wip_zero_fails() {
 fn validate_max_concurrent_zero_fails() {
     let mut config = OrchestrateConfig::default();
     config.execution.max_concurrent = 0;
-    config
-        .pipelines
-        .insert("test".to_string(), PipelineConfig {
+    config.pipelines.insert(
+        "test".to_string(),
+        PipelineConfig {
             pre_phases: vec![],
             phases: vec![PhaseConfig::new("build", false)],
-        });
+        },
+    );
 
     let result = validate(&config);
     assert!(result.is_err());
@@ -350,9 +377,7 @@ fn validate_pipeline_no_main_phases_fails() {
     let result = validate(&config);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| e.contains("at least one main phase")));
+    assert!(errors.iter().any(|e| e.contains("at least one main phase")));
 }
 
 #[test]
@@ -389,9 +414,7 @@ fn validate_destructive_pre_phase_fails() {
     let result = validate(&config);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| e.contains("cannot be destructive")));
+    assert!(errors.iter().any(|e| e.contains("cannot be destructive")));
 }
 
 #[test]

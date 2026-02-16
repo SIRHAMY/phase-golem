@@ -2,6 +2,25 @@
 
 A Rust CLI that autonomously manages a backlog of changes and executes their workflow phases (PRD, research, design, spec, build, review) without human intervention.
 
+## Prerequisites
+
+- [Rust toolchain](https://rustup.rs/) (stable)
+- [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) (`claude`) installed and authenticated
+
+## Installation
+
+```bash
+# Clone the repo
+git clone https://github.com/sirhamy/phase-golem.git
+cd phase-golem
+
+# Build
+cargo build --release
+
+# Copy to somewhere on your PATH
+cp target/release/orchestrate ~/.local/bin/
+```
+
 ## Quick Start
 
 ```bash
@@ -124,7 +143,7 @@ After `init`, your project gets:
 ```
 project-root/
 ├── orchestrate.toml     # Pipeline definitions, guardrails, execution config
-├── BACKLOG.yaml         # Work items and their state (schema v2)
+├── BACKLOG.yaml         # Work items and their state (schema v3)
 ├── BACKLOG_INBOX.yaml   # (optional) Drop-in file for adding items while running
 ├── changes/             # Per-item directories with PRDs, specs, designs
 │   └── WRK-001_auth/
@@ -138,13 +157,14 @@ project-root/
 
 ## Configuration
 
-All configuration lives in `orchestrate.toml` at the project root.
+All configuration lives in `orchestrate.toml` at the project root. See [`orchestrate.example.toml`](orchestrate.example.toml) for an annotated starting point.
 
 ### `[project]`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `prefix` | string | `"WRK"` | Item ID prefix (e.g. `WRK-001`, `WRK-002`) |
+| `backlog_path` | string | `"BACKLOG.yaml"` | Path to the backlog file, relative to project root |
 
 ### `[guardrails]`
 
@@ -251,3 +271,12 @@ is_destructive = false
 - **Coordinator** (`coordinator.rs`): Tokio channel-based actor that serializes all backlog mutations and git operations. Handles commits (immediate for destructive, batched for non-destructive), worklog archiving, and follow-up ingestion.
 - **Agent Runner** (`agent.rs`): Spawns `claude` CLI as a subprocess, manages timeouts and signal handling (SIGTERM graceful shutdown with 5s grace period).
 - **Preflight** (`preflight.rs`): Validates config structure, probes that referenced skills exist, and checks that InProgress items reference valid pipelines before any work begins.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option.

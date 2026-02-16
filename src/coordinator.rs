@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::git::StatusEntry;
-use crate::types::{
-    BacklogFile, BacklogItem, FollowUp, ItemStatus, ItemUpdate, PhaseResult,
-};
+use crate::types::{BacklogFile, BacklogItem, FollowUp, ItemStatus, ItemUpdate, PhaseResult};
 use crate::{log_error, log_warn};
 
 // --- Command enum ---
@@ -154,11 +152,7 @@ impl CoordinatorHandle {
         .await?
     }
 
-    pub async fn record_phase_start(
-        &self,
-        item_id: &str,
-        commit_sha: &str,
-    ) -> Result<(), String> {
+    pub async fn record_phase_start(&self, item_id: &str, commit_sha: &str) -> Result<(), String> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::RecordPhaseStart {
@@ -221,11 +215,7 @@ impl CoordinatorHandle {
         .await?
     }
 
-    pub async fn unblock_item(
-        &self,
-        item_id: &str,
-        context: Option<String>,
-    ) -> Result<(), String> {
+    pub async fn unblock_item(&self, item_id: &str, context: Option<String>) -> Result<(), String> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::UnblockItem {
@@ -261,9 +251,11 @@ impl CoordinatorHandle {
 // --- Pure helpers ---
 
 fn has_staged_changes(status: &[StatusEntry]) -> bool {
-    status
-        .iter()
-        .any(|entry| entry.status_code.starts_with(|c: char| c != ' ' && c != '?'))
+    status.iter().any(|entry| {
+        entry
+            .status_code
+            .starts_with(|c: char| c != ' ' && c != '?')
+    })
 }
 
 fn build_phase_commit_message(item_id: &str, phase: &str, commit_summary: Option<&str>) -> String {
@@ -271,7 +263,10 @@ fn build_phase_commit_message(item_id: &str, phase: &str, commit_summary: Option
     match commit_summary {
         Some(s) => {
             // Strip duplicate prefix if the agent already included it
-            let trimmed = s.strip_prefix(&prefix).map(|rest| rest.trim_start()).unwrap_or(s);
+            let trimmed = s
+                .strip_prefix(&prefix)
+                .map(|rest| rest.trim_start())
+                .unwrap_or(s);
             format!("{} {}", prefix, trimmed)
         }
         None => format!("{} Phase output", prefix),
@@ -296,7 +291,10 @@ fn build_batch_commit_message(phases: &[(String, String, Option<String>)]) -> St
         .filter_map(|(id, phase, summary)| {
             summary.as_ref().map(|s| {
                 let prefix = format!("[{}][{}]", id, phase);
-                let trimmed = s.strip_prefix(&prefix).map(|rest| rest.trim_start()).unwrap_or(s);
+                let trimmed = s
+                    .strip_prefix(&prefix)
+                    .map(|rest| rest.trim_start())
+                    .unwrap_or(s);
                 format!("{} {}", prefix, trimmed)
             })
         })
@@ -311,10 +309,7 @@ fn build_batch_commit_message(phases: &[(String, String, Option<String>)]) -> St
 }
 
 fn restore_from_blocked(item: &mut BacklogItem) -> Result<(), String> {
-    let restore_to = item
-        .blocked_from_status
-        .clone()
-        .unwrap_or(ItemStatus::New);
+    let restore_to = item.blocked_from_status.clone().unwrap_or(ItemStatus::New);
     crate::backlog::transition_status(item, restore_to)
 }
 
@@ -642,11 +637,10 @@ async fn run_coordinator(
             }
             CoordinatorCommand::GetHeadSha { reply } => {
                 let project_root = state.project_root.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    crate::git::get_head_sha(&project_root)
-                })
-                .await
-                .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {}", e)));
+                let result =
+                    tokio::task::spawn_blocking(move || crate::git::get_head_sha(&project_root))
+                        .await
+                        .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {}", e)));
                 let _ = reply.send(result);
             }
             CoordinatorCommand::IsAncestor { sha, reply } => {
@@ -770,11 +764,8 @@ mod tests {
 
     #[test]
     fn phase_commit_message_does_not_strip_different_prefix() {
-        let msg = build_phase_commit_message(
-            "WRK-001",
-            "build",
-            Some("[WRK-002][design] Wrong prefix"),
-        );
+        let msg =
+            build_phase_commit_message("WRK-001", "build", Some("[WRK-002][design] Wrong prefix"));
         assert_eq!(msg, "[WRK-001][build] [WRK-002][design] Wrong prefix");
     }
 
@@ -795,8 +786,16 @@ mod tests {
     #[test]
     fn batch_commit_message_with_summaries() {
         let phases = vec![
-            ("WRK-001".to_string(), "build".to_string(), Some("Add form".to_string())),
-            ("WRK-002".to_string(), "design".to_string(), Some("Layout update".to_string())),
+            (
+                "WRK-001".to_string(),
+                "build".to_string(),
+                Some("Add form".to_string()),
+            ),
+            (
+                "WRK-002".to_string(),
+                "design".to_string(),
+                Some("Layout update".to_string()),
+            ),
         ];
         let msg = build_batch_commit_message(&phases);
         assert_eq!(
@@ -818,11 +817,7 @@ mod tests {
 
     #[test]
     fn batch_commit_single_phase_no_summary() {
-        let phases = vec![(
-            "WRK-001".to_string(),
-            "build".to_string(),
-            None,
-        )];
+        let phases = vec![("WRK-001".to_string(), "build".to_string(), None)];
         let msg = build_batch_commit_message(&phases);
         assert_eq!(msg, "[WRK-001][build] Phase output");
     }
@@ -855,6 +850,10 @@ mod tests {
 
         // The JoinHandle should resolve to Ok(())
         let result = task_handle.await;
-        assert!(result.is_ok(), "JoinHandle should resolve to Ok(()), got: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "JoinHandle should resolve to Ok(()), got: {:?}",
+            result
+        );
     }
 }

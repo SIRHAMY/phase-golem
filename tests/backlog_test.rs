@@ -94,7 +94,9 @@ fn save_and_reload_round_trip() {
     let path = dir.path().join("BACKLOG.yaml");
 
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
     backlog.items[0].size = Some(SizeLevel::Small);
     backlog.items[0].tags = vec!["test".to_string()];
 
@@ -115,12 +117,16 @@ fn save_overwrites_existing_file_atomically() {
 
     // Write initial version
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
     backlog::save(&path, &backlog).unwrap();
 
     // Overwrite with updated version
     backlog.items[0].status = ItemStatus::Scoping;
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
     backlog::save(&path, &backlog).unwrap();
 
     // Verify new version
@@ -183,8 +189,12 @@ fn generate_id_empty_backlog() {
 #[test]
 fn generate_id_sequential() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
     let (id, _suffix) = backlog::generate_next_id(&backlog, "WRK");
     assert_eq!(id, "WRK-003");
 }
@@ -192,8 +202,12 @@ fn generate_id_sequential() {
 #[test]
 fn generate_id_with_gaps() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
-    backlog.items.push(common::make_item("WRK-005", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-005", ItemStatus::New));
     // Should use max + 1, not fill gaps
     let (id, _suffix) = backlog::generate_next_id(&backlog, "WRK");
     assert_eq!(id, "WRK-006");
@@ -209,7 +223,9 @@ fn generate_id_zero_padding() {
 #[test]
 fn generate_id_different_prefix_ignored() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("OTHER-010", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("OTHER-010", ItemStatus::New));
     // Items with different prefix should be ignored
     let (id, _suffix) = backlog::generate_next_id(&backlog, "WRK");
     assert_eq!(id, "WRK-001");
@@ -218,8 +234,12 @@ fn generate_id_different_prefix_ignored() {
 #[test]
 fn generate_id_non_numeric_suffix_ignored() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-abc", ItemStatus::New));
-    backlog.items.push(common::make_item("WRK-003", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-abc", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-003", ItemStatus::New));
     let (id, _suffix) = backlog::generate_next_id(&backlog, "WRK");
     assert_eq!(id, "WRK-004");
 }
@@ -452,7 +472,9 @@ fn archive_item_removes_from_backlog_and_writes_worklog() {
     let mut item = common::make_item("WRK-001", ItemStatus::Done);
     item.phase = Some("review".to_string());
     backlog.items.push(item);
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
     backlog::save(&backlog_path, &backlog).unwrap();
 
     backlog::archive_item(&mut backlog, "WRK-001", &backlog_path, &worklog_path).unwrap();
@@ -547,8 +569,7 @@ fn archive_nonexistent_item_fails() {
     let mut backlog = common::empty_backlog();
     backlog::save(&backlog_path, &backlog).unwrap();
 
-    let result =
-        backlog::archive_item(&mut backlog, "WRK-999", &backlog_path, &worklog_path);
+    let result = backlog::archive_item(&mut backlog, "WRK-999", &backlog_path, &worklog_path);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("not found"));
 }
@@ -575,8 +596,7 @@ fn ingest_follow_ups_creates_new_items() {
         },
     ];
 
-    let created =
-        backlog::ingest_follow_ups(&mut backlog, &follow_ups, "WRK-001/prd", "WRK");
+    let created = backlog::ingest_follow_ups(&mut backlog, &follow_ups, "WRK-001/prd", "WRK");
 
     assert_eq!(created.len(), 2);
     assert_eq!(created[0].id, "WRK-001");
@@ -597,7 +617,9 @@ fn ingest_follow_ups_creates_new_items() {
 #[test]
 fn ingest_follow_ups_continues_ids_from_existing_items() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-005", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-005", ItemStatus::New));
 
     let follow_ups = vec![FollowUp {
         title: "New follow-up".to_string(),
@@ -708,7 +730,9 @@ fn generate_id_empty_backlog_with_high_water_mark() {
 #[test]
 fn generate_id_current_items_exceed_high_water_mark() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-010", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-010", ItemStatus::New));
     backlog.next_item_id = 3;
     let (id, suffix) = backlog::generate_next_id(&backlog, "WRK");
     assert_eq!(id, "WRK-011");
@@ -718,7 +742,9 @@ fn generate_id_current_items_exceed_high_water_mark() {
 #[test]
 fn generate_id_high_water_mark_exceeds_current_items() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-003", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-003", ItemStatus::New));
     backlog.next_item_id = 10;
     let (id, suffix) = backlog::generate_next_id(&backlog, "WRK");
     assert_eq!(id, "WRK-011");
@@ -1172,7 +1198,9 @@ fn prune_stale_dependencies_removes_dangling_refs() {
     item.dependencies = vec!["WRK-999".to_string(), "WRK-002".to_string()];
     backlog.items.push(item);
 
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
 
     let pruned = backlog::prune_stale_dependencies(&mut backlog);
 
@@ -1188,7 +1216,9 @@ fn prune_stale_dependencies_no_stale_returns_zero() {
     item.dependencies = vec!["WRK-002".to_string()];
     backlog.items.push(item);
 
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
 
     let pruned = backlog::prune_stale_dependencies(&mut backlog);
 
@@ -1229,8 +1259,12 @@ fn prune_stale_dependencies_multiple_items_multiple_stale() {
 #[test]
 fn merge_item_basic() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
 
     let result = backlog::merge_item(&mut backlog, "WRK-002", "WRK-001").unwrap();
 
@@ -1268,8 +1302,12 @@ fn merge_item_dependency_union() {
 #[test]
 fn merge_item_strips_source_from_dependency_lists() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
 
     let mut dependent = common::make_item("WRK-003", ItemStatus::New);
     dependent.dependencies = vec!["WRK-002".to_string(), "WRK-001".to_string()];
@@ -1285,7 +1323,9 @@ fn merge_item_strips_source_from_dependency_lists() {
 #[test]
 fn merge_item_self_merge_errors() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     let result = backlog::merge_item(&mut backlog, "WRK-001", "WRK-001");
     assert!(result.is_err());
@@ -1296,21 +1336,29 @@ fn merge_item_self_merge_errors() {
 #[test]
 fn merge_item_source_not_found_errors() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     let result = backlog::merge_item(&mut backlog, "WRK-999", "WRK-001");
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Source item WRK-999 not found"));
+    assert!(result
+        .unwrap_err()
+        .contains("Source item WRK-999 not found"));
 }
 
 #[test]
 fn merge_item_target_not_found_errors() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     let result = backlog::merge_item(&mut backlog, "WRK-001", "WRK-999");
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Target item WRK-999 not found"));
+    assert!(result
+        .unwrap_err()
+        .contains("Target item WRK-999 not found"));
 }
 
 #[test]
@@ -1327,7 +1375,9 @@ fn merge_item_appends_to_existing_description() {
         sizing_rationale: String::new(),
     });
     backlog.items.push(target);
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
 
     backlog::merge_item(&mut backlog, "WRK-002", "WRK-001").unwrap();
 
@@ -1339,7 +1389,9 @@ fn merge_item_appends_to_existing_description() {
 #[test]
 fn merge_item_no_self_ref_in_dependencies() {
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     let mut source = common::make_item("WRK-002", ItemStatus::New);
     // Source depends on target — this should NOT be added to target's deps

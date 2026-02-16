@@ -30,8 +30,13 @@ pub fn write_entry(
     let filename = now.format("%Y-%m").to_string();
     let worklog_path = worklog_dir.join(format!("{}.md", filename));
 
-    fs::create_dir_all(worklog_dir)
-        .map_err(|e| format!("Failed to create worklog directory {}: {}", worklog_dir.display(), e))?;
+    fs::create_dir_all(worklog_dir).map_err(|e| {
+        format!(
+            "Failed to create worklog directory {}: {}",
+            worklog_dir.display(),
+            e
+        )
+    })?;
 
     let datetime = now.to_rfc3339();
     let entry = format!(
@@ -43,10 +48,21 @@ pub fn write_entry(
         .append(true)
         .create(true)
         .open(&worklog_path)
-        .map_err(|e| format!("Failed to open worklog at {}: {}", worklog_path.display(), e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to open worklog at {}: {}",
+                worklog_path.display(),
+                e
+            )
+        })?;
 
-    file.write_all(entry.as_bytes())
-        .map_err(|e| format!("Failed to write worklog at {}: {}", worklog_path.display(), e))?;
+    file.write_all(entry.as_bytes()).map_err(|e| {
+        format!(
+            "Failed to write worklog at {}: {}",
+            worklog_path.display(),
+            e
+        )
+    })?;
 
     Ok(())
 }

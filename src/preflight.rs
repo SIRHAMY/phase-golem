@@ -95,21 +95,14 @@ fn validate_structure(config: &OrchestrateConfig) -> Vec<PreflightError> {
         if pipeline.phases.is_empty() {
             errors.push(PreflightError {
                 condition: format!("Pipeline \"{}\" has no main phases", pipeline_name),
-                config_location: format!(
-                    "orchestrate.toml → pipelines.{}.phases",
-                    pipeline_name
-                ),
+                config_location: format!("orchestrate.toml → pipelines.{}.phases", pipeline_name),
                 suggested_fix: "Add at least one phase to the phases array".to_string(),
             });
         }
 
         // Check phase name uniqueness
         let mut seen_names = HashSet::new();
-        for (idx, phase) in pipeline
-            .pre_phases
-            .iter()
-            .enumerate()
-        {
+        for (idx, phase) in pipeline.pre_phases.iter().enumerate() {
             if !seen_names.insert(&phase.name) {
                 errors.push(PreflightError {
                     condition: format!(
@@ -201,10 +194,7 @@ fn collect_unique_workflows(config: &OrchestrateConfig) -> Vec<String> {
 ///
 /// Each workflow entry is a relative file path (relative to project root).
 /// Preflight checks that the file exists and is readable.
-fn probe_workflows(
-    config: &OrchestrateConfig,
-    project_root: &Path,
-) -> Vec<PreflightError> {
+fn probe_workflows(config: &OrchestrateConfig, project_root: &Path) -> Vec<PreflightError> {
     let workflows = collect_unique_workflows(config);
     let mut errors = Vec::new();
 
@@ -212,10 +202,7 @@ fn probe_workflows(
         let absolute_path = project_root.join(workflow_path);
         if !absolute_path.exists() {
             errors.push(PreflightError {
-                condition: format!(
-                    "Workflow file not found: {}",
-                    workflow_path
-                ),
+                condition: format!("Workflow file not found: {}", workflow_path),
                 config_location: "orchestrate.toml → pipelines → workflows".to_string(),
                 suggested_fix: format!(
                     "Create the workflow file at {} or update the path",
@@ -320,10 +307,7 @@ fn validate_items(config: &OrchestrateConfig, backlog: &BacklogFile) -> Vec<Pref
 fn validate_duplicate_ids(items: &[BacklogItem]) -> Vec<PreflightError> {
     let mut id_indices: HashMap<&str, Vec<usize>> = HashMap::new();
     for (index, item) in items.iter().enumerate() {
-        id_indices
-            .entry(item.id.as_str())
-            .or_default()
-            .push(index);
+        id_indices.entry(item.id.as_str()).or_default().push(index);
     }
 
     let mut duplicates: Vec<_> = id_indices
@@ -335,7 +319,10 @@ fn validate_duplicate_ids(items: &[BacklogItem]) -> Vec<PreflightError> {
     duplicates
         .into_iter()
         .map(|(id, indices)| PreflightError {
-            condition: format!("Duplicate item ID \"{}\" found at indices {:?}", id, indices),
+            condition: format!(
+                "Duplicate item ID \"{}\" found at indices {:?}",
+                id, indices
+            ),
             config_location: "BACKLOG.yaml → items".to_string(),
             suggested_fix: "Remove or rename the duplicate item so each ID is unique".to_string(),
         })
@@ -463,7 +450,14 @@ fn detect_cycles(items: &[&BacklogItem]) -> Vec<Vec<String>> {
     for item in items {
         if state.get(item.id.as_str()) == Some(&VisitState::Unvisited) {
             let mut path = Vec::new();
-            dfs(item.id.as_str(), items, &item_ids, &mut state, &mut path, &mut cycles);
+            dfs(
+                item.id.as_str(),
+                items,
+                &item_ids,
+                &mut state,
+                &mut path,
+                &mut cycles,
+            );
         }
     }
 

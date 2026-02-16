@@ -38,10 +38,7 @@ impl ItemStatus {
         // Forward progression transitions
         matches!(
             (self, to),
-            (New, Scoping)
-                | (Scoping, Ready)
-                | (Ready, InProgress)
-                | (InProgress, Done)
+            (New, Scoping) | (Scoping, Ready) | (Ready, InProgress) | (InProgress, Done)
         )
     }
 }

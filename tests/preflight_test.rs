@@ -2,14 +2,9 @@ mod common;
 
 use std::path::Path;
 
-use orchestrate::config::{
-    OrchestrateConfig, PhaseConfig, PipelineConfig,
-    StalenessAction,
-};
+use orchestrate::config::{OrchestrateConfig, PhaseConfig, PipelineConfig, StalenessAction};
 use orchestrate::preflight::{run_preflight, PreflightError};
-use orchestrate::types::{
-    BacklogItem, ItemStatus, PhasePool,
-};
+use orchestrate::types::{BacklogItem, ItemStatus, PhasePool};
 
 // --- Test helpers ---
 
@@ -73,7 +68,9 @@ fn preflight_no_main_phases_fails() {
     let result = run_preflight(&config, &backlog, Path::new("/tmp/test"));
 
     let errors = result.unwrap_err();
-    assert!(errors.iter().any(|e| e.condition.contains("no main phases")));
+    assert!(errors
+        .iter()
+        .any(|e| e.condition.contains("no main phases")));
 }
 
 #[test]
@@ -101,7 +98,9 @@ fn preflight_duplicate_phase_names_fails() {
     let result = run_preflight(&config, &backlog, Path::new("/tmp/test"));
 
     let errors = result.unwrap_err();
-    assert!(errors.iter().any(|e| e.condition.contains("Duplicate phase name")));
+    assert!(errors
+        .iter()
+        .any(|e| e.condition.contains("Duplicate phase name")));
 }
 
 #[test]
@@ -154,7 +153,9 @@ fn preflight_max_concurrent_zero_fails() {
     let result = run_preflight(&config, &backlog, Path::new("/tmp/test"));
 
     let errors = result.unwrap_err();
-    assert!(errors.iter().any(|e| e.condition.contains("max_concurrent")));
+    assert!(errors
+        .iter()
+        .any(|e| e.condition.contains("max_concurrent")));
 }
 
 #[test]
@@ -318,9 +319,7 @@ fn preflight_invalid_phase_name_fails() {
     let result = run_preflight(&config, &backlog, Path::new("/tmp/test"));
 
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| e.condition.contains("unknown phase")));
+    assert!(errors.iter().any(|e| e.condition.contains("unknown phase")));
 }
 
 #[test]
@@ -667,7 +666,11 @@ fn preflight_multiple_independent_cycles() {
         .collect();
     assert_eq!(cycle_errors.len(), 2);
     // Both cycle paths should be present
-    let all_conditions: String = cycle_errors.iter().map(|e| e.condition.as_str()).collect::<Vec<_>>().join(" ");
+    let all_conditions: String = cycle_errors
+        .iter()
+        .map(|e| e.condition.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(all_conditions.contains("WRK-001") && all_conditions.contains("WRK-002"));
     assert!(all_conditions.contains("WRK-003") && all_conditions.contains("WRK-004"));
 }

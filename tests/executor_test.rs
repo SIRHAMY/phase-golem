@@ -6,17 +6,14 @@ use std::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use orchestrate::agent::MockAgentRunner;
-use orchestrate::config::{
-    GuardrailsConfig, PhaseConfig, PipelineConfig,
-    StalenessAction,
-};
+use orchestrate::config::{GuardrailsConfig, PhaseConfig, PipelineConfig, StalenessAction};
 use orchestrate::coordinator::spawn_coordinator;
 use orchestrate::executor::{
     check_staleness, execute_phase, passes_guardrails, resolve_transition, StalenessResult,
 };
 use orchestrate::types::{
-    BacklogItem, DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult,
-    PhasePool, PhaseResult, ResultCode, SizeLevel,
+    BacklogItem, DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult, PhasePool,
+    PhaseResult, ResultCode, SizeLevel,
 };
 
 // --- Test helpers ---
@@ -68,7 +65,9 @@ fn default_guardrails() -> GuardrailsConfig {
 fn make_simple_pipeline() -> PipelineConfig {
     PipelineConfig {
         pre_phases: vec![PhaseConfig {
-            workflows: vec![".claude/skills/changes/workflows/orchestration/research-scope.md".to_string()],
+            workflows: vec![
+                ".claude/skills/changes/workflows/orchestration/research-scope.md".to_string(),
+            ],
             ..PhaseConfig::new("research", false)
         }],
         phases: vec![
@@ -77,11 +76,16 @@ fn make_simple_pipeline() -> PipelineConfig {
                 ..PhaseConfig::new("prd", false)
             },
             PhaseConfig {
-                workflows: vec![".claude/skills/changes/workflows/orchestration/build-spec-phase.md".to_string()],
+                workflows: vec![
+                    ".claude/skills/changes/workflows/orchestration/build-spec-phase.md"
+                        .to_string(),
+                ],
                 ..PhaseConfig::new("build", true)
             },
             PhaseConfig {
-                workflows: vec![".claude/skills/changes/workflows/5-review/change-review.md".to_string()],
+                workflows: vec![
+                    ".claude/skills/changes/workflows/5-review/change-review.md".to_string()
+                ],
                 ..PhaseConfig::new("review", false)
             },
         ],
@@ -101,10 +105,7 @@ fn resolve_transition_last_pre_phase_passes_guardrails_promotes_to_ready() {
 
     assert_eq!(updates.len(), 2);
     assert_eq!(updates[0], ItemUpdate::ClearPhase);
-    assert_eq!(
-        updates[1],
-        ItemUpdate::TransitionStatus(ItemStatus::Ready)
-    );
+    assert_eq!(updates[1], ItemUpdate::TransitionStatus(ItemStatus::Ready));
 }
 
 #[test]
@@ -155,10 +156,7 @@ fn resolve_transition_last_main_phase_transitions_to_done() {
     let updates = resolve_transition(&item, &result, &pipeline, &guardrails);
 
     assert_eq!(updates.len(), 1);
-    assert_eq!(
-        updates[0],
-        ItemUpdate::TransitionStatus(ItemStatus::Done)
-    );
+    assert_eq!(updates[0], ItemUpdate::TransitionStatus(ItemStatus::Done));
 }
 
 #[test]

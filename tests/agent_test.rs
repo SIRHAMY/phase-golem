@@ -6,9 +6,7 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
-use orchestrate::agent::{
-    read_result_file, run_subprocess_agent, AgentRunner, MockAgentRunner,
-};
+use orchestrate::agent::{read_result_file, run_subprocess_agent, AgentRunner, MockAgentRunner};
 use orchestrate::types::{PhaseResult, ResultCode};
 
 /// Create a valid PhaseResult JSON string.
@@ -85,22 +83,14 @@ async fn read_result_file_invalid_json() {
     let result = read_result_file(&result_path).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(
-        err.contains("parse"),
-        "Expected 'parse' in error: {}",
-        err
-    );
+    assert!(err.contains("parse"), "Expected 'parse' in error: {}", err);
 }
 
 #[tokio::test]
 async fn read_result_file_missing_required_fields() {
     let dir = TempDir::new().unwrap();
     let result_path = dir.path().join("partial.json");
-    fs::write(
-        &result_path,
-        r#"{"item_id": "WRK-001", "phase": "prd"}"#,
-    )
-    .unwrap();
+    fs::write(&result_path, r#"{"item_id": "WRK-001", "phase": "prd"}"#).unwrap();
 
     let result = read_result_file(&result_path).await;
     assert!(result.is_err(), "Should fail with missing required fields");
@@ -115,8 +105,7 @@ async fn subprocess_success_writes_valid_result() {
     let script = common::fixtures_dir().join("mock_agent_success.sh");
 
     let mut cmd = tokio::process::Command::new("bash");
-    cmd.arg(&script)
-        .arg(&result_path);
+    cmd.arg(&script).arg(&result_path);
 
     let result = run_subprocess_agent(cmd, &result_path, Duration::from_secs(30)).await;
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -186,17 +175,12 @@ async fn subprocess_bad_json_returns_error() {
     let script = common::fixtures_dir().join("mock_agent_bad_json.sh");
 
     let mut cmd = tokio::process::Command::new("bash");
-    cmd.arg(&script)
-        .arg(&result_path);
+    cmd.arg(&script).arg(&result_path);
 
     let result = run_subprocess_agent(cmd, &result_path, Duration::from_secs(30)).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(
-        err.contains("parse"),
-        "Expected 'parse' in: {}",
-        err
-    );
+    assert!(err.contains("parse"), "Expected 'parse' in: {}", err);
 }
 
 #[tokio::test]
@@ -210,8 +194,7 @@ async fn subprocess_stale_result_file_cleaned_before_spawn() {
 
     let script = common::fixtures_dir().join("mock_agent_success.sh");
     let mut cmd = tokio::process::Command::new("bash");
-    cmd.arg(&script)
-        .arg(&result_path);
+    cmd.arg(&script).arg(&result_path);
 
     let result = run_subprocess_agent(cmd, &result_path, Duration::from_secs(30)).await;
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -235,8 +218,7 @@ async fn subprocess_nonzero_exit_with_valid_json_respects_result() {
     fs::write(&script_path, script_content).unwrap();
 
     let mut cmd = tokio::process::Command::new("bash");
-    cmd.arg(&script_path)
-        .arg(&result_path);
+    cmd.arg(&script_path).arg(&result_path);
 
     let result = run_subprocess_agent(cmd, &result_path, Duration::from_secs(30)).await;
     assert!(
@@ -302,10 +284,7 @@ async fn mock_runner_returns_predefined_results_in_order() {
 
 #[tokio::test]
 async fn mock_runner_exhausted_returns_error() {
-    let mock = MockAgentRunner::new(vec![Ok(make_result(
-        ResultCode::PhaseComplete,
-        "Done",
-    ))]);
+    let mock = MockAgentRunner::new(vec![Ok(make_result(ResultCode::PhaseComplete, "Done"))]);
     let dummy_path = Path::new("/tmp/dummy.json");
     let timeout = Duration::from_secs(30);
 
@@ -350,11 +329,7 @@ async fn process_group_kill_cleans_up_subprocess() {
 
     // Script that spawns a child process (tests process group cleanup)
     let script_path = dir.path().join("parent_child.sh");
-    fs::write(
-        &script_path,
-        "#!/bin/bash\nsleep 3600 &\nsleep 3600\n",
-    )
-    .unwrap();
+    fs::write(&script_path, "#!/bin/bash\nsleep 3600 &\nsleep 3600\n").unwrap();
 
     let mut cmd = tokio::process::Command::new("bash");
     cmd.arg(&script_path);

@@ -1,0 +1,52 @@
+schema_version: 3
+items:
+- id: WRK-001
+  title: Add user authentication with OAuth2
+  status: done
+  phase: review
+  size: medium
+  complexity: medium
+  risk: low
+  impact: high
+  requires_human_review: false
+  created: 2026-01-10T10:00:00+00:00
+  updated: 2026-01-12T15:30:00+00:00
+  pipeline_type: feature
+  phase_pool: main
+
+- id: WRK-002
+  title: Implement rate limiting for API endpoints
+  status: in_progress
+  phase: build
+  size: medium
+  complexity: medium
+  risk: medium
+  impact: high
+  requires_human_review: false
+  created: 2026-01-11T09:00:00+00:00
+  updated: 2026-01-13T12:00:00+00:00
+  pipeline_type: feature
+  phase_pool: main
+
+- id: WRK-003
+  title: Add CSV export to reporting dashboard
+  status: scoping
+  phase: research
+  size: small
+  complexity: low
+  risk: low
+  impact: medium
+  requires_human_review: false
+  created: 2026-01-12T14:00:00+00:00
+  updated: 2026-01-12T16:00:00+00:00
+  pipeline_type: feature
+  phase_pool: pre
+
+- id: WRK-004
+  title: Migrate database connection pool to async
+  status: new
+  requires_human_review: false
+  created: 2026-01-13T08:00:00+00:00
+  updated: 2026-01-13T08:00:00+00:00
+
+next_item_id: 4

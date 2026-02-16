@@ -38,7 +38,10 @@ pub fn check_preconditions(repo_dir: Option<&Path>) -> Result<(), String> {
     // Check for clean working tree
     let status_output = run_git_command(&["status", "--porcelain"], repo_dir)?;
     if !status_output.trim().is_empty() {
-        return Err("Working tree is not clean. Commit or stash changes before running the orchestrator.".to_string());
+        return Err(
+            "Working tree is not clean. Commit or stash changes before running the orchestrator."
+                .to_string(),
+        );
     }
 
     // Check for detached HEAD
@@ -58,7 +61,10 @@ pub fn check_preconditions(repo_dir: Option<&Path>) -> Result<(), String> {
     };
 
     if git_dir_path.join("rebase-merge").exists() || git_dir_path.join("rebase-apply").exists() {
-        return Err("Rebase in progress. Complete or abort the rebase before running the orchestrator.".to_string());
+        return Err(
+            "Rebase in progress. Complete or abort the rebase before running the orchestrator."
+                .to_string(),
+        );
     }
 
     if git_dir_path.join("MERGE_HEAD").exists() {
@@ -191,6 +197,5 @@ fn run_git_command(args: &[&str], repo_dir: Option<&Path>) -> Result<String, Str
         ));
     }
 
-    String::from_utf8(output.stdout)
-        .map_err(|e| format!("git output is not valid UTF-8: {}", e))
+    String::from_utf8(output.stdout).map_err(|e| format!("git output is not valid UTF-8: {}", e))
 }

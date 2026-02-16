@@ -63,7 +63,9 @@ fn build_prompt_contains_correct_skill_command_for_each_phase() {
         (
             "tech-research",
             PhaseConfig {
-                workflows: vec![".claude/skills/changes/workflows/1-tech-research/tech-research.md".to_string()],
+                workflows: vec![
+                    ".claude/skills/changes/workflows/1-tech-research/tech-research.md".to_string(),
+                ],
                 ..PhaseConfig::new("tech-research", false)
             },
             ".claude/skills/changes/workflows/1-tech-research/tech-research.md",
@@ -79,7 +81,9 @@ fn build_prompt_contains_correct_skill_command_for_each_phase() {
         (
             "spec",
             PhaseConfig {
-                workflows: vec![".claude/skills/changes/workflows/3-spec/create-spec.md".to_string()],
+                workflows: vec![
+                    ".claude/skills/changes/workflows/3-spec/create-spec.md".to_string()
+                ],
                 ..PhaseConfig::new("spec", false)
             },
             ".claude/skills/changes/workflows/3-spec/create-spec.md",
@@ -87,7 +91,10 @@ fn build_prompt_contains_correct_skill_command_for_each_phase() {
         (
             "build",
             PhaseConfig {
-                workflows: vec![".claude/skills/changes/workflows/orchestration/build-spec-phase.md".to_string()],
+                workflows: vec![
+                    ".claude/skills/changes/workflows/orchestration/build-spec-phase.md"
+                        .to_string(),
+                ],
                 ..PhaseConfig::new("build", false)
             },
             ".claude/skills/changes/workflows/orchestration/build-spec-phase.md",
@@ -95,7 +102,9 @@ fn build_prompt_contains_correct_skill_command_for_each_phase() {
         (
             "review",
             PhaseConfig {
-                workflows: vec![".claude/skills/changes/workflows/5-review/change-review.md".to_string()],
+                workflows: vec![
+                    ".claude/skills/changes/workflows/5-review/change-review.md".to_string()
+                ],
                 ..PhaseConfig::new("review", false)
             },
             ".claude/skills/changes/workflows/5-review/change-review.md",
@@ -155,7 +164,9 @@ fn build_prompt_includes_previous_summary_when_provided() {
     let result_path = Path::new(".orchestrator/phase_result_WRK-001_research.json");
     let change_folder = Path::new("changes/WRK-001_test-feature");
     let phase_config = PhaseConfig {
-        workflows: vec![".claude/skills/changes/workflows/1-tech-research/tech-research.md".to_string()],
+        workflows: vec![
+            ".claude/skills/changes/workflows/1-tech-research/tech-research.md".to_string(),
+        ],
         ..PhaseConfig::new("tech-research", false)
     };
 
@@ -959,8 +970,7 @@ fn triage_prompt_includes_backlog_section_when_provided() {
     let pipelines = default_pipelines();
     let summary = "- WRK-001: Add auth [inprogress]\n- WRK-005: Refactor DB [new]";
 
-    let prompt_text =
-        prompt::build_triage_prompt(&item, result_path, &pipelines, Some(summary));
+    let prompt_text = prompt::build_triage_prompt(&item, result_path, &pipelines, Some(summary));
 
     assert!(prompt_text.contains("## Current Backlog"));
     assert!(prompt_text.contains("WRK-001: Add auth"));

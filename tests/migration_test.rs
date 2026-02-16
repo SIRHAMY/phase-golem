@@ -48,7 +48,10 @@ fn migrate_v1_full_fixture() {
     // WRK-004: researching + research -> Scoping + phase cleared (scheduler re-assigns)
     let item4 = backlog.items.iter().find(|i| i.id == "WRK-004").unwrap();
     assert_eq!(item4.status, ItemStatus::Scoping);
-    assert_eq!(item4.phase, None, "Researching items should have phase cleared");
+    assert_eq!(
+        item4.phase, None,
+        "Researching items should have phase cleared"
+    );
     assert_eq!(item4.phase_pool, None);
     assert_eq!(item4.pipeline_type.as_deref(), Some("feature"));
 
@@ -79,7 +82,11 @@ fn migrate_v1_persisted_file_is_valid_v2() {
 
     // Parse again — should succeed as v2 without re-migration
     let result = migrate_v1_to_v2(&target, &default_feature_pipeline());
-    assert!(result.is_ok(), "Re-parsing v2 file should succeed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Re-parsing v2 file should succeed: {:?}",
+        result
+    );
     assert_eq!(result.unwrap().schema_version, 2);
 }
 
@@ -90,14 +97,14 @@ fn migrate_v1_empty_backlog() {
     let dir = TempDir::new().unwrap();
     let target = dir.path().join("BACKLOG.yaml");
 
-    fs::write(
-        &target,
-        "schema_version: 1\nitems: []\n",
-    )
-    .unwrap();
+    fs::write(&target, "schema_version: 1\nitems: []\n").unwrap();
 
     let result = migrate_v1_to_v2(&target, &default_feature_pipeline());
-    assert!(result.is_ok(), "Empty backlog migration failed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Empty backlog migration failed: {:?}",
+        result
+    );
 
     let backlog = result.unwrap();
     assert_eq!(backlog.schema_version, 2);
@@ -209,7 +216,11 @@ fn migrate_missing_schema_version_treated_as_v1() {
     .unwrap();
 
     let result = migrate_v1_to_v2(&target, &default_feature_pipeline());
-    assert!(result.is_ok(), "Migration without schema_version failed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Migration without schema_version failed: {:?}",
+        result
+    );
 
     let backlog = result.unwrap();
     assert_eq!(backlog.schema_version, 2);
@@ -268,7 +279,7 @@ fn migrate_missing_file_returns_error() {
 
 #[test]
 fn migrate_v1_invalid_phase_cleared_by_validation() {
-    use orchestrate::config::{PipelineConfig, PhaseConfig};
+    use orchestrate::config::{PhaseConfig, PipelineConfig};
 
     let dir = TempDir::new().unwrap();
     let target = dir.path().join("BACKLOG.yaml");
@@ -305,14 +316,17 @@ items:
     let backlog = result.unwrap();
     let item = &backlog.items[0];
     assert_eq!(item.phase, None, "Invalid phase should be cleared");
-    assert_eq!(item.phase_pool, None, "phase_pool should be cleared when phase is invalid");
+    assert_eq!(
+        item.phase_pool, None,
+        "phase_pool should be cleared when phase is invalid"
+    );
 }
 
 // --- Phase validation: None phase skips validation ---
 
 #[test]
 fn migrate_v1_none_phase_skips_validation() {
-    use orchestrate::config::{PipelineConfig, PhaseConfig};
+    use orchestrate::config::{PhaseConfig, PipelineConfig};
 
     let dir = TempDir::new().unwrap();
     let target = dir.path().join("BACKLOG.yaml");
@@ -404,8 +418,12 @@ Sizing rationale: Medium size/complexity because it changes the BacklogItem type
         result.context,
         "Items have a description field (Option<String>) that accepts any content."
     );
-    assert!(result.problem.contains("inconsistent descriptions: some are good"));
-    assert!(result.solution.contains("Replace description: Option<String>"));
+    assert!(result
+        .problem
+        .contains("inconsistent descriptions: some are good"));
+    assert!(result
+        .solution
+        .contains("Replace description: Option<String>"));
     assert_eq!(result.impact, "Consistent, high-quality descriptions.");
     assert!(result.sizing_rationale.contains("Medium size/complexity"));
 }
@@ -599,16 +617,28 @@ fn migrate_v2_with_structured_descriptions() {
     assert_eq!(backlog.items.len(), 3);
 
     // WRK-001 has convention-formatted description
-    let desc1 = backlog.items[0].description.as_ref().expect("WRK-001 should have description");
+    let desc1 = backlog.items[0]
+        .description
+        .as_ref()
+        .expect("WRK-001 should have description");
     assert_eq!(desc1.context, "Users need to log in.");
     assert_eq!(desc1.problem, "No auth exists.");
     assert_eq!(desc1.solution, "Add JWT-based auth.");
     assert_eq!(desc1.impact, "Enables user-specific features.");
-    assert_eq!(desc1.sizing_rationale, "Medium because it touches multiple layers.");
+    assert_eq!(
+        desc1.sizing_rationale,
+        "Medium because it touches multiple layers."
+    );
 
     // WRK-002 has freeform description (no headers) — lands in context
-    let desc2 = backlog.items[1].description.as_ref().expect("WRK-002 should have description");
-    assert_eq!(desc2.context, "Just a simple typo fix, no structured headers");
+    let desc2 = backlog.items[1]
+        .description
+        .as_ref()
+        .expect("WRK-002 should have description");
+    assert_eq!(
+        desc2.context,
+        "Just a simple typo fix, no structured headers"
+    );
     assert_eq!(desc2.problem, "");
     assert_eq!(desc2.solution, "");
 
@@ -646,7 +676,11 @@ fn migrate_v2_empty_backlog() {
     fs::write(&target, "schema_version: 2\nitems: []\n").unwrap();
 
     let result = migrate_v2_to_v3(&target);
-    assert!(result.is_ok(), "Empty backlog migration failed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Empty backlog migration failed: {:?}",
+        result
+    );
 
     let backlog = result.unwrap();
     assert_eq!(backlog.schema_version, 3);
@@ -698,11 +732,7 @@ fn migrate_v2_preserves_next_item_id() {
     let dir = TempDir::new().unwrap();
     let target = dir.path().join("BACKLOG.yaml");
 
-    fs::write(
-        &target,
-        "schema_version: 2\nitems: []\nnext_item_id: 42\n",
-    )
-    .unwrap();
+    fs::write(&target, "schema_version: 2\nitems: []\nnext_item_id: 42\n").unwrap();
 
     let result = migrate_v2_to_v3(&target);
     assert!(result.is_ok());

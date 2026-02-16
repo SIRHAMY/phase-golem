@@ -60,20 +60,14 @@ impl std::fmt::Display for FilterCriterion {
 
 pub fn parse_filter(raw: &str) -> Result<FilterCriterion, String> {
     let Some((field_str, value_str)) = raw.split_once('=') else {
-        return Err(format!(
-            "Filter must be in format KEY=VALUE, got: {}",
-            raw
-        ));
+        return Err(format!("Filter must be in format KEY=VALUE, got: {}", raw));
     };
 
     let field_str = field_str.trim();
     let value_str = value_str.trim();
 
     if field_str.is_empty() || value_str.is_empty() {
-        return Err(format!(
-            "Filter must be in format KEY=VALUE, got: {}",
-            raw
-        ));
+        return Err(format!("Filter must be in format KEY=VALUE, got: {}", raw));
     }
 
     let (field, value) = match field_str.to_lowercase().as_str() {
@@ -122,10 +116,7 @@ pub fn parse_filter(raw: &str) -> Result<FilterCriterion, String> {
             })?;
             (FilterField::Complexity, FilterValue::Dimension(level))
         }
-        "tag" => (
-            FilterField::Tag,
-            FilterValue::Tag(value_str.to_string()),
-        ),
+        "tag" => (FilterField::Tag, FilterValue::Tag(value_str.to_string())),
         "pipeline_type" => (
             FilterField::PipelineType,
             FilterValue::PipelineType(value_str.to_string()),
@@ -165,9 +156,7 @@ pub fn matches_item(criterion: &FilterCriterion, item: &BacklogItem) -> bool {
             item.impact.as_ref() == Some(target)
         }
         (FilterField::Size, FilterValue::Size(target)) => item.size.as_ref() == Some(target),
-        (FilterField::Risk, FilterValue::Dimension(target)) => {
-            item.risk.as_ref() == Some(target)
-        }
+        (FilterField::Risk, FilterValue::Dimension(target)) => item.risk.as_ref() == Some(target),
         (FilterField::Complexity, FilterValue::Dimension(target)) => {
             item.complexity.as_ref() == Some(target)
         }

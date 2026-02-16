@@ -4,7 +4,9 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::AgentRunner;
-use crate::config::{GuardrailsConfig, OrchestrateConfig, PhaseConfig, PipelineConfig, StalenessAction};
+use crate::config::{
+    GuardrailsConfig, OrchestrateConfig, PhaseConfig, PipelineConfig, StalenessAction,
+};
 use crate::coordinator::CoordinatorHandle;
 use crate::prompt;
 use crate::types::{
@@ -93,9 +95,7 @@ pub fn resolve_transition(
     guardrails: &GuardrailsConfig,
 ) -> Vec<ItemUpdate> {
     match result.result {
-        ResultCode::PhaseComplete => {
-            resolve_phase_complete(item, result, pipeline, guardrails)
-        }
+        ResultCode::PhaseComplete => resolve_phase_complete(item, result, pipeline, guardrails),
         ResultCode::Failed => {
             // Failed result: the caller handles retry counting.
             // If we get here, retries are exhausted.
@@ -266,6 +266,7 @@ fn dimension_level_value(level: &DimensionLevel) -> u8 {
 ///
 /// The executor does NOT apply transitions itself — it returns a
 /// `PhaseExecutionResult` that the scheduler uses to drive coordinator updates.
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_phase(
     item: &BacklogItem,
     phase_config: &PhaseConfig,
@@ -299,10 +300,7 @@ pub async fn execute_phase(
         Err(e) => return PhaseExecutionResult::Failed(format!("Failed to get HEAD SHA: {}", e)),
     };
 
-    if let Err(e) = coordinator
-        .record_phase_start(&item.id, &head_sha)
-        .await
-    {
+    if let Err(e) = coordinator.record_phase_start(&item.id, &head_sha).await {
         return PhaseExecutionResult::Failed(format!("Failed to record phase start: {}", e));
     }
 
@@ -350,41 +348,39 @@ pub async fn execute_phase(
         };
 
         match workflow_result {
-            Ok(phase_result) => {
-                match phase_result.result {
-                    ResultCode::SubphaseComplete => {
-                        return PhaseExecutionResult::SubphaseComplete(phase_result);
-                    }
-                    ResultCode::PhaseComplete => {
-                        return PhaseExecutionResult::Success(phase_result);
-                    }
-                    ResultCode::Blocked => {
-                        let reason = phase_result
-                            .context
-                            .as_deref()
-                            .unwrap_or(&phase_result.summary)
-                            .to_string();
-                        return PhaseExecutionResult::Blocked(reason);
-                    }
-                    ResultCode::Failed => {
-                        if attempt >= max_attempts {
-                            return PhaseExecutionResult::Failed(format!(
-                                "Phase {} failed after {} attempts. Last failure: {}",
-                                phase_config.name, attempt, phase_result.summary
-                            ));
-                        }
-                        log_info!(
-                            "[{}][{}] Failed (attempt {}/{}): {}",
-                            item.id,
-                            phase_config.name.to_uppercase(),
-                            attempt,
-                            max_attempts,
-                            phase_result.summary
-                        );
-                        failure_context = Some(phase_result.summary);
-                    }
+            Ok(phase_result) => match phase_result.result {
+                ResultCode::SubphaseComplete => {
+                    return PhaseExecutionResult::SubphaseComplete(phase_result);
                 }
-            }
+                ResultCode::PhaseComplete => {
+                    return PhaseExecutionResult::Success(phase_result);
+                }
+                ResultCode::Blocked => {
+                    let reason = phase_result
+                        .context
+                        .as_deref()
+                        .unwrap_or(&phase_result.summary)
+                        .to_string();
+                    return PhaseExecutionResult::Blocked(reason);
+                }
+                ResultCode::Failed => {
+                    if attempt >= max_attempts {
+                        return PhaseExecutionResult::Failed(format!(
+                            "Phase {} failed after {} attempts. Last failure: {}",
+                            phase_config.name, attempt, phase_result.summary
+                        ));
+                    }
+                    log_info!(
+                        "[{}][{}] Failed (attempt {}/{}): {}",
+                        item.id,
+                        phase_config.name.to_uppercase(),
+                        attempt,
+                        max_attempts,
+                        phase_result.summary
+                    );
+                    failure_context = Some(phase_result.summary);
+                }
+            },
             Err(e) => {
                 if attempt >= max_attempts {
                     return PhaseExecutionResult::Failed(format!(
@@ -430,6 +426,7 @@ async fn run_workflows_sequentially(
 /// Build the prompt for executor-driven phase execution.
 ///
 /// Uses the existing prompt infrastructure with the context preamble.
+#[allow(clippy::too_many_arguments)]
 fn build_executor_prompt(
     phase: &str,
     phase_config: &PhaseConfig,
@@ -492,11 +489,7 @@ async fn resolve_or_find_change_folder(
             // Directory doesn't exist yet — fall through to creation
         }
         Err(e) => {
-            return Err(format!(
-                "Failed to read {}: {}",
-                changes_dir.display(),
-                e
-            ));
+            return Err(format!("Failed to read {}: {}", changes_dir.display(), e));
         }
     }
 
@@ -515,13 +508,7 @@ pub fn slugify(title: &str) -> String {
     title
         .to_lowercase()
         .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c
-            } else {
-                '-'
-            }
-        })
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())

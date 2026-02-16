@@ -6,7 +6,9 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use tokio_util::sync::CancellationToken;
 
-use orchestrate::agent::{install_signal_handlers, is_shutdown_requested, kill_all_children, AgentRunner, CliAgentRunner};
+use orchestrate::agent::{
+    install_signal_handlers, is_shutdown_requested, kill_all_children, AgentRunner, CliAgentRunner,
+};
 use orchestrate::backlog;
 use orchestrate::config;
 use orchestrate::coordinator;
@@ -127,8 +129,13 @@ async fn main() {
     }
 }
 
-fn backlog_path(root: &Path) -> PathBuf {
-    root.join("BACKLOG.yaml")
+fn resolve_backlog_path(root: &Path, config: &config::OrchestrateConfig) -> PathBuf {
+    root.join(&config.project.backlog_path)
+}
+
+fn resolve_inbox_path(root: &Path, config: &config::OrchestrateConfig) -> PathBuf {
+    let backlog = resolve_backlog_path(root, config);
+    backlog.parent().unwrap_or(root).join("BACKLOG_INBOX.yaml")
 }
 
 fn handle_init(root: &Path, prefix: &str) -> Result<(), String> {
@@ -155,8 +162,8 @@ fn handle_init(root: &Path, prefix: &str) -> Result<(), String> {
             .map_err(|e| format!("Failed to create {}: {}", dir_path.display(), e))?;
     }
 
-    // Create BACKLOG.yaml if it doesn't exist
-    let backlog = backlog_path(root);
+    // Create BACKLOG.yaml if it doesn't exist (uses default path; config doesn't exist yet)
+    let backlog = root.join("BACKLOG.yaml");
     if !backlog.exists() {
         let empty_backlog = orchestrate::types::BacklogFile {
             schema_version: 3,
@@ -172,6 +179,7 @@ fn handle_init(root: &Path, prefix: &str) -> Result<(), String> {
         let config_contents = format!(
             r#"[project]
 prefix = "{prefix}"
+# backlog_path = "BACKLOG.yaml"
 
 [guardrails]
 max_size = "medium"
@@ -238,7 +246,12 @@ phases = [
     Ok(())
 }
 
-async fn handle_run(root: &Path, target: Vec<String>, only: Option<String>, cap: u32) -> Result<(), String> {
+async fn handle_run(
+    root: &Path,
+    target: Vec<String>,
+    only: Option<String>,
+    cap: u32,
+) -> Result<(), String> {
     // Install signal handlers for graceful shutdown
     install_signal_handlers()?;
 
@@ -256,7 +269,7 @@ async fn handle_run(root: &Path, target: Vec<String>, only: Option<String>, cap:
 
     // Load
     let config = config::load_config(root)?;
-    let backlog_file_path = backlog_path(root);
+    let backlog_file_path = resolve_backlog_path(root, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
     // Mutual exclusivity safety net (clap conflicts_with should handle this)
@@ -274,11 +287,17 @@ async fn handle_run(root: &Path, target: Vec<String>, only: Option<String>, cap:
         let pattern = format!("{}-", prefix);
         for t in &target {
             if !t.starts_with(&pattern) {
-                errors.push(format!("Invalid target format '{}': expected {}-<number>", t, prefix));
+                errors.push(format!(
+                    "Invalid target format '{}': expected {}-<number>",
+                    t, prefix
+                ));
             } else {
                 let suffix = &t[pattern.len()..];
                 if suffix.is_empty() || !suffix.chars().all(|c| c.is_ascii_digit()) {
-                    errors.push(format!("Invalid target format '{}': expected {}-<number>", t, prefix));
+                    errors.push(format!(
+                        "Invalid target format '{}': expected {}-<number>",
+                        t, prefix
+                    ));
                 }
             }
         }
@@ -318,40 +337,57 @@ async fn handle_run(root: &Path, target: Vec<String>, only: Option<String>, cap:
     // Config summary
     log_info!("");
     log_info!("[config] Prefix: {}", config.project.prefix);
-    log_info!("[config] Guardrails: max_size={}, max_complexity={}, max_risk={}",
+    log_info!(
+        "[config] Guardrails: max_size={}, max_complexity={}, max_risk={}",
         format!("{:?}", config.guardrails.max_size).to_lowercase(),
         format!("{:?}", config.guardrails.max_complexity).to_lowercase(),
         format!("{:?}", config.guardrails.max_risk).to_lowercase(),
     );
-    log_info!("[config] Execution: max_wip={}, max_concurrent={}, timeout={}min, retries={}",
-        config.execution.max_wip, config.execution.max_concurrent,
-        config.execution.phase_timeout_minutes, config.execution.max_retries,
+    log_info!(
+        "[config] Execution: max_wip={}, max_concurrent={}, timeout={}min, retries={}",
+        config.execution.max_wip,
+        config.execution.max_concurrent,
+        config.execution.phase_timeout_minutes,
+        config.execution.max_retries,
     );
     if target.len() == 1 {
         log_info!("[config] Target: {}", target[0]);
     } else if target.len() > 1 {
-        let target_display: Vec<String> = target.iter().enumerate().map(|(i, t)| {
-            if i == 0 {
-                format!("{} (active, 1/{})", t, target.len())
-            } else {
-                t.clone()
-            }
-        }).collect();
+        let target_display: Vec<String> = target
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                if i == 0 {
+                    format!("{} (active, 1/{})", t, target.len())
+                } else {
+                    t.clone()
+                }
+            })
+            .collect();
         log_info!("[config] Targets: {}", target_display.join(", "));
     }
     if let Some(ref criterion) = parsed_filter {
         let matching = filter::apply_filter(criterion, &backlog);
-        log_info!("[config] Filter: {} — {} items match (from {} total)",
-            criterion, matching.items.len(), backlog.items.len());
+        log_info!(
+            "[config] Filter: {} — {} items match (from {} total)",
+            criterion,
+            matching.items.len(),
+            backlog.items.len()
+        );
     }
     log_info!("[config] Phase cap: {}", cap);
 
     // Pipeline summary
     log_info!("");
     for (name, pipeline) in &config.pipelines {
-        let pre_names: Vec<&str> = pipeline.pre_phases.iter().map(|p| p.name.as_str()).collect();
+        let pre_names: Vec<&str> = pipeline
+            .pre_phases
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
         let main_names: Vec<&str> = pipeline.phases.iter().map(|p| p.name.as_str()).collect();
-        log_info!("[pipeline:{}] pre: [{}] → main: [{}]",
+        log_info!(
+            "[pipeline:{}] pre: [{}] → main: [{}]",
             name,
             pre_names.join(" → "),
             main_names.join(" → "),
@@ -360,29 +396,87 @@ async fn handle_run(root: &Path, target: Vec<String>, only: Option<String>, cap:
 
     // Backlog summary
     use orchestrate::types::ItemStatus;
-    let new_count = backlog.items.iter().filter(|i| i.status == ItemStatus::New).count();
-    let scoping_count = backlog.items.iter().filter(|i| i.status == ItemStatus::Scoping).count();
-    let ready_count = backlog.items.iter().filter(|i| i.status == ItemStatus::Ready).count();
-    let in_progress_count = backlog.items.iter().filter(|i| i.status == ItemStatus::InProgress).count();
-    let blocked_count = backlog.items.iter().filter(|i| i.status == ItemStatus::Blocked).count();
-    let done_count = backlog.items.iter().filter(|i| i.status == ItemStatus::Done).count();
+    let new_count = backlog
+        .items
+        .iter()
+        .filter(|i| i.status == ItemStatus::New)
+        .count();
+    let scoping_count = backlog
+        .items
+        .iter()
+        .filter(|i| i.status == ItemStatus::Scoping)
+        .count();
+    let ready_count = backlog
+        .items
+        .iter()
+        .filter(|i| i.status == ItemStatus::Ready)
+        .count();
+    let in_progress_count = backlog
+        .items
+        .iter()
+        .filter(|i| i.status == ItemStatus::InProgress)
+        .count();
+    let blocked_count = backlog
+        .items
+        .iter()
+        .filter(|i| i.status == ItemStatus::Blocked)
+        .count();
+    let done_count = backlog
+        .items
+        .iter()
+        .filter(|i| i.status == ItemStatus::Done)
+        .count();
     log_info!("");
-    log_info!("[backlog] {} items: {} new, {} scoping, {} ready, {} in-progress, {} blocked, {} done",
-        backlog.items.len(), new_count, scoping_count, ready_count, in_progress_count, blocked_count, done_count,
+    log_info!(
+        "[backlog] {} items: {} new, {} scoping, {} ready, {} in-progress, {} blocked, {} done",
+        backlog.items.len(),
+        new_count,
+        scoping_count,
+        ready_count,
+        in_progress_count,
+        blocked_count,
+        done_count,
     );
 
     // Queue preview — show first few actionable items
-    let actionable: Vec<&orchestrate::types::BacklogItem> = backlog.items.iter()
-        .filter(|i| matches!(i.status, ItemStatus::New | ItemStatus::Scoping | ItemStatus::Ready | ItemStatus::InProgress))
+    let actionable: Vec<&orchestrate::types::BacklogItem> = backlog
+        .items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i.status,
+                ItemStatus::New | ItemStatus::Scoping | ItemStatus::Ready | ItemStatus::InProgress
+            )
+        })
         .take(MAX_BACKLOG_PREVIEW_ITEMS)
         .collect();
     if !actionable.is_empty() {
         log_info!("[backlog] Next up:");
         for item in &actionable {
             let phase_info = item.phase.as_deref().unwrap_or("-");
-            log_info!("  {} ({:?}) phase={} — {}", item.id, item.status, phase_info, item.title);
+            log_info!(
+                "  {} ({:?}) phase={} — {}",
+                item.id,
+                item.status,
+                phase_info,
+                item.title
+            );
         }
-        if backlog.items.iter().filter(|i| matches!(i.status, ItemStatus::New | ItemStatus::Scoping | ItemStatus::Ready | ItemStatus::InProgress)).count() > MAX_BACKLOG_PREVIEW_ITEMS {
+        if backlog
+            .items
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i.status,
+                    ItemStatus::New
+                        | ItemStatus::Scoping
+                        | ItemStatus::Ready
+                        | ItemStatus::InProgress
+                )
+            })
+            .count()
+            > MAX_BACKLOG_PREVIEW_ITEMS
+        {
             log_info!("  ...");
         }
     }
@@ -390,9 +484,16 @@ async fn handle_run(root: &Path, target: Vec<String>, only: Option<String>, cap:
     // Prune stale dependencies (safety net for archived items)
     let pruned_count = backlog::prune_stale_dependencies(&mut backlog);
     if pruned_count > 0 {
-        log_warn!("[pre] Pruned {} stale dependency reference(s) from backlog", pruned_count);
-        backlog::save(&backlog_file_path, &backlog)
-            .map_err(|e| format!("Failed to save backlog after pruning stale dependencies: {}", e))?;
+        log_warn!(
+            "[pre] Pruned {} stale dependency reference(s) from backlog",
+            pruned_count
+        );
+        backlog::save(&backlog_file_path, &backlog).map_err(|e| {
+            format!(
+                "Failed to save backlog after pruning stale dependencies: {}",
+                e
+            )
+        })?;
     }
 
     // Preflight
@@ -403,15 +504,17 @@ async fn handle_run(root: &Path, target: Vec<String>, only: Option<String>, cap:
         for error in &errors {
             log_error!("  {}", error);
         }
-        return Err(format!("{} preflight error(s) — fix all issues before running", errors.len()));
+        return Err(format!(
+            "{} preflight error(s) — fix all issues before running",
+            errors.len()
+        ));
     }
     log_info!("[pre] Preflight passed.");
 
     // Validate inbox file early (fail fast instead of warning mid-run)
-    let inbox_path = root.join("BACKLOG_INBOX.yaml");
+    let inbox_path = resolve_inbox_path(root, &config);
     if inbox_path.exists() {
-        backlog::load_inbox(&inbox_path)
-            .map_err(|e| format!("Inbox validation failed: {}", e))?;
+        backlog::load_inbox(&inbox_path).map_err(|e| format!("Inbox validation failed: {}", e))?;
     }
 
     let runner = Arc::new(CliAgentRunner);
@@ -455,7 +558,10 @@ async fn handle_run(root: &Path, target: Vec<String>, only: Option<String>, cap:
 
     // Await coordinator shutdown (ensures save_backlog() completes)
     if let Err(err) = coord_task.await {
-        log_warn!("Coordinator task panicked, skipping backlog commit: {:?}", err);
+        log_warn!(
+            "Coordinator task panicked, skipping backlog commit: {:?}",
+            err
+        );
     } else {
         // Commit BACKLOG.yaml if it has uncommitted changes
         let root_for_commit = root.to_path_buf();
@@ -470,9 +576,13 @@ async fn handle_run(root: &Path, target: Vec<String>, only: Option<String>, cap:
                 }
             };
 
+            let backlog_rel = backlog_path_for_commit
+                .strip_prefix(&root_for_commit)
+                .unwrap_or(&backlog_path_for_commit)
+                .to_string_lossy();
             let is_backlog_dirty = status
                 .iter()
-                .any(|entry| entry.path.trim_matches('"') == "BACKLOG.yaml");
+                .any(|entry| entry.path.trim_matches('"') == backlog_rel.as_ref());
 
             if !is_backlog_dirty {
                 return Ok(None);
@@ -530,7 +640,10 @@ async fn handle_run(root: &Path, target: Vec<String>, only: Option<String>, cap:
     match &summary.halt_reason {
         scheduler::HaltReason::FilterExhausted => {
             if let Some(ref filter_str) = filter_display {
-                log_info!("Filter: all items matching {} are done or blocked", filter_str);
+                log_info!(
+                    "Filter: all items matching {} are done or blocked",
+                    filter_str
+                );
             }
         }
         scheduler::HaltReason::NoMatchingItems => {
@@ -561,16 +674,15 @@ async fn handle_triage(root: &Path) -> Result<(), String> {
 
     // Load config and backlog
     let config = config::load_config(root)?;
-    let backlog_file_path = backlog_path(root);
+    let backlog_file_path = resolve_backlog_path(root, &config);
     let backlog = backlog::load(&backlog_file_path, root)?;
 
     let runner = CliAgentRunner;
 
     // Validate inbox file early (fail fast instead of warning mid-run)
-    let inbox_path = root.join("BACKLOG_INBOX.yaml");
+    let inbox_path = resolve_inbox_path(root, &config);
     if inbox_path.exists() {
-        backlog::load_inbox(&inbox_path)
-            .map_err(|e| format!("Inbox validation failed: {}", e))?;
+        backlog::load_inbox(&inbox_path).map_err(|e| format!("Inbox validation failed: {}", e))?;
     }
 
     // Spawn coordinator
@@ -591,7 +703,8 @@ async fn handle_triage(root: &Path) -> Result<(), String> {
         .map(|item| item.id.clone())
         .collect();
 
-    let timeout = std::time::Duration::from_secs(config.execution.phase_timeout_minutes as u64 * 60);
+    let timeout =
+        std::time::Duration::from_secs(config.execution.phase_timeout_minutes as u64 * 60);
     let mut triaged_count = 0u32;
 
     for item_id in &new_item_ids {
@@ -609,10 +722,7 @@ async fn handle_triage(root: &Path) -> Result<(), String> {
             .find(|i| i.id == *item_id)
             .ok_or_else(|| format!("Item {} not found", item_id))?;
 
-        let backlog_summary = prompt::build_backlog_summary(
-            &current_snapshot.items,
-            item_id,
-        );
+        let backlog_summary = prompt::build_backlog_summary(&current_snapshot.items, item_id);
         let triage_prompt = prompt::build_triage_prompt(
             item,
             &result_path,
@@ -620,7 +730,10 @@ async fn handle_triage(root: &Path) -> Result<(), String> {
             backlog_summary.as_deref(),
         );
 
-        match runner.run_agent(&triage_prompt, &result_path, timeout).await {
+        match runner
+            .run_agent(&triage_prompt, &result_path, timeout)
+            .await
+        {
             Ok(phase_result) => {
                 // Stage and commit triage output (immediate commit via destructive flag)
                 coordinator_handle
@@ -638,7 +751,9 @@ async fn handle_triage(root: &Path) -> Result<(), String> {
 
                 log_info!(
                     "[{}][TRIAGE] Result: {:?} — {}",
-                    item_id, phase_result.result, phase_result.summary
+                    item_id,
+                    phase_result.result,
+                    phase_result.summary
                 );
                 triaged_count += 1;
             }
@@ -665,7 +780,7 @@ fn handle_add(
     pipeline_type: Option<String>,
 ) -> Result<(), String> {
     let config = config::load_config(root)?;
-    let backlog_file_path = backlog_path(root);
+    let backlog_file_path = resolve_backlog_path(root, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
     let parsed_size = size.map(|s| parse_size_level(&s)).transpose()?;
@@ -697,7 +812,8 @@ fn handle_add(
 }
 
 fn handle_status(root: &Path) -> Result<(), String> {
-    let backlog_file_path = backlog_path(root);
+    let config = config::load_config(root)?;
+    let backlog_file_path = resolve_backlog_path(root, &config);
     let backlog = backlog::load(&backlog_file_path, root)?;
 
     if backlog.items.is_empty() {
@@ -750,7 +866,7 @@ fn handle_status(root: &Path) -> Result<(), String> {
 
 fn handle_advance(root: &Path, item_id: &str, to: Option<String>) -> Result<(), String> {
     let config = config::load_config(root)?;
-    let backlog_file_path = backlog_path(root);
+    let backlog_file_path = resolve_backlog_path(root, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
     let item = backlog
@@ -791,9 +907,10 @@ fn handle_advance(root: &Path, item_id: &str, to: Option<String>) -> Result<(), 
             println!("Advanced {} to {}", item_id, target_phase);
         }
         None => {
-            let current_phase = item.phase.as_deref().ok_or_else(|| {
-                format!("Cannot advance {}: no current phase set", item_id)
-            })?;
+            let current_phase = item
+                .phase
+                .as_deref()
+                .ok_or_else(|| format!("Cannot advance {}: no current phase set", item_id))?;
             let main_phases: Vec<&str> = pipeline.phases.iter().map(|p| p.name.as_str()).collect();
             let current_idx = main_phases
                 .iter()
@@ -824,7 +941,8 @@ fn handle_advance(root: &Path, item_id: &str, to: Option<String>) -> Result<(), 
 }
 
 fn handle_unblock(root: &Path, item_id: &str, notes: Option<String>) -> Result<(), String> {
-    let backlog_file_path = backlog_path(root);
+    let config = config::load_config(root)?;
+    let backlog_file_path = resolve_backlog_path(root, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
     let item = backlog

@@ -2,6 +2,11 @@
 name = "orchestrate"
 version = "0.1.0"
 edition = "2021"
+description = "A CLI that autonomously manages backlogs and executes multi-phase workflows via Claude AI"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sirhamy/phase-golem"
+keywords = ["cli", "orchestration", "workflow", "ai", "backlog"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "orchestrate"

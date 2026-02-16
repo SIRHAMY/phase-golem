@@ -59,8 +59,14 @@ fn write_entry_contains_expected_fields() {
     let worklog_dir = dir.path().join("_worklog");
 
     let item = make_test_item();
-    orchestrate::worklog::write_entry(&worklog_dir, &item, "Build", "Complete", "Compiled successfully")
-        .expect("Failed to write entry");
+    orchestrate::worklog::write_entry(
+        &worklog_dir,
+        &item,
+        "Build",
+        "Complete",
+        "Compiled successfully",
+    )
+    .expect("Failed to write entry");
 
     // Read the file
     let entries: Vec<_> = fs::read_dir(&worklog_dir)
@@ -69,26 +75,17 @@ fn write_entry_contains_expected_fields() {
     let file_path = entries[0].as_ref().unwrap().path();
     let contents = fs::read_to_string(file_path).expect("Failed to read worklog file");
 
-    assert!(
-        contents.contains("WRK-001"),
-        "Expected item ID in worklog"
-    );
+    assert!(contents.contains("WRK-001"), "Expected item ID in worklog");
     assert!(
         contents.contains("Test item"),
         "Expected item title in worklog"
     );
-    assert!(
-        contents.contains("Build"),
-        "Expected phase in worklog"
-    );
+    assert!(contents.contains("Build"), "Expected phase in worklog");
     assert!(
         contents.contains("Compiled successfully"),
         "Expected summary in worklog"
     );
-    assert!(
-        contents.contains("---"),
-        "Expected separator in worklog"
-    );
+    assert!(contents.contains("---"), "Expected separator in worklog");
 }
 
 #[test]
@@ -135,8 +132,14 @@ fn write_entry_creates_parent_dirs() {
     let worklog_dir = dir.path().join("deep").join("nested").join("_worklog");
 
     let item = make_test_item();
-    orchestrate::worklog::write_entry(&worklog_dir, &item, "Design", "Complete", "Deep nesting test")
-        .expect("Failed to write entry in nested dir");
+    orchestrate::worklog::write_entry(
+        &worklog_dir,
+        &item,
+        "Design",
+        "Complete",
+        "Deep nesting test",
+    )
+    .expect("Failed to write entry in nested dir");
 
     assert!(
         worklog_dir.exists(),

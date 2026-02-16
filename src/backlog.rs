@@ -21,8 +21,8 @@ const EXPECTED_SCHEMA_VERSION: u32 = 3;
 /// Validates schema_version matches the expected version after migration.
 /// Unknown fields are silently ignored (forward compatibility).
 pub fn load(path: &Path, project_root: &Path) -> Result<BacklogFile, String> {
-    let contents =
-        fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let contents = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
 
     // Check schema version to decide whether migration is needed
     let parsed_yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&contents)
@@ -37,12 +37,9 @@ pub fn load(path: &Path, project_root: &Path) -> Result<BacklogFile, String> {
         // Chain migrations sequentially: v1 → v2 → v3
         if schema_version == 1 {
             let config = load_config(project_root)?;
-            let pipeline = config
-                .pipelines
-                .get("feature")
-                .ok_or_else(|| {
-                    "Migration requires 'feature' pipeline in config, but none found".to_string()
-                })?;
+            let pipeline = config.pipelines.get("feature").ok_or_else(|| {
+                "Migration requires 'feature' pipeline in config, but none found".to_string()
+            })?;
             crate::migration::migrate_v1_to_v2(path, pipeline)?;
             // File is now v2 on disk; fall through to v2→v3
         }
@@ -87,8 +84,7 @@ pub fn save(path: &Path, backlog: &BacklogFile) -> Result<(), String> {
     let temp_file = NamedTempFile::new_in(parent)
         .map_err(|e| format!("Failed to create temp file in {}: {}", parent.display(), e))?;
 
-    fs::write(temp_file.path(), &yaml)
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+    fs::write(temp_file.path(), &yaml).map_err(|e| format!("Failed to write temp file: {}", e))?;
 
     // sync to disk before rename
     let file = fs::File::open(temp_file.path())
@@ -162,10 +158,7 @@ pub fn add_item(
 ///
 /// For transitions to `Blocked`: saves the current status as `blocked_from_status`.
 /// For transitions from `Blocked`: clears blocked fields.
-pub fn transition_status(
-    item: &mut BacklogItem,
-    new_status: ItemStatus,
-) -> Result<(), String> {
+pub fn transition_status(item: &mut BacklogItem, new_status: ItemStatus) -> Result<(), String> {
     if !item.status.is_valid_transition(&new_status) {
         return Err(format!(
             "Invalid status transition for {}: {:?} -> {:?}",
@@ -288,13 +281,7 @@ pub fn load_inbox(inbox_path: &Path) -> Result<Option<Vec<InboxItem>>, String> {
     let contents = match fs::read_to_string(inbox_path) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => {
-            return Err(format!(
-                "Failed to read {}: {}",
-                inbox_path.display(),
-                e
-            ))
-        }
+        Err(e) => return Err(format!("Failed to read {}: {}", inbox_path.display(), e)),
     };
 
     if contents.trim().is_empty() {
@@ -360,11 +347,7 @@ pub fn clear_inbox(inbox_path: &Path) -> Result<(), String> {
     match fs::remove_file(inbox_path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!(
-            "Failed to delete {}: {}",
-            inbox_path.display(),
-            e
-        )),
+        Err(e) => Err(format!("Failed to delete {}: {}", inbox_path.display(), e)),
     }
 }
 
@@ -429,7 +412,10 @@ pub fn merge_item(
     let source = backlog.items.remove(source_idx);
 
     // Build merge context from source
-    let mut merge_parts = vec![format!("[Merged from {}] Title: {}", source_id, source.title)];
+    let mut merge_parts = vec![format!(
+        "[Merged from {}] Title: {}",
+        source_id, source.title
+    )];
     if let Some(ref desc) = source.description {
         if !desc.context.is_empty() {
             merge_parts.push(format!("Context: {}", desc.context));
@@ -489,8 +475,13 @@ fn write_archive_worklog_entry(worklog_path: &Path, item: &BacklogItem) -> Resul
         )
     })?;
 
-    fs::create_dir_all(parent)
-        .map_err(|e| format!("Failed to create worklog directory {}: {}", parent.display(), e))?;
+    fs::create_dir_all(parent).map_err(|e| {
+        format!(
+            "Failed to create worklog directory {}: {}",
+            parent.display(),
+            e
+        )
+    })?;
 
     let now = chrono::Utc::now().to_rfc3339();
     let phase_str = item.phase.as_deref().unwrap_or("N/A");
@@ -503,10 +494,21 @@ fn write_archive_worklog_entry(worklog_path: &Path, item: &BacklogItem) -> Resul
         .append(true)
         .create(true)
         .open(worklog_path)
-        .map_err(|e| format!("Failed to open worklog at {}: {}", worklog_path.display(), e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to open worklog at {}: {}",
+                worklog_path.display(),
+                e
+            )
+        })?;
 
-    file.write_all(entry.as_bytes())
-        .map_err(|e| format!("Failed to write worklog at {}: {}", worklog_path.display(), e))?;
+    file.write_all(entry.as_bytes()).map_err(|e| {
+        format!(
+            "Failed to write worklog at {}: {}",
+            worklog_path.display(),
+            e
+        )
+    })?;
 
     Ok(())
 }

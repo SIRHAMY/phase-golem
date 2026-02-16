@@ -87,17 +87,13 @@ pub fn kill_all_children() {
     }
 
     // Wait grace period
-    let deadline =
-        std::time::Instant::now() + Duration::from_secs(SIGTERM_GRACE_PERIOD_SECONDS);
+    let deadline = std::time::Instant::now() + Duration::from_secs(SIGTERM_GRACE_PERIOD_SECONDS);
     let poll_interval = Duration::from_millis(KILL_POLL_INTERVAL_MS);
 
     while std::time::Instant::now() < deadline {
-        let all_gone = pgids.iter().all(|&pgid| {
-            matches!(
-                killpg(pgid, None),
-                Err(nix::errno::Errno::ESRCH)
-            )
-        });
+        let all_gone = pgids
+            .iter()
+            .all(|&pgid| matches!(killpg(pgid, None), Err(nix::errno::Errno::ESRCH)));
         if all_gone {
             break;
         }
@@ -134,12 +130,7 @@ impl CliAgentRunner {
         let output = std::process::Command::new("claude")
             .arg("--version")
             .output()
-            .map_err(|e| {
-                format!(
-                    "Claude CLI not found on PATH. Install it first. ({})",
-                    e
-                )
-            })?;
+            .map_err(|e| format!("Claude CLI not found on PATH. Install it first. ({})", e))?;
 
         if !output.status.success() {
             return Err("Claude CLI found but `claude --version` failed".to_string());
@@ -202,11 +193,8 @@ pub async fn run_subprocess_agent(
     // functions are permitted. setpgid is async-signal-safe per POSIX.
     unsafe {
         cmd.pre_exec(|| {
-            nix::unistd::setpgid(
-                nix::unistd::Pid::from_raw(0),
-                nix::unistd::Pid::from_raw(0),
-            )
-            .map_err(std::io::Error::other)?;
+            nix::unistd::setpgid(nix::unistd::Pid::from_raw(0), nix::unistd::Pid::from_raw(0))
+                .map_err(std::io::Error::other)?;
             Ok(())
         });
     }
@@ -232,7 +220,10 @@ pub async fn run_subprocess_agent(
     match wait_result {
         Err(_) => {
             // Timeout — kill the process group
-            log_debug!("[agent] TIMEOUT after {}s — killing process group", timeout.as_secs());
+            log_debug!(
+                "[agent] TIMEOUT after {}s — killing process group",
+                timeout.as_secs()
+            );
             kill_process_group(child_pid).await;
             let _ = child.wait().await;
             unregister_child(pgid);
@@ -242,9 +233,12 @@ pub async fn run_subprocess_agent(
             ))
         }
         Ok(wait_result) => {
-            let exit_status = wait_result
-                .map_err(|e| format!("Error waiting for subprocess: {}", e))?;
-            log_debug!("[agent] Subprocess exited (status={:?})", exit_status.code());
+            let exit_status =
+                wait_result.map_err(|e| format!("Error waiting for subprocess: {}", e))?;
+            log_debug!(
+                "[agent] Subprocess exited (status={:?})",
+                exit_status.code()
+            );
 
             unregister_child(pgid);
 

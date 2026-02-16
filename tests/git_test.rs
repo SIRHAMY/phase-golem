@@ -184,8 +184,7 @@ fn stage_empty_paths_is_ok() {
 #[test]
 fn get_status_clean() {
     let repo = setup_temp_repo();
-    let entries =
-        orchestrate::git::get_status(Some(repo.path())).expect("Failed to get status");
+    let entries = orchestrate::git::get_status(Some(repo.path())).expect("Failed to get status");
     assert!(entries.is_empty(), "Expected empty status for clean repo");
 }
 
@@ -199,8 +198,7 @@ fn get_status_with_changes() {
     // Modify an existing file
     fs::write(repo.path().join("README.md"), "# Modified\n").expect("Failed to modify file");
 
-    let entries =
-        orchestrate::git::get_status(Some(repo.path())).expect("Failed to get status");
+    let entries = orchestrate::git::get_status(Some(repo.path())).expect("Failed to get status");
     assert!(
         entries.len() >= 2,
         "Expected at least 2 status entries, got {}",
@@ -234,20 +232,21 @@ fn get_status_parses_status_codes() {
     // Create another untracked file
     fs::write(repo.path().join("untracked.txt"), "untracked").expect("Failed to write file");
 
-    let entries =
-        orchestrate::git::get_status(Some(repo.path())).expect("Failed to get status");
+    let entries = orchestrate::git::get_status(Some(repo.path())).expect("Failed to get status");
 
     let staged = entries.iter().find(|e| e.path == "staged.txt");
     assert!(staged.is_some(), "Expected staged.txt in status");
     assert_eq!(
-        staged.unwrap().status_code, "A ",
+        staged.unwrap().status_code,
+        "A ",
         "Expected 'A ' status for staged file"
     );
 
     let untracked = entries.iter().find(|e| e.path == "untracked.txt");
     assert!(untracked.is_some(), "Expected untracked.txt in status");
     assert_eq!(
-        untracked.unwrap().status_code, "??",
+        untracked.unwrap().status_code,
+        "??",
         "Expected '??' status for untracked file"
     );
 }

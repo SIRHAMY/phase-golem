@@ -88,18 +88,16 @@ pub fn build_triage_prompt(
             .join("\n")
     };
 
-    let mut sections = vec![
-        build_preamble(
-            "Autonomous Triage Agent",
-            "You are running autonomously as a triage agent. No human is available for questions.",
-            item,
-            None,
-            None,
-            None,
-            None,
-        )
-        .replace("## Item", "## Item to Triage"),
-    ];
+    let mut sections = vec![build_preamble(
+        "Autonomous Triage Agent",
+        "You are running autonomously as a triage agent. No human is available for questions.",
+        item,
+        None,
+        None,
+        None,
+        None,
+    )
+    .replace("## Item", "## Item to Triage")];
 
     if let Some(summary) = backlog_summary {
         sections.push(format!(
@@ -273,9 +271,7 @@ fn build_skill_invocation(phase_config: &PhaseConfig, change_folder: &Path) -> S
             .workflows
             .iter()
             .enumerate()
-            .map(|(i, wf)| {
-                format!("{}. Read and follow the workflow at `{}`.", i + 1, wf)
-            })
+            .map(|(i, wf)| format!("{}. Read and follow the workflow at `{}`.", i + 1, wf))
             .collect();
         format!(
             "## Task\n\nComplete the following workflows in order:\n\n{}\n\nThe change folder for this item is: `{}`",
@@ -388,10 +384,7 @@ pub fn build_context_preamble(
     }
 
     if let Some(summary) = previous_summary {
-        sections.push(format!(
-            "### Previous Phase Summary\n\n{}",
-            summary
-        ));
+        sections.push(format!("### Previous Phase Summary\n\n{}", summary));
     }
 
     if let Some(context) = failure_context {
@@ -402,10 +395,7 @@ pub fn build_context_preamble(
     }
 
     if let Some(notes) = unblock_notes {
-        sections.push(format!(
-            "### Unblock Context\n\n{}",
-            notes
-        ));
+        sections.push(format!("### Unblock Context\n\n{}", notes));
     }
 
     sections.join("\n\n")

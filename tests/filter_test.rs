@@ -1,9 +1,7 @@
 mod common;
 
 use orchestrate::filter::{apply_filter, parse_filter, FilterField, FilterValue};
-use orchestrate::types::{
-    BacklogFile, DimensionLevel, ItemStatus, SizeLevel,
-};
+use orchestrate::types::{BacklogFile, DimensionLevel, ItemStatus, SizeLevel};
 
 use common::make_item;
 
@@ -63,10 +61,7 @@ fn parse_filter_tag() {
 fn parse_filter_pipeline_type() {
     let f = parse_filter("pipeline_type=feature").unwrap();
     assert_eq!(f.field, FilterField::PipelineType);
-    assert_eq!(
-        f.value,
-        FilterValue::PipelineType("feature".to_string())
-    );
+    assert_eq!(f.value, FilterValue::PipelineType("feature".to_string()));
 }
 
 // --- Invalid field name ---
@@ -179,10 +174,7 @@ fn parse_filter_tag_preserves_case() {
 #[test]
 fn parse_filter_pipeline_type_preserves_case() {
     let f = parse_filter("pipeline_type=Feature").unwrap();
-    assert_eq!(
-        f.value,
-        FilterValue::PipelineType("Feature".to_string())
-    );
+    assert_eq!(f.value, FilterValue::PipelineType("Feature".to_string()));
 }
 
 // --- status=in_progress parses and matches ItemStatus::InProgress ---

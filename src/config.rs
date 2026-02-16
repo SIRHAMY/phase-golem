@@ -18,6 +18,7 @@ pub struct OrchestrateConfig {
 #[serde(default)]
 pub struct ProjectConfig {
     pub prefix: String,
+    pub backlog_path: String,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -85,6 +86,7 @@ impl Default for ProjectConfig {
     fn default() -> Self {
         Self {
             prefix: "WRK".to_string(),
+            backlog_path: "BACKLOG.yaml".to_string(),
         }
     }
 }
@@ -121,27 +123,22 @@ pub fn default_feature_pipeline() -> PipelineConfig {
         }],
         phases: vec![
             PhaseConfig {
-                workflows: vec![
-                    ".claude/skills/changes/workflows/0-prd/create-prd.md".to_string(),
-                ],
+                workflows: vec![".claude/skills/changes/workflows/0-prd/create-prd.md".to_string()],
                 ..PhaseConfig::new("prd", false)
             },
             PhaseConfig {
                 workflows: vec![
-                    ".claude/skills/changes/workflows/1-tech-research/tech-research.md"
-                        .to_string(),
+                    ".claude/skills/changes/workflows/1-tech-research/tech-research.md".to_string(),
                 ],
                 ..PhaseConfig::new("tech-research", false)
             },
             PhaseConfig {
-                workflows: vec![
-                    ".claude/skills/changes/workflows/2-design/design.md".to_string(),
-                ],
+                workflows: vec![".claude/skills/changes/workflows/2-design/design.md".to_string()],
                 ..PhaseConfig::new("design", false)
             },
             PhaseConfig {
                 workflows: vec![
-                    ".claude/skills/changes/workflows/3-spec/create-spec.md".to_string(),
+                    ".claude/skills/changes/workflows/3-spec/create-spec.md".to_string()
                 ],
                 ..PhaseConfig::new("spec", false)
             },
@@ -154,7 +151,7 @@ pub fn default_feature_pipeline() -> PipelineConfig {
             },
             PhaseConfig {
                 workflows: vec![
-                    ".claude/skills/changes/workflows/5-review/change-review.md".to_string(),
+                    ".claude/skills/changes/workflows/5-review/change-review.md".to_string()
                 ],
                 ..PhaseConfig::new("review", false)
             },

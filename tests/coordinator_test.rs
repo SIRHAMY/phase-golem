@@ -56,7 +56,9 @@ fn save_and_commit_backlog(root: &Path, backlog: &BacklogFile) {
 async fn get_snapshot_returns_current_backlog_state() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
     backlog
         .items
         .push(make_in_progress_item("WRK-002", "build"));
@@ -84,7 +86,9 @@ async fn get_snapshot_returns_current_backlog_state() {
 async fn get_snapshot_reflects_updates() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -115,7 +119,9 @@ async fn get_snapshot_reflects_updates() {
 async fn update_item_transition_status() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -140,7 +146,9 @@ async fn update_item_transition_status() {
 async fn update_item_invalid_transition_returns_error() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -164,9 +172,7 @@ async fn update_item_invalid_transition_returns_error() {
 async fn update_item_set_phase() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog
-        .items
-        .push(make_in_progress_item("WRK-001", "prd"));
+    backlog.items.push(make_in_progress_item("WRK-001", "prd"));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -191,9 +197,7 @@ async fn update_item_set_phase() {
 async fn update_item_clear_phase() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog
-        .items
-        .push(make_in_progress_item("WRK-001", "prd"));
+    backlog.items.push(make_in_progress_item("WRK-001", "prd"));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -286,7 +290,9 @@ async fn update_item_unblock() {
 async fn update_item_unblock_non_blocked_returns_error() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -308,7 +314,9 @@ async fn update_item_unblock_non_blocked_returns_error() {
 async fn update_item_update_assessments() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -344,7 +352,9 @@ async fn update_item_update_assessments() {
 async fn update_item_set_pipeline_type() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -403,7 +413,9 @@ async fn update_item_set_last_phase_commit() {
 async fn update_item_set_description() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -424,10 +436,7 @@ async fn update_item_set_description() {
     };
 
     handle
-        .update_item(
-            "WRK-001",
-            ItemUpdate::SetDescription(desc.clone()),
-        )
+        .update_item("WRK-001", ItemUpdate::SetDescription(desc.clone()))
         .await
         .unwrap();
 
@@ -451,10 +460,7 @@ async fn update_item_nonexistent_returns_error() {
     );
 
     let result = handle
-        .update_item(
-            "WRK-999",
-            ItemUpdate::TransitionStatus(ItemStatus::Scoping),
-        )
+        .update_item("WRK-999", ItemUpdate::TransitionStatus(ItemStatus::Scoping))
         .await;
 
     assert!(result.is_err());
@@ -469,7 +475,9 @@ async fn update_item_nonexistent_returns_error() {
 async fn update_item_persists_to_disk() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -617,9 +625,7 @@ async fn complete_phase_non_destructive_stages_only() {
 async fn batch_commit_commits_staged_phases() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog
-        .items
-        .push(make_in_progress_item("WRK-001", "prd"));
+    backlog.items.push(make_in_progress_item("WRK-001", "prd"));
     backlog
         .items
         .push(make_in_progress_item("WRK-003", "design"));
@@ -852,10 +858,7 @@ async fn record_phase_start_sets_last_phase_commit() {
     );
 
     let sha = handle.get_head_sha().await.unwrap();
-    handle
-        .record_phase_start("WRK-001", &sha)
-        .await
-        .unwrap();
+    handle.record_phase_start("WRK-001", &sha).await.unwrap();
 
     let snapshot = handle.get_snapshot().await.unwrap();
     assert_eq!(snapshot.items[0].last_phase_commit, Some(sha));
@@ -880,10 +883,7 @@ async fn record_phase_start_persists_to_disk() {
     );
 
     let sha = "b".repeat(40);
-    handle
-        .record_phase_start("WRK-001", &sha)
-        .await
-        .unwrap();
+    handle.record_phase_start("WRK-001", &sha).await.unwrap();
 
     // Verify on-disk state
     let on_disk = backlog::load(&backlog_path(dir.path()), dir.path()).unwrap();
@@ -940,7 +940,9 @@ async fn archive_item_removes_from_backlog() {
     let mut done_item = common::make_item("WRK-001", ItemStatus::Done);
     done_item.phase = Some("review".to_string());
     backlog.items.push(done_item);
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1079,7 +1081,9 @@ async fn ingest_follow_ups_creates_new_items() {
 async fn ingest_follow_ups_persists_to_disk() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1173,7 +1177,9 @@ async fn unblock_item_without_context() {
 async fn unblock_non_blocked_item_returns_error() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1222,7 +1228,9 @@ async fn unblock_item_resets_last_phase_commit() {
 async fn shutdown_saves_final_state_when_handle_dropped() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1294,7 +1302,9 @@ async fn handle_send_after_shutdown_returns_error() {
 async fn multiple_sequential_operations_maintain_consistency() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1348,8 +1358,12 @@ async fn multiple_sequential_operations_maintain_consistency() {
 async fn concurrent_handle_clones_work_correctly() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1386,7 +1400,9 @@ async fn concurrent_handle_clones_work_correctly() {
 async fn ingest_inbox_with_valid_items() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1427,7 +1443,10 @@ async fn ingest_inbox_with_valid_items() {
     assert_eq!(item2.title, "Another item");
 
     // Verify inbox file was deleted
-    assert!(!inbox_path.exists(), "Inbox file should be deleted after ingestion");
+    assert!(
+        !inbox_path.exists(),
+        "Inbox file should be deleted after ingestion"
+    );
 
     // Verify persisted to disk
     let on_disk = backlog::load(&backlog_path(dir.path()), dir.path()).unwrap();
@@ -1476,7 +1495,10 @@ async fn ingest_inbox_malformed_yaml() {
     assert!(result.is_empty());
 
     // Inbox file should be preserved for manual correction
-    assert!(inbox_path.exists(), "Malformed inbox file should be preserved");
+    assert!(
+        inbox_path.exists(),
+        "Malformed inbox file should be preserved"
+    );
 }
 
 #[tokio::test]
@@ -1508,7 +1530,9 @@ async fn ingest_inbox_empty_file() {
 async fn ingest_inbox_save_failure_rolls_back() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1538,11 +1562,18 @@ async fn ingest_inbox_save_failure_rolls_back() {
     assert!(result.is_err(), "Should return error when save fails");
 
     // Inbox file should be preserved (not deleted since save failed)
-    assert!(inbox_path.exists(), "Inbox file should be preserved on save failure");
+    assert!(
+        inbox_path.exists(),
+        "Inbox file should be preserved on save failure"
+    );
 
     // In-memory backlog should be rolled back
     let snapshot = handle.get_snapshot().await.unwrap();
-    assert_eq!(snapshot.items.len(), 1, "Backlog should be rolled back to 1 item");
+    assert_eq!(
+        snapshot.items.len(),
+        1,
+        "Backlog should be rolled back to 1 item"
+    );
 
     // Restore directory permissions for cleanup
     let mut perms = fs::metadata(&readonly_dir).unwrap().permissions();
@@ -1555,7 +1586,9 @@ async fn ingest_inbox_save_failure_rolls_back() {
 async fn ingest_inbox_clear_failure_still_returns_success() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1701,7 +1734,9 @@ fn path_matching_no_entries_means_clean() {
 async fn shutdown_no_commit_when_backlog_clean() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1711,7 +1746,9 @@ async fn shutdown_no_commit_when_backlog_clean() {
         .current_dir(dir.path())
         .output()
         .expect("git rev-parse");
-    let sha_before = String::from_utf8_lossy(&head_before.stdout).trim().to_string();
+    let sha_before = String::from_utf8_lossy(&head_before.stdout)
+        .trim()
+        .to_string();
 
     let (handle, coord_task) = spawn_coordinator(
         backlog,
@@ -1731,7 +1768,10 @@ async fn shutdown_no_commit_when_backlog_clean() {
     let is_backlog_dirty = status
         .iter()
         .any(|entry| entry.path.trim_matches('"') == "BACKLOG.yaml");
-    assert!(!is_backlog_dirty, "BACKLOG.yaml should be clean since no state changes were made");
+    assert!(
+        !is_backlog_dirty,
+        "BACKLOG.yaml should be clean since no state changes were made"
+    );
 
     // No new commit should have been created
     let head_after = Command::new("git")
@@ -1739,8 +1779,13 @@ async fn shutdown_no_commit_when_backlog_clean() {
         .current_dir(dir.path())
         .output()
         .expect("git rev-parse");
-    let sha_after = String::from_utf8_lossy(&head_after.stdout).trim().to_string();
-    assert_eq!(sha_before, sha_after, "No commit should be created when BACKLOG.yaml is clean");
+    let sha_after = String::from_utf8_lossy(&head_after.stdout)
+        .trim()
+        .to_string();
+    assert_eq!(
+        sha_before, sha_after,
+        "No commit should be created when BACKLOG.yaml is clean"
+    );
 }
 
 // =============================================================================
@@ -1755,7 +1800,10 @@ fn halt_commit_message_cap_reached() {
         "[orchestrator] Save backlog state on halt ({:?})",
         HaltReason::CapReached
     );
-    assert_eq!(msg, "[orchestrator] Save backlog state on halt (CapReached)");
+    assert_eq!(
+        msg,
+        "[orchestrator] Save backlog state on halt (CapReached)"
+    );
 }
 
 #[test]
@@ -1826,8 +1874,12 @@ fn halt_commit_message_filter_exhausted() {
 async fn merge_item_removes_source_and_updates_target() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
-    backlog.items.push(common::make_item("WRK-002", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-002", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1859,7 +1911,9 @@ async fn merge_item_removes_source_and_updates_target() {
 async fn merge_item_nonexistent_source_returns_error() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
@@ -1880,7 +1934,9 @@ async fn merge_item_nonexistent_source_returns_error() {
 async fn merge_item_self_merge_returns_error() {
     let dir = common::setup_test_env();
     let mut backlog = common::empty_backlog();
-    backlog.items.push(common::make_item("WRK-001", ItemStatus::New));
+    backlog
+        .items
+        .push(common::make_item("WRK-001", ItemStatus::New));
 
     save_and_commit_backlog(dir.path(), &backlog);
 
