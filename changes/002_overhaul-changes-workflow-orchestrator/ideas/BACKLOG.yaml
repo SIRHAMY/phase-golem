@@ -1,0 +1,17 @@
+# Project Backlog
+#
+# The work queue. Script parses this to pick next tasks.
+#
+# Required: id, title, size, status, risk, created
+# Optional: idea_file, needs_human, tags, done_date, notes, dependencies
+#
+# In-progress fields (added when item enters changes workflow):
+#   phase:          prd | research | design | spec | build | review
+#   phase_attempts: retry counter for current phase (resets on advance)
+#
+# Status lifecycle:
+#   new → researching → scoped → ready → in_progress → done
+#   Any status can also → blocked (needs human decision)
+#   Small items can skip straight to ready.
+
+items: []
