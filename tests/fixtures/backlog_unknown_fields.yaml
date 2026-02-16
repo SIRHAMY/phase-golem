@@ -1,0 +1,10 @@
+schema_version: 3
+some_future_field: true
+items:
+  - id: WRK-001
+    title: Item with unknown fields
+    status: new
+    requires_human_review: false
+    future_field_on_item: 42
+    created: "2026-02-10T00:00:00+00:00"
+    updated: "2026-02-10T00:00:00+00:00"

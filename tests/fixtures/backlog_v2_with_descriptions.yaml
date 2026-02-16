@@ -1,0 +1,26 @@
+schema_version: 2
+items:
+  - id: WRK-001
+    title: Add user authentication
+    status: in_progress
+    phase: build
+    size: medium
+    requires_human_review: false
+    created: "2026-02-10T00:00:00+00:00"
+    updated: "2026-02-11T00:00:00+00:00"
+    pipeline_type: feature
+    description: "Context: Users need to log in.\nProblem: No auth exists.\nSolution: Add JWT-based auth.\nImpact: Enables user-specific features.\nSizing rationale: Medium because it touches multiple layers."
+  - id: WRK-002
+    title: Fix typo in README
+    status: new
+    requires_human_review: false
+    created: "2026-02-09T00:00:00+00:00"
+    updated: "2026-02-10T00:00:00+00:00"
+    description: "Just a simple typo fix, no structured headers"
+  - id: WRK-003
+    title: Item without description
+    status: done
+    phase: review
+    requires_human_review: false
+    created: "2026-02-11T00:00:00+00:00"
+    updated: "2026-02-11T00:00:00+00:00"
