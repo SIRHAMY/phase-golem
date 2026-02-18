@@ -2,3 +2,7 @@
 .phase-golem/
 *.rlib
 phase-golem.toml
+
+# Claude Code custom workflows
+.claude/commands/changes/
+.claude/skills/changes/
