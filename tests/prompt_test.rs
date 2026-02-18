@@ -125,6 +125,7 @@ fn build_prompt_contains_correct_skill_command_for_each_phase() {
             previous_summary: None,
             unblock_notes: None,
             failure_context: None,
+            config_base: Path::new("."),
         });
 
         assert!(
@@ -153,6 +154,7 @@ fn build_prompt_includes_result_file_path_in_suffix() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains(".phase-golem/phase_result_WRK-001_prd.json"));
@@ -179,6 +181,7 @@ fn build_prompt_includes_previous_summary_when_provided() {
         previous_summary: Some("PRD created with 5 success criteria and 3 user stories"),
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("Previous Phase Summary"));
@@ -201,6 +204,7 @@ fn build_prompt_excludes_previous_summary_when_none() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(!prompt_text.contains("Previous Phase Summary"));
@@ -225,6 +229,7 @@ fn build_prompt_includes_unblock_notes_when_provided() {
         previous_summary: None,
         unblock_notes: Some("Use PostgreSQL instead of SQLite for the database layer"),
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("Unblock Context"));
@@ -247,6 +252,7 @@ fn build_prompt_excludes_unblock_notes_when_none() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(!prompt_text.contains("Unblock Context"));
@@ -268,6 +274,7 @@ fn build_prompt_includes_failure_context_when_retrying() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: Some("Agent timed out after 1800 seconds"),
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("Previous Failure"));
@@ -291,6 +298,7 @@ fn build_prompt_excludes_failure_context_when_none() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(!prompt_text.contains("Previous Failure"));
@@ -312,6 +320,7 @@ fn build_prompt_includes_assumptions_instruction_in_preamble() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("Assumptions"));
@@ -334,6 +343,7 @@ fn build_prompt_includes_assessments_when_present() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("Current Assessments"));
@@ -363,6 +373,7 @@ fn build_prompt_includes_partial_assessments() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("- **Size:** small"));
@@ -387,6 +398,7 @@ fn build_prompt_excludes_assessments_when_none() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(!prompt_text.contains("Current Assessments"));
@@ -408,6 +420,7 @@ fn build_prompt_contains_json_schema_in_suffix() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("\"item_id\""));
@@ -437,6 +450,7 @@ fn build_prompt_item_id_embedded_in_schema() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("\"item_id\": \"WRK-042\""));
@@ -546,6 +560,7 @@ fn build_prompt_embeds_correct_phase_string_for_each_phase() {
             previous_summary: None,
             unblock_notes: None,
             failure_context: None,
+            config_base: Path::new("."),
         });
 
         let expected = format!("\"phase\": \"{}\"", expected_str);
@@ -577,6 +592,7 @@ fn build_prompt_contains_autonomous_preamble() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("Autonomous Agent"));
@@ -607,6 +623,7 @@ fn build_prompt_with_all_optional_sections() {
         previous_summary: Some("Research identified 3 viable approaches"),
         unblock_notes: Some("Go with approach B (CSS variables)"),
         failure_context: Some("Previous agent hit a dependency conflict"),
+        config_base: Path::new("."),
     });
 
     // All sections present
@@ -648,6 +665,7 @@ fn build_prompt_includes_structured_description() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("## Description"));
@@ -681,6 +699,7 @@ fn build_prompt_skips_empty_description_fields() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(prompt_text.contains("**Context:** Some context"));
@@ -713,6 +732,7 @@ fn build_prompt_omits_description_section_when_all_empty() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(!prompt_text.contains("## Description"));
@@ -735,6 +755,7 @@ fn build_prompt_excludes_description_when_none() {
         previous_summary: None,
         unblock_notes: None,
         failure_context: None,
+        config_base: Path::new("."),
     });
 
     assert!(!prompt_text.contains("## Description"));

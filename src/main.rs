@@ -30,6 +30,12 @@ struct Cli {
     #[arg(long, default_value = ".")]
     root: PathBuf,
 
+    /// Path to config file (defaults to {root}/phase-golem.toml).
+    /// When specified, config-relative paths (backlog, workflows) resolve
+    /// from the config file's parent directory.
+    #[arg(long)]
+    config: Option<PathBuf>,
+
     /// Log verbosity level (error, warn, info, debug)
     #[arg(long, default_value = "info")]
     log_level: String,
@@ -108,19 +114,33 @@ async fn main() {
 
     let root = &cli.root;
 
+    let (config_path, config_base) = match &cli.config {
+        Some(p) => (
+            Some(p.clone()),
+            p.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        ),
+        None => (None, root.to_path_buf()),
+    };
+
     let result = match cli.command {
         Commands::Init { prefix } => handle_init(root, &prefix),
-        Commands::Run { target, only, cap } => handle_run(root, target, only, cap).await,
-        Commands::Status => handle_status(root),
+        Commands::Run { target, only, cap } => {
+            handle_run(root, config_path.as_deref(), &config_base, target, only, cap).await
+        }
+        Commands::Status => handle_status(root, config_path.as_deref(), &config_base),
         Commands::Add {
             title,
             size,
             risk,
             pipeline,
-        } => handle_add(root, &title, size, risk, pipeline),
-        Commands::Triage => handle_triage(root).await,
-        Commands::Advance { item_id, to } => handle_advance(root, &item_id, to),
-        Commands::Unblock { item_id, notes } => handle_unblock(root, &item_id, notes),
+        } => handle_add(root, config_path.as_deref(), &config_base, &title, size, risk, pipeline),
+        Commands::Triage => handle_triage(root, config_path.as_deref(), &config_base).await,
+        Commands::Advance { item_id, to } => {
+            handle_advance(root, config_path.as_deref(), &config_base, &item_id, to)
+        }
+        Commands::Unblock { item_id, notes } => {
+            handle_unblock(root, config_path.as_deref(), &config_base, &item_id, notes)
+        }
     };
 
     if let Err(e) = result {
@@ -129,13 +149,13 @@ async fn main() {
     }
 }
 
-fn resolve_backlog_path(root: &Path, config: &config::PhaseGolemConfig) -> PathBuf {
-    root.join(&config.project.backlog_path)
+fn resolve_backlog_path(config_base: &Path, config: &config::PhaseGolemConfig) -> PathBuf {
+    config_base.join(&config.project.backlog_path)
 }
 
-fn resolve_inbox_path(root: &Path, config: &config::PhaseGolemConfig) -> PathBuf {
-    let backlog = resolve_backlog_path(root, config);
-    backlog.parent().unwrap_or(root).join("BACKLOG_INBOX.yaml")
+fn resolve_inbox_path(config_base: &Path, config: &config::PhaseGolemConfig) -> PathBuf {
+    let backlog = resolve_backlog_path(config_base, config);
+    backlog.parent().unwrap_or(config_base).join("BACKLOG_INBOX.yaml")
 }
 
 fn handle_init(root: &Path, prefix: &str) -> Result<(), String> {
@@ -248,6 +268,8 @@ phases = [
 
 async fn handle_run(
     root: &Path,
+    config_path: Option<&Path>,
+    config_base: &Path,
     target: Vec<String>,
     only: Option<String>,
     cap: u32,
@@ -268,8 +290,8 @@ async fn handle_run(
     phase_golem::git::check_preconditions(Some(root))?;
 
     // Load
-    let config = config::load_config(root)?;
-    let backlog_file_path = resolve_backlog_path(root, &config);
+    let config = config::load_config_from(config_path, root)?;
+    let backlog_file_path = resolve_backlog_path(config_base, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
     // Mutual exclusivity safety net (clap conflicts_with should handle this)
@@ -499,7 +521,7 @@ async fn handle_run(
     // Preflight
     log_info!("");
     log_info!("[pre] Running preflight checks...");
-    if let Err(errors) = preflight::run_preflight(&config, &backlog, root) {
+    if let Err(errors) = preflight::run_preflight(&config, &backlog, root, config_base) {
         log_error!("[pre] Preflight FAILED:");
         for error in &errors {
             log_error!("  {}", error);
@@ -512,7 +534,7 @@ async fn handle_run(
     log_info!("[pre] Preflight passed.");
 
     // Validate inbox file early (fail fast instead of warning mid-run)
-    let inbox_path = resolve_inbox_path(root, &config);
+    let inbox_path = resolve_inbox_path(config_base, &config);
     if inbox_path.exists() {
         backlog::load_inbox(&inbox_path).map_err(|e| format!("Inbox validation failed: {}", e))?;
     }
@@ -549,6 +571,7 @@ async fn handle_run(
         filter: parsed_filter,
         cap,
         root: root.to_path_buf(),
+        config_base: config_base.to_path_buf(),
     };
 
     let summary = scheduler::run_scheduler(coord_handle, runner, config, params, cancel).await?;
@@ -658,7 +681,7 @@ async fn handle_run(
     Ok(())
 }
 
-async fn handle_triage(root: &Path) -> Result<(), String> {
+async fn handle_triage(root: &Path, config_path: Option<&Path>, config_base: &Path) -> Result<(), String> {
     // Install signal handlers for graceful shutdown
     install_signal_handlers()?;
 
@@ -673,14 +696,14 @@ async fn handle_triage(root: &Path) -> Result<(), String> {
     phase_golem::git::check_preconditions(Some(root))?;
 
     // Load config and backlog
-    let config = config::load_config(root)?;
-    let backlog_file_path = resolve_backlog_path(root, &config);
+    let config = config::load_config_from(config_path, root)?;
+    let backlog_file_path = resolve_backlog_path(config_base, &config);
     let backlog = backlog::load(&backlog_file_path, root)?;
 
     let runner = CliAgentRunner;
 
     // Validate inbox file early (fail fast instead of warning mid-run)
-    let inbox_path = resolve_inbox_path(root, &config);
+    let inbox_path = resolve_inbox_path(config_base, &config);
     if inbox_path.exists() {
         backlog::load_inbox(&inbox_path).map_err(|e| format!("Inbox validation failed: {}", e))?;
     }
@@ -774,13 +797,15 @@ async fn handle_triage(root: &Path) -> Result<(), String> {
 
 fn handle_add(
     root: &Path,
+    config_path: Option<&Path>,
+    config_base: &Path,
     title: &str,
     size: Option<String>,
     risk: Option<String>,
     pipeline_type: Option<String>,
 ) -> Result<(), String> {
-    let config = config::load_config(root)?;
-    let backlog_file_path = resolve_backlog_path(root, &config);
+    let config = config::load_config_from(config_path, root)?;
+    let backlog_file_path = resolve_backlog_path(config_base, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
     let parsed_size = size.map(|s| parse_size_level(&s)).transpose()?;
@@ -811,9 +836,9 @@ fn handle_add(
     Ok(())
 }
 
-fn handle_status(root: &Path) -> Result<(), String> {
-    let config = config::load_config(root)?;
-    let backlog_file_path = resolve_backlog_path(root, &config);
+fn handle_status(root: &Path, config_path: Option<&Path>, config_base: &Path) -> Result<(), String> {
+    let config = config::load_config_from(config_path, root)?;
+    let backlog_file_path = resolve_backlog_path(config_base, &config);
     let backlog = backlog::load(&backlog_file_path, root)?;
 
     if backlog.items.is_empty() {
@@ -864,9 +889,9 @@ fn handle_status(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn handle_advance(root: &Path, item_id: &str, to: Option<String>) -> Result<(), String> {
-    let config = config::load_config(root)?;
-    let backlog_file_path = resolve_backlog_path(root, &config);
+fn handle_advance(root: &Path, config_path: Option<&Path>, config_base: &Path, item_id: &str, to: Option<String>) -> Result<(), String> {
+    let config = config::load_config_from(config_path, root)?;
+    let backlog_file_path = resolve_backlog_path(config_base, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
     let item = backlog
@@ -940,9 +965,9 @@ fn handle_advance(root: &Path, item_id: &str, to: Option<String>) -> Result<(), 
     Ok(())
 }
 
-fn handle_unblock(root: &Path, item_id: &str, notes: Option<String>) -> Result<(), String> {
-    let config = config::load_config(root)?;
-    let backlog_file_path = resolve_backlog_path(root, &config);
+fn handle_unblock(root: &Path, config_path: Option<&Path>, config_base: &Path, item_id: &str, notes: Option<String>) -> Result<(), String> {
+    let config = config::load_config_from(config_path, root)?;
+    let backlog_file_path = resolve_backlog_path(config_base, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
     let item = backlog

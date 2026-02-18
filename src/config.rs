@@ -219,6 +219,51 @@ pub fn validate(config: &PhaseGolemConfig) -> Result<(), Vec<String>> {
     }
 }
 
+/// Load config from an explicit path (if provided) or fall back to `{project_root}/phase-golem.toml`.
+///
+/// When `config_path` is `Some`, the file MUST exist — returns an error if missing.
+/// When `config_path` is `None`, delegates to `load_config` (returns defaults if missing).
+pub fn load_config_from(
+    config_path: Option<&Path>,
+    project_root: &Path,
+) -> Result<PhaseGolemConfig, String> {
+    match config_path {
+        Some(path) => load_config_at(path),
+        None => load_config(project_root),
+    }
+}
+
+/// Load config from a specific file path. Errors if the file does not exist.
+fn load_config_at(path: &Path) -> Result<PhaseGolemConfig, String> {
+    if !path.exists() {
+        return Err(format!(
+            "Config file not found: {}",
+            path.display()
+        ));
+    }
+
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+
+    let mut config: PhaseGolemConfig = toml::from_str(&contents)
+        .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
+
+    populate_default_pipelines(&mut config);
+
+    validate(&config).map_err(|errors| {
+        format!(
+            "Config validation failed:\n{}",
+            errors
+                .iter()
+                .map(|e| format!("  - {}", e))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    })?;
+
+    Ok(config)
+}
+
 pub fn load_config(project_root: &Path) -> Result<PhaseGolemConfig, String> {
     let config_path = project_root.join("phase-golem.toml");
 

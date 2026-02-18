@@ -52,6 +52,10 @@ pub struct RunParams {
     pub filter: Option<crate::filter::FilterCriterion>,
     pub cap: u32,
     pub root: PathBuf,
+    /// Base directory for resolving config-relative paths (workflow files).
+    /// When `--config` is used, this is the config file's parent directory.
+    /// Otherwise, equals `root`.
+    pub config_base: PathBuf,
 }
 
 // --- Running task tracking ---
@@ -833,6 +837,7 @@ pub async fn run_scheduler(
                     let runner_clone = runner.clone();
                     let cfg = config.clone();
                     let root = params.root.clone();
+                    let config_base = params.config_base.clone();
                     let prev_summary = previous_summaries.get(&item_id).cloned();
                     let cancel_clone = cancel.clone();
 
@@ -903,6 +908,7 @@ pub async fn run_scheduler(
                             &cancel_clone,
                             &root,
                             prev_summary.as_deref(),
+                            &config_base,
                         )
                         .await;
 

@@ -14,6 +14,10 @@ pub struct PromptParams<'a> {
     pub previous_summary: Option<&'a str>,
     pub unblock_notes: Option<&'a str>,
     pub failure_context: Option<&'a str>,
+    /// Base directory for resolving config-relative paths (workflow files).
+    /// When `--config` is used, this is the config file's parent directory.
+    /// Otherwise, it equals the project root.
+    pub config_base: &'a Path,
 }
 
 /// Build a full prompt for a workflow phase agent.
@@ -37,7 +41,7 @@ pub fn build_prompt(params: &PromptParams) -> String {
 
     [
         preamble,
-        build_skill_invocation(params.phase_config, params.change_folder),
+        build_skill_invocation(params.phase_config, params.change_folder, params.config_base),
         build_output_suffix(&params.item.id, params.phase, params.result_path),
     ]
     .join("\n\n")
@@ -258,17 +262,23 @@ fn build_preamble(
 ///
 /// References workflow files by relative path. Any agent can read a file
 /// and follow its instructions, making this robust across agent runtimes.
-fn build_skill_invocation(phase_config: &PhaseConfig, change_folder: &Path) -> String {
+fn build_skill_invocation(phase_config: &PhaseConfig, change_folder: &Path, config_base: &Path) -> String {
     let change_path = change_folder.display();
 
-    if phase_config.workflows.len() == 1 {
+    // Resolve workflow paths relative to config_base so agents can always find them.
+    let resolved: Vec<String> = phase_config
+        .workflows
+        .iter()
+        .map(|wf| config_base.join(wf).to_string_lossy().to_string())
+        .collect();
+
+    if resolved.len() == 1 {
         format!(
             "## Task\n\nRead and follow the workflow at `{}`.\n\nThe change folder for this item is: `{}`",
-            phase_config.workflows[0], change_path,
+            resolved[0], change_path,
         )
     } else {
-        let instructions: Vec<String> = phase_config
-            .workflows
+        let instructions: Vec<String> = resolved
             .iter()
             .enumerate()
             .map(|(i, wf)| format!("{}. Read and follow the workflow at `{}`.", i + 1, wf))

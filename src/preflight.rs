@@ -38,7 +38,8 @@ impl std::fmt::Display for PreflightError {
 pub fn run_preflight(
     config: &PhaseGolemConfig,
     backlog: &BacklogFile,
-    project_root: &Path,
+    _project_root: &Path,
+    config_base: &Path,
 ) -> Result<(), Vec<PreflightError>> {
     let mut errors = Vec::new();
 
@@ -47,7 +48,7 @@ pub fn run_preflight(
 
     // Phase 2: Workflow probe — verify workflow files exist on disk
     if errors.is_empty() {
-        errors.extend(probe_workflows(config, project_root));
+        errors.extend(probe_workflows(config, config_base));
     }
 
     // Phase 3: Item validation

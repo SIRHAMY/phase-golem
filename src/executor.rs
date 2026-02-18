@@ -276,6 +276,7 @@ pub async fn execute_phase(
     cancel: &CancellationToken,
     root: &Path,
     previous_summary: Option<&str>,
+    config_base: &Path,
 ) -> PhaseExecutionResult {
     // 1. Staleness check (destructive phases only)
     if phase_config.is_destructive {
@@ -339,6 +340,7 @@ pub async fn execute_phase(
             previous_summary,
             item.unblock_context.as_deref(),
             failure_context.as_deref(),
+            config_base,
         );
 
         // Run workflows sequentially
@@ -436,6 +438,7 @@ fn build_executor_prompt(
     previous_summary: Option<&str>,
     unblock_notes: Option<&str>,
     failure_context: Option<&str>,
+    config_base: &Path,
 ) -> String {
     let params = prompt::PromptParams {
         phase,
@@ -446,6 +449,7 @@ fn build_executor_prompt(
         previous_summary,
         unblock_notes,
         failure_context,
+        config_base,
     };
     prompt::build_prompt(&params)
 }

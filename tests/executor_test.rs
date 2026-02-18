@@ -665,6 +665,7 @@ async fn execute_phase_success_returns_success() {
         &cancel,
         dir.path(),
         None,
+        dir.path(),
     )
     .await;
 
@@ -736,6 +737,7 @@ async fn execute_phase_failure_with_retry_returns_failed_after_exhaustion() {
         &cancel,
         dir.path(),
         None,
+        dir.path(),
     )
     .await;
 
@@ -792,6 +794,7 @@ async fn execute_phase_subphase_complete_returns_immediately() {
         &cancel,
         dir.path(),
         None,
+        dir.path(),
     )
     .await;
 
@@ -836,6 +839,7 @@ async fn execute_phase_cancellation_returns_cancelled() {
         &cancel,
         dir.path(),
         None,
+        dir.path(),
     )
     .await;
 
@@ -886,6 +890,7 @@ async fn execute_phase_blocked_result_returns_blocked() {
         &cancel,
         dir.path(),
         None,
+        dir.path(),
     )
     .await;
 
@@ -929,6 +934,7 @@ async fn execute_phase_agent_error_retries_and_fails() {
         &cancel,
         dir.path(),
         None,
+        dir.path(),
     )
     .await;
 
@@ -1005,6 +1011,7 @@ async fn execute_phase_staleness_blocks_destructive_phase() {
         &cancel,
         dir.path(),
         None,
+        dir.path(),
     )
     .await;
 

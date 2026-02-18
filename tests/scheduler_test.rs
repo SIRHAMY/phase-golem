@@ -197,6 +197,7 @@ fn run_params(root: &Path, target: Option<&str>, cap: u32) -> RunParams {
         filter: None,
         cap,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     }
 }
 
@@ -1869,6 +1870,7 @@ async fn test_multi_target_processes_in_order() {
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -1914,6 +1916,7 @@ async fn test_multi_target_halts_on_block() {
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -1955,6 +1958,7 @@ async fn test_multi_target_all_done_at_startup() {
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -1998,6 +2002,7 @@ async fn test_multi_target_skips_done_targets() {
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2041,6 +2046,7 @@ async fn test_multi_target_single_element_backward_compat() {
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2085,6 +2091,7 @@ async fn test_multi_target_target_archived_during_run() {
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2130,6 +2137,7 @@ async fn test_multi_target_skips_pre_blocked_targets() {
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2179,6 +2187,7 @@ async fn test_filter_restricts_scheduler_to_matching_items() {
         filter: Some(filter::parse_filter("impact=high").unwrap()),
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2221,6 +2230,7 @@ async fn test_filter_no_matching_items_halts() {
         filter: Some(filter::parse_filter("impact=high").unwrap()),
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2261,6 +2271,7 @@ async fn test_filter_all_exhausted_halts() {
         filter: Some(filter::parse_filter("impact=high").unwrap()),
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2309,6 +2320,7 @@ async fn test_integration_single_target_backward_compat() {
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2368,6 +2380,7 @@ async fn test_integration_multi_target_sequential() {
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2420,6 +2433,7 @@ async fn test_integration_multi_target_with_block() {
         filter: None,
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2473,6 +2487,7 @@ async fn test_integration_filter_impact_high() {
         filter: Some(filter::parse_filter("impact=high").unwrap()),
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =
@@ -2520,6 +2535,7 @@ async fn test_integration_filter_no_matches() {
         filter: Some(filter::parse_filter("impact=high").unwrap()),
         cap: 100,
         root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
     };
 
     let summary =

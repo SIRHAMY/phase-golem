@@ -508,3 +508,68 @@ phases = []
         err
     );
 }
+
+// --- load_config_from tests ---
+
+#[test]
+fn load_config_from_none_delegates_to_load_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = load_config_from(None, dir.path()).unwrap();
+
+    assert_eq!(config.project.prefix, "WRK");
+    assert_eq!(config.guardrails.max_size, SizeLevel::Medium);
+    assert_eq!(config.guardrails.max_complexity, DimensionLevel::Medium);
+    assert_eq!(config.guardrails.max_risk, DimensionLevel::Low);
+    assert_eq!(config.execution.phase_timeout_minutes, 30);
+    assert_eq!(config.execution.max_retries, 2);
+    assert_eq!(config.execution.default_phase_cap, 100);
+}
+
+#[test]
+fn load_config_from_explicit_path_that_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("custom-config.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[project]
+prefix = "CUSTOM"
+
+[guardrails]
+max_size = "large"
+max_complexity = "high"
+max_risk = "medium"
+
+[execution]
+phase_timeout_minutes = 45
+max_retries = 3
+default_phase_cap = 75
+"#,
+    )
+    .unwrap();
+
+    let config = load_config_from(Some(config_path.as_path()), dir.path()).unwrap();
+
+    assert_eq!(config.project.prefix, "CUSTOM");
+    assert_eq!(config.guardrails.max_size, SizeLevel::Large);
+    assert_eq!(config.guardrails.max_complexity, DimensionLevel::High);
+    assert_eq!(config.guardrails.max_risk, DimensionLevel::Medium);
+    assert_eq!(config.execution.phase_timeout_minutes, 45);
+    assert_eq!(config.execution.max_retries, 3);
+    assert_eq!(config.execution.default_phase_cap, 75);
+}
+
+#[test]
+fn load_config_from_explicit_path_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing_path = dir.path().join("does-not-exist.toml");
+
+    let result = load_config_from(Some(missing_path.as_path()), dir.path());
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("Config file not found"),
+        "Expected 'Config file not found' in: {}",
+        err
+    );
+}
