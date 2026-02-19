@@ -796,15 +796,35 @@ items:
   updated: 2026-02-13T18:20:41.094672585+00:00
 - id: HAMY-001
   title: Multi-CLI Agent Support
-  status: ready
-  phase: spec
+  status: in_progress
+  phase: prd
   size: medium
   complexity: medium
   risk: low
   impact: high
   requires_human_review: false
-  created: '2026-02-15T00:00:00+00:00'
-  updated: '2026-02-17T00:00:00+00:00'
+  created: 2026-02-15T00:00:00+00:00
+  updated: 2026-02-19T02:37:49.535148166+00:00
   pipeline_type: feature
   phase_pool: main
-next_item_id: 96
+  last_phase_commit: e81aa76fd04b91a80e1203d22c1432990ac7567c
+- id: HAMY-097
+  title: Replace default feature pipeline with simple plan/build/review pipeline that doesn't depend on external skills
+  status: new
+  size: medium
+  risk: low
+  impact: high
+  requires_human_review: false
+  origin: inbox
+  created: 2026-02-19T02:30:08.353472801+00:00
+  updated: 2026-02-19T02:30:08.353472801+00:00
+- id: HAMY-098
+  title: Investigate OpenCode CLI invocation pattern for phase-golem integration
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: HAMY-001/prd
+  created: 2026-02-19T02:37:49.549762317+00:00
+  updated: 2026-02-19T02:37:49.549762317+00:00
+next_item_id: 98
