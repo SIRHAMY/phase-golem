@@ -794,4 +794,17 @@ items:
   origin: WRK-006/build
   created: 2026-02-13T18:20:41.094672585+00:00
   updated: 2026-02-13T18:20:41.094672585+00:00
+- id: HAMY-001
+  title: Multi-CLI Agent Support
+  status: ready
+  phase: spec
+  size: medium
+  complexity: medium
+  risk: low
+  impact: high
+  requires_human_review: false
+  created: '2026-02-15T00:00:00+00:00'
+  updated: '2026-02-17T00:00:00+00:00'
+  pipeline_type: feature
+  phase_pool: main
 next_item_id: 96

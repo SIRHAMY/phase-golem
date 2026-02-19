@@ -1,0 +1,5 @@
+- title: "Replace default feature pipeline with simple plan/build/review pipeline that doesn't depend on external skills"
+  description: "The default_feature_pipeline() in config.rs references .claude/skills/changes/workflows/ files which are gitignored and won't exist for users cloning the repo. The default should be a simple 3-phase pipeline (plan, build, review) with self-contained workflow prompts. Ship example workflow files under a committed path (e.g. examples/workflows/) so the default config actually works out of the box. The current 7-phase pipeline referencing the changes skill can be documented as an advanced example."
+  size: medium
+  risk: low
+  impact: high
