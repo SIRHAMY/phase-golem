@@ -797,17 +797,17 @@ items:
 - id: HAMY-001
   title: Multi-CLI Agent Support
   status: in_progress
-  phase: tech-research
+  phase: design
   size: medium
   complexity: medium
   risk: low
   impact: high
   requires_human_review: false
   created: 2026-02-15T00:00:00+00:00
-  updated: 2026-02-19T02:39:23.035132197+00:00
+  updated: 2026-02-19T02:41:35.908075629+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 4007a2380e38813a1e311fb8bfaeb831319e56b3
+  last_phase_commit: 0cd13e29aaa314a39fd98808a52b7ab350f31649
 - id: HAMY-097
   title: Replace default feature pipeline with simple plan/build/review pipeline that doesn't depend on external skills
   status: new
@@ -836,4 +836,31 @@ items:
   origin: HAMY-001/tech-research
   created: 2026-02-19T02:39:23.040782874+00:00
   updated: 2026-02-19T02:39:23.040782874+00:00
-next_item_id: 99
+- id: HAMY-100
+  title: Post-result item_id/phase validation in execute_phase
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: HAMY-001/design
+  created: 2026-02-19T02:41:35.923374105+00:00
+  updated: 2026-02-19T02:41:35.923374105+00:00
+- id: HAMY-101
+  title: ACP-based universal agent invocation
+  status: new
+  size: large
+  risk: medium
+  requires_human_review: false
+  origin: HAMY-001/design
+  created: 2026-02-19T02:41:35.923374105+00:00
+  updated: 2026-02-19T02:41:35.923374105+00:00
+- id: HAMY-102
+  title: OpenCode CLI smoke test and graduation from experimental
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: HAMY-001/design
+  created: 2026-02-19T02:41:35.923374105+00:00
+  updated: 2026-02-19T02:41:35.923374105+00:00
+next_item_id: 102
