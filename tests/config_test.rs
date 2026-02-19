@@ -955,6 +955,26 @@ fn cli_tool_and_agent_config_accessible_from_crate() {
     let _config: phase_golem::config::AgentConfig = AgentConfig::default();
 }
 
+// --- Config-to-runner integration test ---
+
+#[test]
+fn config_to_runner_opencode_with_model() {
+    use phase_golem::agent::CliAgentRunner;
+
+    let config: PhaseGolemConfig = toml::from_str(
+        r#"
+[agent]
+cli = "opencode"
+model = "gpt-4"
+"#,
+    )
+    .unwrap();
+
+    let runner = CliAgentRunner::new(config.agent.cli, config.agent.model);
+    assert_eq!(runner.tool, CliTool::OpenCode);
+    assert_eq!(runner.model, Some("gpt-4".to_string()));
+}
+
 // --- Init template round-trip test ---
 
 #[test]

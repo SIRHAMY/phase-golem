@@ -8,13 +8,17 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 use phase_golem::agent::{AgentRunner, CliAgentRunner};
+use phase_golem::config::CliTool;
 use phase_golem::types::ResultCode;
 
 #[tokio::test]
 #[ignore] // requires real claude CLI — run explicitly
 async fn cli_agent_runner_can_spawn_and_get_result() {
     // Verify CLI exists first
-    CliAgentRunner::verify_cli_available().expect("claude CLI not available");
+    let runner = CliAgentRunner::new(CliTool::Claude, None);
+    runner
+        .verify_cli_available()
+        .expect("claude CLI not available");
 
     let tmp = TempDir::new().unwrap();
     let result_path = tmp.path().join("test_result.json");
@@ -34,7 +38,6 @@ async fn cli_agent_runner_can_spawn_and_get_result() {
         result_path.display()
     );
 
-    let runner = CliAgentRunner;
     let timeout = Duration::from_secs(120);
 
     let result = runner.run_agent(&prompt, &result_path, timeout).await;

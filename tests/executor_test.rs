@@ -9,7 +9,8 @@ use phase_golem::agent::MockAgentRunner;
 use phase_golem::config::{GuardrailsConfig, PhaseConfig, PipelineConfig, StalenessAction};
 use phase_golem::coordinator::spawn_coordinator;
 use phase_golem::executor::{
-    check_staleness, execute_phase, passes_guardrails, resolve_transition, StalenessResult,
+    check_staleness, execute_phase, passes_guardrails, resolve_transition,
+    validate_result_identity, StalenessResult,
 };
 use phase_golem::types::{
     BacklogItem, DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult, PhasePool,
@@ -1021,4 +1022,38 @@ async fn execute_phase_staleness_blocks_destructive_phase() {
         }
         other => panic!("Expected Blocked due to staleness, got {:?}", other),
     }
+}
+
+// --- validate_result_identity tests ---
+
+#[test]
+fn validate_result_identity_matching_returns_ok() {
+    let result = make_phase_result("WRK-001", "build", ResultCode::PhaseComplete);
+    assert!(validate_result_identity(&result, "WRK-001", "build").is_ok());
+}
+
+#[test]
+fn validate_result_identity_mismatched_item_id_returns_err() {
+    let result = make_phase_result("WRK-002", "build", ResultCode::PhaseComplete);
+    let err = validate_result_identity(&result, "WRK-001", "build").unwrap_err();
+    assert!(err.contains("item_id"));
+    assert!(err.contains("WRK-001"));
+    assert!(err.contains("WRK-002"));
+}
+
+#[test]
+fn validate_result_identity_mismatched_phase_returns_err() {
+    let result = make_phase_result("WRK-001", "review", ResultCode::PhaseComplete);
+    let err = validate_result_identity(&result, "WRK-001", "build").unwrap_err();
+    assert!(err.contains("phase"));
+    assert!(err.contains("build"));
+    assert!(err.contains("review"));
+}
+
+#[test]
+fn validate_result_identity_both_mismatched_returns_err() {
+    let result = make_phase_result("WRK-002", "review", ResultCode::Failed);
+    let err = validate_result_identity(&result, "WRK-001", "build").unwrap_err();
+    assert!(err.contains("item_id"));
+    assert!(err.contains("phase"));
 }

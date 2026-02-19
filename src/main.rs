@@ -304,8 +304,6 @@ async fn handle_run(
     log_info!("");
 
     // Prechecks
-    log_info!("[pre] Verifying Claude CLI...");
-    CliAgentRunner::verify_cli_available()?;
     log_info!("[pre] Acquiring lock...");
     let runtime_dir = root.join(".phase-golem");
     let _lock = lock::try_acquire(&runtime_dir)?;
@@ -314,6 +312,11 @@ async fn handle_run(
 
     // Load
     let config = config::load_config_from(config_path, root)?;
+
+    // Construct runner from config and verify CLI
+    let runner = CliAgentRunner::new(config.agent.cli.clone(), config.agent.model.clone());
+    log_info!("[pre] Verifying Claude CLI...");
+    runner.verify_cli_available()?;
     let backlog_file_path = resolve_backlog_path(config_base, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
@@ -562,7 +565,7 @@ async fn handle_run(
         backlog::load_inbox(&inbox_path).map_err(|e| format!("Inbox validation failed: {}", e))?;
     }
 
-    let runner = Arc::new(CliAgentRunner);
+    let runner = Arc::new(runner);
     log_info!("");
     let (coord_handle, coord_task) = coordinator::spawn_coordinator(
         backlog,
@@ -712,9 +715,6 @@ async fn handle_triage(
     // Install signal handlers for graceful shutdown
     install_signal_handlers()?;
 
-    // Verify Claude CLI is available
-    CliAgentRunner::verify_cli_available()?;
-
     // Acquire lock
     let runtime_dir = root.join(".phase-golem");
     let _lock = lock::try_acquire(&runtime_dir)?;
@@ -727,7 +727,9 @@ async fn handle_triage(
     let backlog_file_path = resolve_backlog_path(config_base, &config);
     let backlog = backlog::load(&backlog_file_path, root)?;
 
-    let runner = CliAgentRunner;
+    // Construct runner from config and verify CLI
+    let runner = CliAgentRunner::new(config.agent.cli.clone(), config.agent.model.clone());
+    runner.verify_cli_available()?;
 
     // Validate inbox file early (fail fast instead of warning mid-run)
     let inbox_path = resolve_inbox_path(config_base, &config);

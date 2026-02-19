@@ -147,7 +147,7 @@ The OpenCode invocation pattern (`opencode run [--model provider/model] [--quiet
 
 > Parameterize `CliAgentRunner`, update call sites in `handle_run` and `handle_triage`, add post-result validation, update integration test
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Medium
 
@@ -167,29 +167,29 @@ The OpenCode invocation pattern (`opencode run [--model provider/model] [--quiet
 
 **Tasks:**
 
-- [ ] Add `use crate::config::CliTool;` import to `agent.rs`
-- [ ] Change `CliAgentRunner` from `pub struct CliAgentRunner;` to `pub struct CliAgentRunner { pub tool: CliTool, pub model: Option<String> }`. Add `pub fn new(tool: CliTool, model: Option<String>) -> Self` constructor.
-- [ ] Convert `verify_cli_available()` from static method to instance method (`&self`). Use `self.tool.binary_name()` for the command, `self.tool.version_args()` for args, and `self.tool.display_name()` in error messages. Include `self.tool.install_hint()` in the error message when the CLI is not found (e.g., `"OpenCode CLI not found on PATH. Install: https://github.com/opencode-ai/opencode"`).
-- [ ] Update `run_agent()` implementation: replace `Command::new("claude")` with `Command::new(self.tool.binary_name())`, replace hardcoded `.args(["--dangerously-skip-permissions", "-p", prompt])` with `.args(self.tool.build_args(prompt, self.model.as_deref()))`
-- [ ] Update `handle_run()` in `main.rs`: Move CLI verification from before config load to after. New flow: (1) install signal handlers, (2) acquire lock, (3) check git preconditions, (4) load config, (5) construct `CliAgentRunner::new(config.agent.cli.clone(), config.agent.model.clone())`, (6) call `runner.verify_cli_available()`. Update runner wrapping: `Arc::new(runner)` (runner already constructed).
-- [ ] Update `handle_triage()` in `main.rs`: Same reorder as `handle_run`. New flow: (1) install signal handlers, (2) acquire lock, (3) check git preconditions, (4) load config, (5) construct `CliAgentRunner::new(config.agent.cli.clone(), config.agent.model.clone())`, (6) call `runner.verify_cli_available()`. Lock acquisition and git checks remain before config load, matching `handle_run`'s pattern. **Important:** Do NOT wrap the runner in `Arc` for `handle_triage` — it is used directly via `&self` reference in a sequential loop, unlike `handle_run` which wraps in `Arc::new()` for the scheduler.
-- [ ] Update `tests/agent_integration_test.rs`: Change `CliAgentRunner::verify_cli_available()` to `let runner = CliAgentRunner::new(CliTool::Claude, None); runner.verify_cli_available()`. Change `let runner = CliAgentRunner;` to `let runner = CliAgentRunner::new(CliTool::Claude, None);`. Add `use phase_golem::config::CliTool;` import.
-- [ ] Add a config-to-runner integration test: parse a TOML string with `[agent] cli = "opencode"` and `model = "gpt-4"`, construct `CliAgentRunner::new(config.agent.cli, config.agent.model)`, and assert `runner.tool == CliTool::OpenCode` and `runner.model == Some("gpt-4")`. This verifies the full TOML → `AgentConfig` → `CliAgentRunner` pipeline end-to-end.
-- [ ] Add `validate_result_identity()` pure helper function in `executor.rs`: `pub fn validate_result_identity(result: &PhaseResult, expected_item_id: &str, expected_phase: &str) -> Result<(), String>`. Returns `Ok(())` if `result.item_id == expected_item_id` and `result.phase == expected_phase`. Returns `Err(descriptive message)` on mismatch (e.g., `"Result mismatch: expected item_id=WRK-001, got=WRK-002"`). This applies to ALL `ResultCode` variants — even a `Failed` result should have correct identity metadata.
-- [ ] Call `validate_result_identity()` in `execute_phase()` after `run_workflows_sequentially` returns `Ok(phase_result)`, BEFORE the match on `phase_result.result`. On `Err`, immediately return `PhaseExecutionResult::Failed(err_msg)` — this is an immediate return from the function, NOT a loop iteration failure. It must be placed so that retry logic does NOT re-execute for identity mismatches (non-retryable corruption).
-- [ ] Write unit tests for `validate_result_identity()`: (a) matching `item_id` and `phase` returns `Ok`, (b) mismatched `item_id` returns `Err` with descriptive message, (c) mismatched `phase` returns `Err`, (d) both mismatched returns `Err`.
+- [x] Add `use crate::config::CliTool;` import to `agent.rs`
+- [x] Change `CliAgentRunner` from `pub struct CliAgentRunner;` to `pub struct CliAgentRunner { pub tool: CliTool, pub model: Option<String> }`. Add `pub fn new(tool: CliTool, model: Option<String>) -> Self` constructor.
+- [x] Convert `verify_cli_available()` from static method to instance method (`&self`). Use `self.tool.binary_name()` for the command, `self.tool.version_args()` for args, and `self.tool.display_name()` in error messages. Include `self.tool.install_hint()` in the error message when the CLI is not found (e.g., `"OpenCode CLI not found on PATH. Install: https://github.com/opencode-ai/opencode"`).
+- [x] Update `run_agent()` implementation: replace `Command::new("claude")` with `Command::new(self.tool.binary_name())`, replace hardcoded `.args(["--dangerously-skip-permissions", "-p", prompt])` with `.args(self.tool.build_args(prompt, self.model.as_deref()))`
+- [x] Update `handle_run()` in `main.rs`: Move CLI verification from before config load to after. New flow: (1) install signal handlers, (2) acquire lock, (3) check git preconditions, (4) load config, (5) construct `CliAgentRunner::new(config.agent.cli.clone(), config.agent.model.clone())`, (6) call `runner.verify_cli_available()`. Update runner wrapping: `Arc::new(runner)` (runner already constructed).
+- [x] Update `handle_triage()` in `main.rs`: Same reorder as `handle_run`. New flow: (1) install signal handlers, (2) acquire lock, (3) check git preconditions, (4) load config, (5) construct `CliAgentRunner::new(config.agent.cli.clone(), config.agent.model.clone())`, (6) call `runner.verify_cli_available()`. Lock acquisition and git checks remain before config load, matching `handle_run`'s pattern. **Important:** Do NOT wrap the runner in `Arc` for `handle_triage` — it is used directly via `&self` reference in a sequential loop, unlike `handle_run` which wraps in `Arc::new()` for the scheduler.
+- [x] Update `tests/agent_integration_test.rs`: Change `CliAgentRunner::verify_cli_available()` to `let runner = CliAgentRunner::new(CliTool::Claude, None); runner.verify_cli_available()`. Change `let runner = CliAgentRunner;` to `let runner = CliAgentRunner::new(CliTool::Claude, None);`. Add `use phase_golem::config::CliTool;` import.
+- [x] Add a config-to-runner integration test: parse a TOML string with `[agent] cli = "opencode"` and `model = "gpt-4"`, construct `CliAgentRunner::new(config.agent.cli, config.agent.model)`, and assert `runner.tool == CliTool::OpenCode` and `runner.model == Some("gpt-4")`. This verifies the full TOML → `AgentConfig` → `CliAgentRunner` pipeline end-to-end.
+- [x] Add `validate_result_identity()` pure helper function in `executor.rs`: `pub fn validate_result_identity(result: &PhaseResult, expected_item_id: &str, expected_phase: &str) -> Result<(), String>`. Returns `Ok(())` if `result.item_id == expected_item_id` and `result.phase == expected_phase`. Returns `Err(descriptive message)` on mismatch (e.g., `"Result mismatch: expected item_id=WRK-001, got=WRK-002"`). This applies to ALL `ResultCode` variants — even a `Failed` result should have correct identity metadata.
+- [x] Call `validate_result_identity()` in `execute_phase()` after `run_workflows_sequentially` returns `Ok(phase_result)`, BEFORE the match on `phase_result.result`. On `Err`, immediately return `PhaseExecutionResult::Failed(err_msg)` — this is an immediate return from the function, NOT a loop iteration failure. It must be placed so that retry logic does NOT re-execute for identity mismatches (non-retryable corruption).
+- [x] Write unit tests for `validate_result_identity()`: (a) matching `item_id` and `phase` returns `Ok`, (b) mismatched `item_id` returns `Err` with descriptive message, (c) mismatched `phase` returns `Err`, (d) both mismatched returns `Err`.
 
 **Verification:**
 
-- [ ] `cargo build` succeeds
-- [ ] `cargo test` passes (all existing tests + updated integration test compiles)
-- [ ] `cargo test --test agent_integration_test --no-run` compiles the integration test without running it (it is `#[ignore]`)
-- [ ] Verify `spawn_triage` in `scheduler.rs` requires zero code changes — it receives `Arc<impl AgentRunner>` generically and should work with the parameterized `CliAgentRunner` without modification
-- [ ] Manual test: `phase-golem run` with no `[agent]` config — verify (a) subprocess spawned is `claude`, (b) args are `["--dangerously-skip-permissions", "-p", <prompt>]` with no `--model` pair, (c) run completes or fails identically to pre-change behavior
-- [ ] Manual test: `phase-golem run` with `[agent] cli = "opencode"` — verify (a) if `opencode` not on PATH, error message includes "OpenCode CLI" and an install suggestion, (b) if `opencode` on PATH, subprocess is spawned with `opencode run --quiet <prompt>`
-- [ ] Manual test: `phase-golem triage` with `[agent] cli = "opencode"` — verify the triage path also uses the configured tool (not just the run path)
-- [ ] `validate_result_identity` tests pass: matching identity returns `Ok`; mismatched `item_id` returns `Err`; mismatched `phase` returns `Err`
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo build` succeeds
+- [x] `cargo test` passes (all existing tests + updated integration test compiles)
+- [x] `cargo test --test agent_integration_test --no-run` compiles the integration test without running it (it is `#[ignore]`)
+- [x] Verify `spawn_triage` in `scheduler.rs` requires zero code changes — it receives `Arc<impl AgentRunner>` generically and should work with the parameterized `CliAgentRunner` without modification
+- [x] Manual test: `phase-golem run` with no `[agent]` config — skipped (autonomous mode, no manual testing available; verified via code inspection that default config path constructs `CliAgentRunner::new(CliTool::Claude, None)` and `build_args` produces `["--dangerously-skip-permissions", "-p", prompt]`)
+- [x] Manual test: `phase-golem run` with `[agent] cli = "opencode"` — skipped (autonomous mode; verified via code inspection and config-to-runner integration test that OpenCode config flows through correctly)
+- [x] Manual test: `phase-golem triage` with `[agent] cli = "opencode"` — skipped (autonomous mode; verified via code inspection that `handle_triage` constructs runner from `config.agent` identically to `handle_run`)
+- [x] `validate_result_identity` tests pass: matching identity returns `Ok`; mismatched `item_id` returns `Err`; mismatched `phase` returns `Err`
+- [x] Code review passes (`/code-review` → fix issues → repeat until pass)
 
 **Commit:** `[HAMY-001][P2] Feature: Parameterize CliAgentRunner with configurable CLI tool and post-result validation`
 
@@ -204,6 +204,10 @@ In `handle_triage`, the current ordering is: (1) signal handlers, (2) verify CLI
 **DESIGN doc contradiction:** The Design doc explicitly states post-result validation is "DEFERRED to a separate change", but this SPEC includes it in Phase 2. This is intentional — the PRD lists post-result validation as a Must Have, and the Design doc's deferral note is outdated. When implementing, follow this SPEC, not the Design doc's deferral note. Phase 3 includes a task to update the Design doc to reflect this decision.
 
 **Followups:**
+
+- The `"[pre] Verifying Claude CLI..."` log message in `handle_run` is still hardcoded. Phase 3 will update it to use `config.agent.cli.display_name()`.
+- Code review suggested considering `CliAgentRunner::new(agent_config)` instead of threading individual fields — already captured in Followups Summary (Low priority).
+- Code review suggested explicit error types for non-retryable validation failures (e.g., `ValidationError::IdentityMismatch`) — deferred as low-priority; the current `Result<(), String>` is adequate for the single validation check.
 
 ---
 
@@ -281,6 +285,7 @@ The per-phase logging in `executor.rs` requires no signature changes because `ex
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
 | Phase 1 | complete | pending | Config foundation, init template fixes, 66 config tests pass |
+| Phase 2 | complete | pending | Parameterized CliAgentRunner, post-result validation, 581 tests pass |
 
 ## Followups Summary
 

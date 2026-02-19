@@ -15,6 +15,44 @@ use crate::types::{
 };
 use crate::{log_info, log_warn};
 
+// --- Result identity validation ---
+
+/// Validate that a phase result's identity metadata matches expectations.
+///
+/// Returns `Ok(())` if `result.item_id` and `result.phase` match the expected values.
+/// Returns `Err` with a descriptive message on mismatch. This applies to ALL result
+/// codes — even a `Failed` result should have correct identity metadata.
+pub fn validate_result_identity(
+    result: &PhaseResult,
+    expected_item_id: &str,
+    expected_phase: &str,
+) -> Result<(), String> {
+    let mut mismatches = Vec::new();
+
+    if result.item_id != expected_item_id {
+        mismatches.push(format!(
+            "item_id: expected '{}', got '{}'",
+            expected_item_id, result.item_id
+        ));
+    }
+
+    if result.phase != expected_phase {
+        mismatches.push(format!(
+            "phase: expected '{}', got '{}'",
+            expected_phase, result.phase
+        ));
+    }
+
+    if mismatches.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Result identity mismatch: {}",
+            mismatches.join("; ")
+        ))
+    }
+}
+
 // --- Staleness ---
 
 /// Result of a staleness check before phase execution.
@@ -350,39 +388,48 @@ pub async fn execute_phase(
         };
 
         match workflow_result {
-            Ok(phase_result) => match phase_result.result {
-                ResultCode::SubphaseComplete => {
-                    return PhaseExecutionResult::SubphaseComplete(phase_result);
+            Ok(phase_result) => {
+                // Validate result identity before processing — non-retryable on mismatch
+                if let Err(e) =
+                    validate_result_identity(&phase_result, &item.id, &phase_config.name)
+                {
+                    return PhaseExecutionResult::Failed(e);
                 }
-                ResultCode::PhaseComplete => {
-                    return PhaseExecutionResult::Success(phase_result);
-                }
-                ResultCode::Blocked => {
-                    let reason = phase_result
-                        .context
-                        .as_deref()
-                        .unwrap_or(&phase_result.summary)
-                        .to_string();
-                    return PhaseExecutionResult::Blocked(reason);
-                }
-                ResultCode::Failed => {
-                    if attempt >= max_attempts {
-                        return PhaseExecutionResult::Failed(format!(
-                            "Phase {} failed after {} attempts. Last failure: {}",
-                            phase_config.name, attempt, phase_result.summary
-                        ));
+
+                match phase_result.result {
+                    ResultCode::SubphaseComplete => {
+                        return PhaseExecutionResult::SubphaseComplete(phase_result);
                     }
-                    log_info!(
-                        "[{}][{}] Failed (attempt {}/{}): {}",
-                        item.id,
-                        phase_config.name.to_uppercase(),
-                        attempt,
-                        max_attempts,
-                        phase_result.summary
-                    );
-                    failure_context = Some(phase_result.summary);
+                    ResultCode::PhaseComplete => {
+                        return PhaseExecutionResult::Success(phase_result);
+                    }
+                    ResultCode::Blocked => {
+                        let reason = phase_result
+                            .context
+                            .as_deref()
+                            .unwrap_or(&phase_result.summary)
+                            .to_string();
+                        return PhaseExecutionResult::Blocked(reason);
+                    }
+                    ResultCode::Failed => {
+                        if attempt >= max_attempts {
+                            return PhaseExecutionResult::Failed(format!(
+                                "Phase {} failed after {} attempts. Last failure: {}",
+                                phase_config.name, attempt, phase_result.summary
+                            ));
+                        }
+                        log_info!(
+                            "[{}][{}] Failed (attempt {}/{}): {}",
+                            item.id,
+                            phase_config.name.to_uppercase(),
+                            attempt,
+                            max_attempts,
+                            phase_result.summary
+                        );
+                        failure_context = Some(phase_result.summary);
+                    }
                 }
-            },
+            }
             Err(e) => {
                 if attempt >= max_attempts {
                     return PhaseExecutionResult::Failed(format!(

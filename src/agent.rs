@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use nix::unistd::Pid;
 
+use crate::config::CliTool;
 use crate::types::PhaseResult;
 use crate::{log_debug, log_warn};
 
@@ -121,19 +122,38 @@ pub trait AgentRunner: Send + Sync {
     ) -> impl std::future::Future<Output = Result<PhaseResult, String>> + Send;
 }
 
-/// Real implementation that spawns `claude` CLI as a subprocess.
-pub struct CliAgentRunner;
+/// Real implementation that spawns a CLI agent as a subprocess.
+pub struct CliAgentRunner {
+    pub tool: CliTool,
+    pub model: Option<String>,
+}
 
 impl CliAgentRunner {
-    /// Verify that the `claude` CLI is available on PATH.
-    pub fn verify_cli_available() -> Result<(), String> {
-        let output = std::process::Command::new("claude")
-            .arg("--version")
+    pub fn new(tool: CliTool, model: Option<String>) -> Self {
+        Self { tool, model }
+    }
+
+    /// Verify that the configured CLI tool is available on PATH.
+    pub fn verify_cli_available(&self) -> Result<(), String> {
+        let output = std::process::Command::new(self.tool.binary_name())
+            .args(self.tool.version_args())
             .output()
-            .map_err(|e| format!("Claude CLI not found on PATH. Install it first. ({})", e))?;
+            .map_err(|e| {
+                format!(
+                    "{} not found on PATH. {} ({})",
+                    self.tool.display_name(),
+                    self.tool.install_hint(),
+                    e
+                )
+            })?;
 
         if !output.status.success() {
-            return Err("Claude CLI found but `claude --version` failed".to_string());
+            return Err(format!(
+                "{} found but `{} {}` failed",
+                self.tool.display_name(),
+                self.tool.binary_name(),
+                self.tool.version_args().join(" ")
+            ));
         }
 
         Ok(())
@@ -147,8 +167,8 @@ impl AgentRunner for CliAgentRunner {
         result_path: &Path,
         timeout: Duration,
     ) -> Result<PhaseResult, String> {
-        let mut cmd = tokio::process::Command::new("claude");
-        cmd.args(["--dangerously-skip-permissions", "-p", prompt]);
+        let mut cmd = tokio::process::Command::new(self.tool.binary_name());
+        cmd.args(self.tool.build_args(prompt, self.model.as_deref()));
         run_subprocess_agent(cmd, result_path, timeout).await
     }
 }
