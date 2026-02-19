@@ -252,7 +252,7 @@ impl AgentRunner for CliAgentRunner {
 8. **Per-phase logging:** Each phase execution log line includes the resolved CLI tool and model (e.g., `[WRK-001][BUILD] Using Claude CLI (model: opus)`). Emitted in `execute_phase()` before calling the runner.
 9. **Result reading:** `read_result_file()` is unchanged — all tools must produce the same `PhaseResult` JSON
 
-**Note:** Post-result `item_id`/`phase` validation (PRD Must Have) is deferred to a separate change to keep this PR focused on CLI tool selection.
+**Note:** Post-result `item_id`/`phase` validation (PRD Must Have) was implemented in SPEC Phase 2 as `validate_result_identity()` in `executor.rs`.
 
 ### Key Flows
 
@@ -370,11 +370,11 @@ impl AgentRunner for CliAgentRunner {
 
 **Consequences:** The `AgentConfig.model` field is never semantically empty after `load_config()` returns.
 
-#### Decision: Post-result item_id/phase validation — DEFERRED
+#### Decision: Post-result item_id/phase validation — IMPLEMENTED (Phase 2)
 
 **Context:** PRD requires asserting `result.item_id == expected_item_id` and `result.phase == expected_phase` after reading result files.
 
-**Decision:** Deferred to a separate change. This is conceptually unrelated to multi-CLI support and benefits from independent testing of the executor change. The validation should go in `execute_phase()` on the `Ok(phase_result)` returned by `run_workflows_sequentially()`, producing a non-retryable error on mismatch.
+**Decision:** Originally deferred to a separate change, but un-deferred and included in Phase 2 of the SPEC. Implemented as `validate_result_identity()` in `executor.rs`, called from `execute_phase()` after `run_workflows_sequentially` returns `Ok(phase_result)`. Returns a non-retryable error on mismatch (bypasses retry loop).
 
 #### Decision: `deny_unknown_fields` on `PhaseConfig` and `AgentConfig`
 
@@ -475,7 +475,7 @@ impl AgentRunner for CliAgentRunner {
 - `src/main.rs:handle_run()` — **Reorder:** Move CLI verification from pre-config (currently line 285, static call) to post-config/post-construction (after line 542). Construct `CliAgentRunner::new(config.agent.cli.clone(), config.agent.model.clone())`, call `runner.verify_cli_available()`, add startup logging (tool, model, binary path, OpenCode experimental warning if applicable).
 - `src/main.rs:handle_triage()` — **Same reorder:** Move CLI verification from line 689 (static) to after config load (line 699) and runner construction (line 703). Same construction and logging changes.
 - `src/main.rs:handle_init()` (~line 199) — Add `[agent]` section between `[execution]` and `[pipelines]` in template. Fix `destructive` → `is_destructive` field name in generated TOML phases.
-- `src/executor.rs:execute_phase()` — Add per-phase log line with CLI tool and model. (Post-result item_id/phase validation deferred to separate change.)
+- `src/executor.rs:execute_phase()` — Add per-phase log line with CLI tool and model. Post-result `item_id`/`phase` validation implemented in SPEC Phase 2.
 - `tests/` — Update any tests that construct `CliAgentRunner` directly (most use `MockAgentRunner` — unaffected)
 
 ### External Dependencies

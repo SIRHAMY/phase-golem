@@ -165,6 +165,33 @@ async fn main() {
     }
 }
 
+fn log_agent_config(agent: &config::AgentConfig) {
+    log_info!(
+        "[config] Agent: {} (model: {})",
+        agent.cli.display_name(),
+        agent.model.as_deref().unwrap_or("default")
+    );
+    if agent.cli == config::CliTool::OpenCode {
+        log_info!("[config] Note: OpenCode CLI support is experimental.");
+    }
+    // Log resolved binary path for debugging PATH issues
+    match std::process::Command::new("which")
+        .arg(agent.cli.binary_name())
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            let path = String::from_utf8_lossy(&output.stdout);
+            log_info!("[config] Binary: {}", path.trim());
+        }
+        _ => {
+            log_warn!(
+                "[config] Could not resolve binary path for {}",
+                agent.cli.binary_name()
+            );
+        }
+    }
+}
+
 fn resolve_backlog_path(config_base: &Path, config: &config::PhaseGolemConfig) -> PathBuf {
     config_base.join(&config.project.backlog_path)
 }
@@ -315,8 +342,10 @@ async fn handle_run(
 
     // Construct runner from config and verify CLI
     let runner = CliAgentRunner::new(config.agent.cli.clone(), config.agent.model.clone());
-    log_info!("[pre] Verifying Claude CLI...");
+    log_info!("[pre] Verifying {} ...", config.agent.cli.display_name());
     runner.verify_cli_available()?;
+    log_agent_config(&config.agent);
+
     let backlog_file_path = resolve_backlog_path(config_base, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
@@ -729,7 +758,9 @@ async fn handle_triage(
 
     // Construct runner from config and verify CLI
     let runner = CliAgentRunner::new(config.agent.cli.clone(), config.agent.model.clone());
+    log_info!("[pre] Verifying {} ...", config.agent.cli.display_name());
     runner.verify_cli_available()?;
+    log_agent_config(&config.agent);
 
     // Validate inbox file early (fail fast instead of warning mid-run)
     let inbox_path = resolve_inbox_path(config_base, &config);

@@ -804,10 +804,10 @@ items:
   impact: high
   requires_human_review: false
   created: 2026-02-15T00:00:00+00:00
-  updated: 2026-02-19T03:15:12.142247012+00:00
+  updated: 2026-02-19T03:21:46.369896047+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: b34a39917671ce9c388465d0724a511e603804dc
+  last_phase_commit: 94fc670a0537a90efd3236089dc2905b715325f0
 - id: HAMY-097
   title: Replace default feature pipeline with simple plan/build/review pipeline that doesn't depend on external skills
   status: new
@@ -925,4 +925,31 @@ items:
   origin: HAMY-001/build
   created: 2026-02-19T03:15:12.156364937+00:00
   updated: 2026-02-19T03:15:12.156364937+00:00
-next_item_id: 110
+- id: HAMY-111
+  title: OpenCode smoke test before graduating from experimental
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: HAMY-001/build
+  created: 2026-02-19T03:21:46.384382303+00:00
+  updated: 2026-02-19T03:21:46.384382303+00:00
+- id: HAMY-112
+  title: Extract shared post-parse config pipeline helper
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: HAMY-001/build
+  created: 2026-02-19T03:21:46.384382303+00:00
+  updated: 2026-02-19T03:21:46.384382303+00:00
+- id: HAMY-113
+  title: Add Codex CLI as third CliTool variant
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: HAMY-001/build
+  created: 2026-02-19T03:21:46.384382303+00:00
+  updated: 2026-02-19T03:21:46.384382303+00:00
+next_item_id: 113

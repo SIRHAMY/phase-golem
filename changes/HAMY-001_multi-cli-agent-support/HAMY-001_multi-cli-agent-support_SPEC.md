@@ -215,7 +215,7 @@ In `handle_triage`, the current ordering is: (1) signal handlers, (2) verify CLI
 
 > Add startup logging, per-phase logging, update log message references, update PRD/Design docs
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -230,25 +230,25 @@ In `handle_triage`, the current ordering is: (1) signal handlers, (2) verify CLI
 
 **Tasks:**
 
-- [ ] Add startup logging in `handle_run()` after runner construction and verification: log the resolved agent config. Format: `log_info!("[config] Agent: {} (model: {})", tool_display_name, model_or_default)` where `model_or_default` is `config.agent.model.as_deref().unwrap_or("default")`. Example output: `[config] Agent: Claude CLI (model: sonnet)` or `[config] Agent: Claude CLI (model: default)`. If `cli = OpenCode`, also log: `[config] Note: OpenCode CLI support is experimental.`
-- [ ] Add resolved binary path logging in `handle_run()` after runner verification: use `which::which(config.agent.cli.binary_name())` (if the `which` crate is available) or `std::process::Command::new("which").arg(binary_name).output()` to resolve and log the full path. Format: `log_info!("[config] Binary: {}", resolved_path)`. If resolution fails, log a warning but do not error (the verify step already confirmed the binary works). Check if the `which` crate is already a dependency before using it; if not, use the shell `which` command via `Command`.
-- [ ] Add same startup logging in `handle_triage()` after runner construction.
-- [ ] Update the verification log message in `handle_run()`: change `"[pre] Verifying Claude CLI..."` to use `config.agent.cli.display_name()` (e.g., `"[pre] Verifying Claude CLI..."` or `"[pre] Verifying OpenCode CLI..."`). Note: this line must reference the config, so it appears after config load.
-- [ ] Update the verification log message in `handle_triage()`: same change as `handle_run()` — use `config.agent.cli.display_name()` instead of hardcoded "Claude CLI".
-- [ ] Add per-phase log line in `executor.rs:execute_phase()`: before the retry loop (before line 321), add `log_info!("[{}][{}] Using {} (model: {})", item.id, phase_config.name.to_uppercase(), config.agent.cli.display_name(), config.agent.model.as_deref().unwrap_or("default"))`. This uses the existing `config: &PhaseGolemConfig` parameter — no signature change needed.
-- [ ] Update the PRD's open questions: mark the OpenCode invocation pattern question as resolved with: "Resolved: `opencode run [--model provider/model] [--quiet] <prompt>` per tech research." Mark the model selection question as resolved with: "Resolved: OpenCode uses `--model provider/model` format; Claude uses `--model name` format. Both passed via `build_args()`."
-- [ ] Update the Design doc's post-result validation note (which says "deferred to a separate change") to reflect that it was un-deferred and included in Phase 2 of this SPEC.
+- [x] Add startup logging in `handle_run()` after runner construction and verification: log the resolved agent config. Format: `log_info!("[config] Agent: {} (model: {})", tool_display_name, model_or_default)` where `model_or_default` is `config.agent.model.as_deref().unwrap_or("default")`. Example output: `[config] Agent: Claude CLI (model: sonnet)` or `[config] Agent: Claude CLI (model: default)`. If `cli = OpenCode`, also log: `[config] Note: OpenCode CLI support is experimental.`
+- [x] Add resolved binary path logging in `handle_run()` after runner verification: use `which::which(config.agent.cli.binary_name())` (if the `which` crate is available) or `std::process::Command::new("which").arg(binary_name).output()` to resolve and log the full path. Format: `log_info!("[config] Binary: {}", resolved_path)`. If resolution fails, log a warning but do not error (the verify step already confirmed the binary works). Check if the `which` crate is already a dependency before using it; if not, use the shell `which` command via `Command`.
+- [x] Add same startup logging in `handle_triage()` after runner construction.
+- [x] Update the verification log message in `handle_run()`: change `"[pre] Verifying Claude CLI..."` to use `config.agent.cli.display_name()` (e.g., `"[pre] Verifying Claude CLI..."` or `"[pre] Verifying OpenCode CLI..."`). Note: this line must reference the config, so it appears after config load.
+- [x] Update the verification log message in `handle_triage()`: same change as `handle_run()` — use `config.agent.cli.display_name()` instead of hardcoded "Claude CLI".
+- [x] Add per-phase log line in `executor.rs:execute_phase()`: before the retry loop (before line 321), add `log_info!("[{}][{}] Using {} (model: {})", item.id, phase_config.name.to_uppercase(), config.agent.cli.display_name(), config.agent.model.as_deref().unwrap_or("default"))`. This uses the existing `config: &PhaseGolemConfig` parameter — no signature change needed.
+- [x] Update the PRD's open questions: mark the OpenCode invocation pattern question as resolved with: "Resolved: `opencode run [--model provider/model] [--quiet] <prompt>` per tech research." Mark the model selection question as resolved with: "Resolved: OpenCode uses `--model provider/model` format; Claude uses `--model name` format. Both passed via `build_args()`."
+- [x] Update the Design doc's post-result validation note (which says "deferred to a separate change") to reflect that it was un-deferred and included in Phase 2 of this SPEC.
 
 **Verification:**
 
-- [ ] `cargo build` succeeds
-- [ ] `cargo test` passes (no regressions)
-- [ ] Manual test: `phase-golem run` logs agent config at startup (e.g., `[config] Agent: Claude CLI (model: default)`)
-- [ ] Manual test: `phase-golem run` logs the resolved binary path at startup (e.g., `[config] Binary: /usr/local/bin/claude`)
-- [ ] Manual test: Each phase execution logs the CLI tool and model
-- [ ] Verify PRD open questions are updated with resolution notes
-- [ ] Verify Design doc post-result validation deferral note is updated
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo build` succeeds
+- [x] `cargo test` passes (no regressions)
+- [x] Manual test: `phase-golem run` logs agent config at startup (e.g., `[config] Agent: Claude CLI (model: default)`) — skipped (autonomous mode; verified via code inspection that `log_agent_config()` is called after runner verification in both `handle_run` and `handle_triage`)
+- [x] Manual test: `phase-golem run` logs the resolved binary path at startup (e.g., `[config] Binary: /usr/local/bin/claude`) — skipped (autonomous mode; verified via code inspection that `log_agent_config()` runs `which` and logs result)
+- [x] Manual test: Each phase execution logs the CLI tool and model — skipped (autonomous mode; verified via code inspection that `execute_phase` logs `[{item_id}][{PHASE}] Using {display_name} (model: {model})` before retry loop)
+- [x] Verify PRD open questions are updated with resolution notes
+- [x] Verify Design doc post-result validation deferral note is updated
+- [x] Code review passes (`/code-review` → fix issues → repeat until pass)
 
 **Commit:** `[HAMY-001][P3] Feature: Add agent observability and update docs`
 
@@ -256,29 +256,35 @@ In `handle_triage`, the current ordering is: (1) signal handlers, (2) verify CLI
 
 The per-phase logging in `executor.rs` requires no signature changes because `execute_phase` already receives `config: &PhaseGolemConfig`, which now contains `config.agent.cli` and `config.agent.model` from Phase 1.
 
+The `which` crate is not a project dependency, so binary path resolution uses `std::process::Command::new("which")` via shell command per the SPEC's fallback guidance.
+
+Code review identified that startup logging (agent config, experimental warning, binary path) was duplicated verbatim between `handle_run()` and `handle_triage()` (24 lines each). Extracted to a shared `log_agent_config(&AgentConfig)` helper function in `main.rs`.
+
 **Followups:**
+
+- Consider using the `which` crate for cross-platform binary resolution if Windows support becomes relevant. The current `which` shell command only works on Unix-like systems.
 
 ---
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met:
-  - [ ] User can configure CLI tool in `phase-golem.toml` via `[agent]` section
-  - [ ] `AgentRunner` trait signature unchanged; `CliAgentRunner` parameterized; `MockAgentRunner` unaffected
-  - [ ] Correct command/arguments for configured CLI tool (unit tested per tool)
-  - [ ] Default behavior remains `claude` when no CLI configured (both absent section and omitted field)
-  - [ ] `verify_cli_available()` accepts configured CLI tool, returns error with tool name
-  - [ ] All entry points updated: `handle_run`, `handle_triage` (construct from config)
-  - [ ] CLI tool field deserializes as enum via serde (invalid values = deser error)
-  - [ ] Effective agent config logged at startup
-  - [ ] Existing tests pass
-  - [ ] `handle_init` includes `[agent]` section with defaults
-  - [ ] Log messages use configured tool's display name
-  - [ ] Per-phase execution logs include CLI tool and model
-- [ ] Tests pass
-- [ ] No regressions introduced
-- [ ] Code reviewed (if applicable)
+- [x] All phases complete
+- [x] All PRD success criteria met:
+  - [x] User can configure CLI tool in `phase-golem.toml` via `[agent]` section
+  - [x] `AgentRunner` trait signature unchanged; `CliAgentRunner` parameterized; `MockAgentRunner` unaffected
+  - [x] Correct command/arguments for configured CLI tool (unit tested per tool)
+  - [x] Default behavior remains `claude` when no CLI configured (both absent section and omitted field)
+  - [x] `verify_cli_available()` accepts configured CLI tool, returns error with tool name
+  - [x] All entry points updated: `handle_run`, `handle_triage` (construct from config)
+  - [x] CLI tool field deserializes as enum via serde (invalid values = deser error)
+  - [x] Effective agent config logged at startup
+  - [x] Existing tests pass
+  - [x] `handle_init` includes `[agent]` section with defaults
+  - [x] Log messages use configured tool's display name
+  - [x] Per-phase execution logs include CLI tool and model
+- [x] Tests pass
+- [x] No regressions introduced
+- [x] Code reviewed (if applicable)
 
 ## Execution Log
 
@@ -286,6 +292,7 @@ The per-phase logging in `executor.rs` requires no signature changes because `ex
 |-------|--------|--------|-------|
 | Phase 1 | complete | pending | Config foundation, init template fixes, 66 config tests pass |
 | Phase 2 | complete | pending | Parameterized CliAgentRunner, post-result validation, 581 tests pass |
+| Phase 3 | complete | pending | Observability: startup/per-phase logging, display_name in log messages, PRD/Design doc updates, 581 tests pass |
 
 ## Followups Summary
 
@@ -307,6 +314,7 @@ The per-phase logging in `executor.rs` requires no signature changes because `ex
 - [ ] ACP (Agent Client Protocol) integration as a future `AcpAgentRunner` — provides universal protocol support for 10+ tools but has a fundamental stdin/stdout conflict with current architecture that needs separate design work.
 - [ ] Add `--prompt-file` support for large prompts that might approach argv limits (~2MB on Linux).
 - [ ] Consider changing `CliAgentRunner::new(tool, model)` to `CliAgentRunner::new(agent_config)` — the current struct duplicates `AgentConfig` fields. If `AgentConfig` grows (e.g., for per-phase overrides in HAMY-001b), every new field must be threaded through separately.
+- [ ] Consider using the `which` crate for cross-platform binary path resolution if Windows support becomes relevant. Current `which` shell command only works on Unix-like systems.
 
 ## Design Details
 
@@ -358,10 +366,16 @@ See the Design doc's Technical Decisions section for rationale on: method-based 
 
 ## Retrospective
 
-[Fill in after completion]
-
 ### What worked well?
+
+- The 3-phase decomposition (types → runner → observability) kept each phase focused and independently shippable
+- Code review caught the duplicated logging block (24 lines x 2) before it shipped, leading to a clean `log_agent_config()` helper extraction
+- The SPEC's detailed task descriptions and patterns references made implementation straightforward
 
 ### What was harder than expected?
 
+- Nothing significant — Phase 3 was appropriately scoped as low complexity
+
 ### What would we do differently next time?
+
+- Consider extracting shared startup logging helpers earlier in the design phase to prevent duplication at the code level

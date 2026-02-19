@@ -146,8 +146,8 @@ _(None for this change — additional features are deferred to follow-up changes
 - [x] ~~Where in `phase-golem.toml` should this live?~~ **Decision: `[agent]` section** — semantically distinct from execution params, room for future config
 - [x] ~~Which CLI tools in v1?~~ **Decision: claude + opencode (enum variants)** — claude fully supported, opencode deferred until invocation pattern validated. Codex CLI (OpenAI) can be added later via enum extension.
 - [x] ~~Per-phase CLI selection priority?~~ **Decision: Deferred to follow-up change (HAMY-001b)** — global agent config provides immediate value; per-phase overrides add significant complexity and serve a narrower use case
-- [ ] What is the exact invocation pattern for opencode? (command name, args for prompt, non-interactive flags, model selection) — **Blocks enabling the `opencode` enum variant**, not the initial change
-- [ ] How does model selection work for each CLI tool? (claude has `--model`, opencode TBD) — **Blocks enabling the `opencode` enum variant**
+- [x] What is the exact invocation pattern for opencode? (command name, args for prompt, non-interactive flags, model selection) — **Resolved:** `opencode run [--model provider/model] [--quiet] <prompt>` per tech research.
+- [x] How does model selection work for each CLI tool? (claude has `--model`, opencode TBD) — **Resolved:** OpenCode uses `--model provider/model` format; Claude uses `--model name` format. Both passed via `build_args()`.
 - [x] ~~Should `handle_init` include the new CLI config field in generated `phase-golem.toml`?~~ **Decision: Yes, include with defaults** — makes it explicit which agent CLI and model are being used
 - [x] ~~What should the config ergonomics look like for per-phase overrides?~~ **Decision: Deferred to HAMY-001b** — will be addressed when per-phase overrides are in scope
 - [x] ~~Should the `AgentRunner` trait signature change?~~ **Decision: No** — `CliAgentRunner` becomes a parameterized struct; trait signature unchanged; `MockAgentRunner` unaffected

@@ -353,7 +353,16 @@ pub async fn execute_phase(
     let timeout = Duration::from_secs(config.execution.phase_timeout_minutes as u64 * 60);
     let max_attempts = config.execution.max_retries + 1;
 
-    // 4. Retry loop
+    // 4. Log CLI tool and model for this phase
+    log_info!(
+        "[{}][{}] Using {} (model: {})",
+        item.id,
+        phase_config.name.to_uppercase(),
+        config.agent.cli.display_name(),
+        config.agent.model.as_deref().unwrap_or("default")
+    );
+
+    // 5. Retry loop
     let mut failure_context: Option<String> = None;
 
     for attempt in 1..=max_attempts {
