@@ -2,7 +2,7 @@ mod common;
 
 use std::path::Path;
 
-use phase_golem::config::{PhaseGolemConfig, PhaseConfig, PipelineConfig, StalenessAction};
+use phase_golem::config::{PhaseConfig, PhaseGolemConfig, PipelineConfig, StalenessAction};
 use phase_golem::preflight::{run_preflight, PreflightError};
 use phase_golem::types::{BacklogItem, ItemStatus, PhasePool};
 
@@ -47,7 +47,12 @@ fn preflight_valid_config_passes() {
     let config = default_config();
     let backlog = common::make_backlog(vec![]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -65,7 +70,12 @@ fn preflight_no_main_phases_fails() {
 
     let backlog = common::make_backlog(vec![]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors
@@ -95,7 +105,12 @@ fn preflight_duplicate_phase_names_fails() {
 
     let backlog = common::make_backlog(vec![]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors
@@ -122,7 +137,12 @@ fn preflight_destructive_pre_phase_fails() {
 
     let backlog = common::make_backlog(vec![]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors
@@ -137,7 +157,12 @@ fn preflight_max_wip_zero_fails() {
 
     let backlog = common::make_backlog(vec![]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors.iter().any(|e| e.condition.contains("max_wip")));
@@ -150,7 +175,12 @@ fn preflight_max_concurrent_zero_fails() {
 
     let backlog = common::make_backlog(vec![]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors
@@ -176,7 +206,12 @@ fn preflight_staleness_block_with_max_wip_gt_1_fails() {
 
     let backlog = common::make_backlog(vec![]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors
@@ -193,7 +228,12 @@ fn preflight_errors_contain_config_location() {
 
     let backlog = common::make_backlog(vec![]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     let error = &errors[0];
@@ -283,7 +323,12 @@ fn preflight_valid_in_progress_item_passes() {
 
     let backlog = common::make_backlog(vec![item]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -298,7 +343,12 @@ fn preflight_invalid_pipeline_type_fails() {
 
     let backlog = common::make_backlog(vec![item]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors
@@ -316,7 +366,12 @@ fn preflight_invalid_phase_name_fails() {
 
     let backlog = common::make_backlog(vec![item]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors.iter().any(|e| e.condition.contains("unknown phase")));
@@ -332,7 +387,12 @@ fn preflight_mismatched_phase_pool_fails() {
 
     let backlog = common::make_backlog(vec![item]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors.iter().any(|e| e.condition.contains("phase_pool")));
@@ -350,7 +410,12 @@ fn preflight_skips_new_and_done_items() {
 
     let backlog = common::make_backlog(vec![new_item, done_item]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -365,7 +430,12 @@ fn preflight_validates_scoping_items() {
 
     let backlog = common::make_backlog(vec![item]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -380,7 +450,12 @@ fn preflight_item_with_default_pipeline_type_passes() {
 
     let backlog = common::make_backlog(vec![item]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -392,7 +467,12 @@ fn preflight_empty_backlog_no_duplicate_errors() {
     let config = default_config();
     let backlog = common::make_backlog(vec![]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -404,7 +484,12 @@ fn preflight_single_item_no_duplicate_errors() {
 
     let backlog = common::make_backlog(vec![item]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -418,7 +503,12 @@ fn preflight_unique_ids_no_duplicate_errors() {
 
     let backlog = common::make_backlog(vec![item_a, item_b, item_c]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -431,7 +521,12 @@ fn preflight_duplicate_id_pair_fails() {
 
     let backlog = common::make_backlog(vec![item_a, item_b]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     let dup_errors: Vec<_> = errors
@@ -457,7 +552,12 @@ fn preflight_multiple_distinct_duplicate_ids_fails() {
 
     let backlog = common::make_backlog(vec![item_a, item_b, item_c, item_d]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     let dup_errors: Vec<_> = errors
@@ -482,7 +582,12 @@ fn preflight_three_way_duplicate_id_fails() {
 
     let backlog = common::make_backlog(vec![item_a, item_b, item_c, item_d, item_e]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     let dup_errors: Vec<_> = errors
@@ -502,7 +607,12 @@ fn preflight_case_sensitive_ids_not_duplicates() {
 
     let backlog = common::make_backlog(vec![item_a, item_b]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -517,7 +627,12 @@ fn preflight_dangling_dependency_fails() {
 
     let backlog = common::make_backlog(vec![item]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors
@@ -536,7 +651,12 @@ fn preflight_multiple_dangling_references() {
 
     let backlog = common::make_backlog(vec![item_a, item_b]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     let dangling_errors: Vec<_> = errors
@@ -555,7 +675,12 @@ fn preflight_valid_dependencies_passes() {
 
     let backlog = common::make_backlog(vec![item_a, item_b]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -570,7 +695,12 @@ fn preflight_self_dependency_fails() {
 
     let backlog = common::make_backlog(vec![item]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     let cycle_errors: Vec<_> = errors
@@ -592,7 +722,12 @@ fn preflight_two_node_cycle_fails() {
 
     let backlog = common::make_backlog(vec![item_a, item_b]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     let cycle_errors: Vec<_> = errors
@@ -621,7 +756,12 @@ fn preflight_three_node_cycle_fails() {
 
     let backlog = common::make_backlog(vec![item_a, item_b, item_c]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     let cycle_errors: Vec<_> = errors
@@ -657,7 +797,12 @@ fn preflight_multiple_independent_cycles() {
 
     let backlog = common::make_backlog(vec![item_a, item_b, item_c, item_d]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     let cycle_errors: Vec<_> = errors
@@ -687,7 +832,12 @@ fn preflight_cycle_with_blocked_item_detected() {
 
     let backlog = common::make_backlog(vec![item_a, item_b]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     let errors = result.unwrap_err();
     assert!(errors
@@ -707,7 +857,12 @@ fn preflight_done_items_excluded_from_cycle_detection() {
 
     let backlog = common::make_backlog(vec![item_a, item_b]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -729,7 +884,12 @@ fn preflight_diamond_dag_no_false_positive() {
 
     let backlog = common::make_backlog(vec![item_a, item_b, item_c, item_d]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -748,7 +908,12 @@ fn preflight_transitive_chain_no_cycle() {
 
     let backlog = common::make_backlog(vec![item_a, item_b, item_c]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }
@@ -761,7 +926,12 @@ fn preflight_no_dependencies_passes() {
 
     let backlog = common::make_backlog(vec![item_a, item_b]);
 
-    let result = run_preflight(&config, &backlog, Path::new("/tmp/test"), Path::new("/tmp/test"));
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
 
     assert!(result.is_ok());
 }

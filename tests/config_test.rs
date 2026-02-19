@@ -1,4 +1,5 @@
 use phase_golem::config::*;
+use phase_golem::config::{AgentConfig, CliTool};
 use phase_golem::types::*;
 
 // --- backlog_path config tests ---
@@ -572,4 +573,436 @@ fn load_config_from_explicit_path_missing() {
         "Expected 'Config file not found' in: {}",
         err
     );
+}
+
+// --- CliTool tests ---
+
+#[test]
+fn cli_tool_default_is_claude() {
+    assert_eq!(CliTool::default(), CliTool::Claude);
+}
+
+#[test]
+fn cli_tool_binary_name() {
+    assert_eq!(CliTool::Claude.binary_name(), "claude");
+    assert_eq!(CliTool::OpenCode.binary_name(), "opencode");
+}
+
+#[test]
+fn cli_tool_display_name() {
+    assert_eq!(CliTool::Claude.display_name(), "Claude CLI");
+    assert_eq!(CliTool::OpenCode.display_name(), "OpenCode CLI");
+}
+
+#[test]
+fn cli_tool_build_args_claude_without_model() {
+    let args = CliTool::Claude.build_args("do stuff", None);
+    assert_eq!(
+        args,
+        vec!["--dangerously-skip-permissions", "-p", "do stuff"]
+    );
+}
+
+#[test]
+fn cli_tool_build_args_claude_with_model() {
+    let args = CliTool::Claude.build_args("do stuff", Some("opus"));
+    assert_eq!(
+        args,
+        vec![
+            "--dangerously-skip-permissions",
+            "--model",
+            "opus",
+            "-p",
+            "do stuff"
+        ]
+    );
+}
+
+#[test]
+fn cli_tool_build_args_opencode_without_model() {
+    let args = CliTool::OpenCode.build_args("do stuff", None);
+    assert_eq!(args, vec!["run", "--quiet", "do stuff"]);
+}
+
+#[test]
+fn cli_tool_build_args_opencode_with_model() {
+    let args = CliTool::OpenCode.build_args("do stuff", Some("gpt-4"));
+    assert_eq!(args, vec!["run", "--model", "gpt-4", "--quiet", "do stuff"]);
+}
+
+#[test]
+fn cli_tool_build_args_with_special_chars_in_prompt() {
+    let prompt = "line1\nline2\n\"quoted\"\nspecial: $HOME & stuff; rm -rf /";
+    let args = CliTool::Claude.build_args(prompt, None);
+    assert_eq!(args[args.len() - 1], prompt);
+    let args_oc = CliTool::OpenCode.build_args(prompt, None);
+    assert_eq!(args_oc[args_oc.len() - 1], prompt);
+}
+
+#[test]
+fn cli_tool_version_args() {
+    assert_eq!(CliTool::Claude.version_args(), vec!["--version"]);
+    assert_eq!(CliTool::OpenCode.version_args(), vec!["--version"]);
+}
+
+#[test]
+fn cli_tool_install_hint_non_empty() {
+    assert!(!CliTool::Claude.install_hint().is_empty());
+    assert!(!CliTool::OpenCode.install_hint().is_empty());
+}
+
+#[test]
+fn cli_tool_serde_claude() {
+    let config: PhaseGolemConfig = toml::from_str(
+        r#"
+[agent]
+cli = "claude"
+"#,
+    )
+    .unwrap();
+    assert_eq!(config.agent.cli, CliTool::Claude);
+}
+
+#[test]
+fn cli_tool_serde_opencode() {
+    let config: PhaseGolemConfig = toml::from_str(
+        r#"
+[agent]
+cli = "opencode"
+"#,
+    )
+    .unwrap();
+    assert_eq!(config.agent.cli, CliTool::OpenCode);
+}
+
+#[test]
+fn cli_tool_serde_invalid_value_rejected() {
+    let result = toml::from_str::<PhaseGolemConfig>(
+        r#"
+[agent]
+cli = "gpt"
+"#,
+    );
+    assert!(result.is_err());
+}
+
+// --- AgentConfig tests ---
+
+#[test]
+fn agent_config_full_section_parses() {
+    let config: PhaseGolemConfig = toml::from_str(
+        r#"
+[agent]
+cli = "opencode"
+model = "gpt-4"
+"#,
+    )
+    .unwrap();
+    assert_eq!(config.agent.cli, CliTool::OpenCode);
+    assert_eq!(config.agent.model, Some("gpt-4".to_string()));
+}
+
+#[test]
+fn agent_config_partial_only_model_defaults_cli() {
+    let config: PhaseGolemConfig = toml::from_str(
+        r#"
+[agent]
+model = "sonnet"
+"#,
+    )
+    .unwrap();
+    assert_eq!(config.agent.cli, CliTool::Claude);
+    assert_eq!(config.agent.model, Some("sonnet".to_string()));
+}
+
+#[test]
+fn agent_config_missing_section_defaults() {
+    let config: PhaseGolemConfig = toml::from_str("").unwrap();
+    assert_eq!(config.agent.cli, CliTool::Claude);
+    assert_eq!(config.agent.model, None);
+}
+
+#[test]
+fn agent_config_deny_unknown_fields_rejects_typo() {
+    let result = toml::from_str::<PhaseGolemConfig>(
+        r#"
+[agent]
+cli_tool = "claude"
+"#,
+    );
+    assert!(result.is_err());
+}
+
+// --- Normalization tests ---
+
+#[test]
+fn normalize_empty_string_model_to_none() {
+    let mut config = PhaseGolemConfig {
+        agent: AgentConfig {
+            cli: CliTool::Claude,
+            model: Some("".to_string()),
+        },
+        ..PhaseGolemConfig::default()
+    };
+    normalize_agent_config(&mut config);
+    assert_eq!(config.agent.model, None);
+}
+
+#[test]
+fn normalize_whitespace_model_to_none() {
+    let mut config = PhaseGolemConfig {
+        agent: AgentConfig {
+            cli: CliTool::Claude,
+            model: Some("   ".to_string()),
+        },
+        ..PhaseGolemConfig::default()
+    };
+    normalize_agent_config(&mut config);
+    assert_eq!(config.agent.model, None);
+}
+
+#[test]
+fn normalize_tab_newline_model_to_none() {
+    let mut config = PhaseGolemConfig {
+        agent: AgentConfig {
+            cli: CliTool::Claude,
+            model: Some("\t\n".to_string()),
+        },
+        ..PhaseGolemConfig::default()
+    };
+    normalize_agent_config(&mut config);
+    assert_eq!(config.agent.model, None);
+}
+
+#[test]
+fn normalize_valid_model_preserved() {
+    let mut config = PhaseGolemConfig {
+        agent: AgentConfig {
+            cli: CliTool::Claude,
+            model: Some("opus".to_string()),
+        },
+        ..PhaseGolemConfig::default()
+    };
+    normalize_agent_config(&mut config);
+    assert_eq!(config.agent.model, Some("opus".to_string()));
+}
+
+#[test]
+fn normalize_none_model_stays_none() {
+    let mut config = PhaseGolemConfig::default();
+    normalize_agent_config(&mut config);
+    assert_eq!(config.agent.model, None);
+}
+
+#[test]
+fn normalize_via_load_config_at_whitespace_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("custom.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[agent]
+model = "  "
+"#,
+    )
+    .unwrap();
+
+    let config = load_config_from(Some(config_path.as_path()), dir.path()).unwrap();
+    assert_eq!(config.agent.model, None);
+}
+
+// --- load_config no-file agent defaults ---
+
+#[test]
+fn load_config_no_file_agent_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert_eq!(
+        config.agent,
+        AgentConfig {
+            cli: CliTool::Claude,
+            model: None,
+        }
+    );
+}
+
+// --- Validation tests (model allowlist) ---
+
+#[test]
+fn validate_model_with_internal_hyphens_accepted() {
+    let mut config = PhaseGolemConfig::default();
+    config.agent.model = Some("claude-opus-4".to_string());
+    config
+        .pipelines
+        .insert("t".to_string(), default_feature_pipeline());
+    assert!(validate(&config).is_ok());
+}
+
+#[test]
+fn validate_model_with_dots_accepted() {
+    let mut config = PhaseGolemConfig::default();
+    config.agent.model = Some("gpt-4.1".to_string());
+    config
+        .pipelines
+        .insert("t".to_string(), default_feature_pipeline());
+    assert!(validate(&config).is_ok());
+}
+
+#[test]
+fn validate_model_with_slashes_accepted() {
+    let mut config = PhaseGolemConfig::default();
+    config.agent.model = Some("openai/gpt-4o".to_string());
+    config
+        .pipelines
+        .insert("t".to_string(), default_feature_pipeline());
+    assert!(validate(&config).is_ok());
+}
+
+#[test]
+fn validate_model_starting_with_hyphen_rejected() {
+    let mut config = PhaseGolemConfig::default();
+    config.agent.model = Some("-badmodel".to_string());
+    config
+        .pipelines
+        .insert("t".to_string(), default_feature_pipeline());
+    let result = validate(&config);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert!(errors.iter().any(|e| e.contains("agent.model")));
+}
+
+#[test]
+fn validate_model_starting_with_double_hyphen_rejected() {
+    let mut config = PhaseGolemConfig::default();
+    config.agent.model = Some("--flag".to_string());
+    config
+        .pipelines
+        .insert("t".to_string(), default_feature_pipeline());
+    let result = validate(&config);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert!(errors.iter().any(|e| e.contains("agent.model")));
+}
+
+#[test]
+fn validate_model_with_spaces_rejected() {
+    let mut config = PhaseGolemConfig::default();
+    config.agent.model = Some("opus 4".to_string());
+    config
+        .pipelines
+        .insert("t".to_string(), default_feature_pipeline());
+    let result = validate(&config);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert!(errors.iter().any(|e| e.contains("agent.model")));
+}
+
+#[test]
+fn validate_model_with_special_chars_rejected() {
+    let mut config = PhaseGolemConfig::default();
+    config.agent.model = Some("model;rm".to_string());
+    config
+        .pipelines
+        .insert("t".to_string(), default_feature_pipeline());
+    let result = validate(&config);
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+    assert!(errors.iter().any(|e| e.contains("agent.model")));
+}
+
+#[test]
+fn validate_none_model_passes() {
+    let mut config = PhaseGolemConfig::default();
+    config.agent.model = None;
+    config
+        .pipelines
+        .insert("t".to_string(), default_feature_pipeline());
+    assert!(validate(&config).is_ok());
+}
+
+// --- PhaseConfig backward compat tests ---
+
+#[test]
+fn phase_config_destructive_alias_parses() {
+    let config: PhaseGolemConfig = toml::from_str(
+        r#"
+[[pipelines.test.phases]]
+name = "build"
+destructive = true
+"#,
+    )
+    .unwrap();
+    assert!(config.pipelines["test"].phases[0].is_destructive);
+}
+
+#[test]
+fn phase_config_deny_unknown_fields_rejects_unknown_key() {
+    let result = toml::from_str::<PhaseGolemConfig>(
+        r#"
+[[pipelines.test.phases]]
+name = "build"
+is_destructive = false
+unknown_key = "bad"
+"#,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn cli_tool_and_agent_config_accessible_from_crate() {
+    // Confirms public export through the crate boundary
+    let _tool: phase_golem::config::CliTool = CliTool::Claude;
+    let _config: phase_golem::config::AgentConfig = AgentConfig::default();
+}
+
+// --- Init template round-trip test ---
+
+#[test]
+fn init_template_round_trip_parses() {
+    // Replicate the handle_init template TOML (with a concrete prefix)
+    let template = r#"[project]
+prefix = "WRK"
+# backlog_path = "BACKLOG.yaml"
+
+[guardrails]
+max_size = "medium"
+max_complexity = "medium"
+max_risk = "low"
+
+[execution]
+phase_timeout_minutes = 30
+max_retries = 2
+default_phase_cap = 100
+max_wip = 1
+max_concurrent = 1
+
+[agent]
+# cli = "claude"          # AI CLI tool: "claude", "opencode"
+# model = ""              # Model override (e.g., "opus", "sonnet")
+
+[pipelines.feature]
+pre_phases = [
+    { name = "research", workflows = [".claude/skills/changes/workflows/orchestration/research-scope.md"], is_destructive = false },
+]
+phases = [
+    { name = "prd",           workflows = [".claude/skills/changes/workflows/0-prd/create-prd.md"],                     is_destructive = false },
+    { name = "tech-research", workflows = [".claude/skills/changes/workflows/1-tech-research/tech-research.md"],       is_destructive = false },
+    { name = "design",        workflows = [".claude/skills/changes/workflows/2-design/design.md"],                       is_destructive = false },
+    { name = "spec",           workflows = [".claude/skills/changes/workflows/3-spec/create-spec.md"],                    is_destructive = false },
+    { name = "build",          workflows = [".claude/skills/changes/workflows/4-build/implement-spec-autonomous.md"],   is_destructive = true },
+    { name = "review",         workflows = [".claude/skills/changes/workflows/5-review/change-review.md"],               is_destructive = false },
+]
+"#;
+
+    let config: PhaseGolemConfig =
+        toml::from_str(template).expect("handle_init template should parse successfully");
+
+    // Verify agent defaults (commented-out fields should not be set)
+    assert_eq!(config.agent.cli, CliTool::Claude);
+    assert_eq!(config.agent.model, None);
+
+    // Verify the pipeline parsed
+    assert!(config.pipelines.contains_key("feature"));
+    assert_eq!(config.pipelines["feature"].phases.len(), 6);
+    assert!(config.pipelines["feature"].phases[4].is_destructive);
 }

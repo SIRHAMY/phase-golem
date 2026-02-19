@@ -41,7 +41,11 @@ pub fn build_prompt(params: &PromptParams) -> String {
 
     [
         preamble,
-        build_skill_invocation(params.phase_config, params.change_folder, params.config_base),
+        build_skill_invocation(
+            params.phase_config,
+            params.change_folder,
+            params.config_base,
+        ),
         build_output_suffix(&params.item.id, params.phase, params.result_path),
     ]
     .join("\n\n")
@@ -262,7 +266,11 @@ fn build_preamble(
 ///
 /// References workflow files by relative path. Any agent can read a file
 /// and follow its instructions, making this robust across agent runtimes.
-fn build_skill_invocation(phase_config: &PhaseConfig, change_folder: &Path, config_base: &Path) -> String {
+fn build_skill_invocation(
+    phase_config: &PhaseConfig,
+    change_folder: &Path,
+    config_base: &Path,
+) -> String {
     let change_path = change_folder.display();
 
     // Resolve workflow paths relative to config_base so agents can always find them.

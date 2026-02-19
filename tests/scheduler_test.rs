@@ -7,7 +7,7 @@ use std::sync::Arc;
 use phase_golem::agent::MockAgentRunner;
 use phase_golem::backlog;
 use phase_golem::config::{
-    default_feature_pipeline, ExecutionConfig, PhaseGolemConfig, PhaseConfig, PipelineConfig,
+    default_feature_pipeline, ExecutionConfig, PhaseConfig, PhaseGolemConfig, PipelineConfig,
 };
 use phase_golem::coordinator;
 use phase_golem::filter;

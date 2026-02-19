@@ -58,7 +58,7 @@ Each phase should leave the codebase in a functional, stable state. Complete and
 
 > Add `CliTool` enum, `AgentConfig` struct, config integration, normalization, validation, `handle_init` template fixes, and tests
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Medium
 
@@ -78,40 +78,40 @@ Each phase should leave the codebase in a functional, stable state. Complete and
 
 **Tasks:**
 
-- [ ] Add `CliTool` enum to `config.rs` with `Claude` and `OpenCode` variants. Derives: `Default, Deserialize, Clone, Debug, PartialEq, Eq`. Attributes: `#[serde(rename_all = "lowercase")]` (NOT `snake_case` — `snake_case` would serialize `OpenCode` as `open_code` instead of `opencode`), `#[default]` on `Claude`. Implement methods: `binary_name() -> &str`, `display_name() -> &str`, `build_args(&self, prompt: &str, model: Option<&str>) -> Vec<String>`, `version_args() -> Vec<&str>`, `install_hint() -> &str` (returns install suggestion URL/command, e.g., `"Install: https://docs.anthropic.com/en/docs/claude-code"` for Claude, `"Install: https://github.com/opencode-ai/opencode"` for OpenCode).
-- [ ] Add `AgentConfig` struct to `config.rs` with fields `cli: CliTool` and `model: Option<String>`. Derives: `Default, Deserialize, Clone, Debug, PartialEq`. Attributes: `#[serde(default, deny_unknown_fields)]`.
-- [ ] Add `pub agent: AgentConfig` field to `PhaseGolemConfig` (between `execution` and `pipelines`)
-- [ ] Add `#[serde(alias = "destructive")]` to `PhaseConfig.is_destructive` AND `#[serde(deny_unknown_fields)]` to `PhaseConfig` struct — these MUST be applied together in the same edit. Without the alias, `deny_unknown_fields` would reject existing configs that use `destructive` instead of `is_destructive`. Before applying, audit all existing test TOML fixtures in `tests/config_test.rs` (and any other test files) for unknown fields in `PhaseConfig` blocks that would now be rejected.
-- [ ] Add `normalize_agent_config(config: &mut PhaseGolemConfig)` helper function. Trims `config.agent.model` and normalizes empty/whitespace-only strings to `None`.
-- [ ] Add model validation to `validate()`: reject `config.agent.model` values that do not match the allowlist pattern `^[a-zA-Z0-9._/-]+$` (per PRD). This rejects whitespace, control characters, empty strings, and flag-like prefixes (`--`, `-`) as defense-in-depth. Use a simple character-by-character check (or `regex` crate if already a dependency; otherwise avoid adding a dep for this). Error message: `"agent.model contains invalid characters (allowed: letters, digits, '.', '_', '/', '-')"`. Note: this is stricter than just rejecting flag prefixes — it also rejects spaces, special chars, etc.
-- [ ] Call `normalize_agent_config(&mut config)` in `load_config()` — insert after `toml::from_str` (line 279), before `populate_default_pipelines` (line 282)
-- [ ] Call `normalize_agent_config(&mut config)` in `load_config_at()` — insert after `toml::from_str` (line 248), before `populate_default_pipelines` (line 251)
-- [ ] Update `handle_init()` template in `main.rs`: Add `[agent]` section between `[execution]` and `[pipelines.feature]` with commented defaults:
+- [x] Add `CliTool` enum to `config.rs` with `Claude` and `OpenCode` variants. Derives: `Default, Deserialize, Clone, Debug, PartialEq, Eq`. Attributes: `#[serde(rename_all = "lowercase")]` (NOT `snake_case` — `snake_case` would serialize `OpenCode` as `open_code` instead of `opencode`), `#[default]` on `Claude`. Implement methods: `binary_name() -> &str`, `display_name() -> &str`, `build_args(&self, prompt: &str, model: Option<&str>) -> Vec<String>`, `version_args() -> Vec<&str>`, `install_hint() -> &str` (returns install suggestion URL/command, e.g., `"Install: https://docs.anthropic.com/en/docs/claude-code"` for Claude, `"Install: https://github.com/opencode-ai/opencode"` for OpenCode).
+- [x] Add `AgentConfig` struct to `config.rs` with fields `cli: CliTool` and `model: Option<String>`. Derives: `Default, Deserialize, Clone, Debug, PartialEq`. Attributes: `#[serde(default, deny_unknown_fields)]`.
+- [x] Add `pub agent: AgentConfig` field to `PhaseGolemConfig` (between `execution` and `pipelines`)
+- [x] Add `#[serde(alias = "destructive")]` to `PhaseConfig.is_destructive` AND `#[serde(deny_unknown_fields)]` to `PhaseConfig` struct — these MUST be applied together in the same edit. Without the alias, `deny_unknown_fields` would reject existing configs that use `destructive` instead of `is_destructive`. Before applying, audit all existing test TOML fixtures in `tests/config_test.rs` (and any other test files) for unknown fields in `PhaseConfig` blocks that would now be rejected.
+- [x] Add `normalize_agent_config(config: &mut PhaseGolemConfig)` helper function. Trims `config.agent.model` and normalizes empty/whitespace-only strings to `None`.
+- [x] Add model validation to `validate()`: reject `config.agent.model` values that do not match the allowlist pattern `^[a-zA-Z0-9._/-]+$` (per PRD). This rejects whitespace, control characters, empty strings, and flag-like prefixes (`--`, `-`) as defense-in-depth. Use a simple character-by-character check (or `regex` crate if already a dependency; otherwise avoid adding a dep for this). Error message: `"agent.model contains invalid characters (allowed: letters, digits, '.', '_', '/', '-')"`. Note: this is stricter than just rejecting flag prefixes — it also rejects spaces, special chars, etc.
+- [x] Call `normalize_agent_config(&mut config)` in `load_config()` — insert after `toml::from_str` (line 279), before `populate_default_pipelines` (line 282)
+- [x] Call `normalize_agent_config(&mut config)` in `load_config_at()` — insert after `toml::from_str` (line 248), before `populate_default_pipelines` (line 251)
+- [x] Update `handle_init()` template in `main.rs`: Add `[agent]` section between `[execution]` and `[pipelines.feature]` with commented defaults:
   ```toml
   [agent]
   # cli = "claude"          # AI CLI tool: "claude", "opencode"
   # model = ""              # Model override (e.g., "opus", "sonnet")
   ```
-- [ ] Fix `handle_init()` template in `main.rs`: Change all `destructive = false` to `is_destructive = false` and `destructive = true` to `is_destructive = true` in the generated pipeline TOML. There are 5 phases with `destructive = false` and 1 with `destructive = true` in the main `phases` array (the `pre_phases` entry does not have a `destructive` field, which is fine — serde will use the default). Count and verify each occurrence (6 total replacements) before committing.
-- [ ] Write tests for `CliTool`: `binary_name()` returns correct values, `display_name()` returns correct values, `build_args()` for Claude without model, `build_args()` for Claude with model, `build_args()` for OpenCode without model, `build_args()` for OpenCode with model, `version_args()` returns correct values for both variants, `install_hint()` returns non-empty string for both variants, `default()` is `Claude`, serde deserialization from TOML strings (`"claude"` → `Claude`, `"opencode"` → `OpenCode`), serde rejects invalid values (e.g., `"gpt"` → error). Test `build_args()` with a prompt containing newlines, quotes, and special characters to verify the args vector is correct.
-- [ ] Write tests for `AgentConfig` deserialization: full `[agent]` section parses, partial section (only `model`) defaults `cli` to Claude, missing `[agent]` section defaults to `{cli: Claude, model: None}`, invalid `cli` value produces parse error, `deny_unknown_fields` rejects typos (e.g., `cli_tool = "claude"`)
-- [ ] Write tests for normalization: empty string `""` → `None`, whitespace `"  "` → `None`, tab/newline → `None`, valid string preserved, `None` stays `None`. Include a test that loads config via `load_config_from(Some(path), root)` (the `load_config_at` path) with `model = "  "` and asserts normalization to `None` — ensures both config loading paths are covered.
-- [ ] Write test for load_config no-file defaults: call `load_config()` when no `phase-golem.toml` exists and verify `config.agent` defaults to `AgentConfig { cli: CliTool::Claude, model: None }`.
-- [ ] Write tests for validation (allowlist `^[a-zA-Z0-9._/-]+$`): model with internal hyphens accepted (e.g., `claude-opus-4`), model with dots accepted (e.g., `gpt-4.1`), model with slashes accepted (e.g., `openai/gpt-4o`), model starting with `-` rejected, model starting with `--` rejected, model with spaces rejected (e.g., `"opus 4"`), model with special chars rejected (e.g., `"model;rm"`), `None` model passes validation
-- [ ] Write tests for `PhaseConfig` backward compat: `destructive = true` parses as `is_destructive = true` via alias, `deny_unknown_fields` rejects unknown keys. Also verify that `CliTool` and `AgentConfig` are accessible as `phase_golem::config::CliTool` and `phase_golem::config::AgentConfig` from the test crate (confirms public export through the crate boundary).
-- [ ] Write automated init template round-trip test: extract or replicate the `handle_init` template TOML string, parse it via `toml::from_str::<PhaseGolemConfig>()`, and assert success. This catches any `deny_unknown_fields` violations from stale field names (e.g., leftover `destructive` instead of `is_destructive`). Also assert the parsed config contains `[agent]` defaults (`cli = Claude, model = None`).
+- [x] Fix `handle_init()` template in `main.rs`: Change all `destructive = false` to `is_destructive = false` and `destructive = true` to `is_destructive = true` in the generated pipeline TOML. There are 5 phases with `destructive = false` and 1 with `destructive = true` in the main `phases` array (the `pre_phases` entry does not have a `destructive` field, which is fine — serde will use the default). Count and verify each occurrence (6 total replacements) before committing. NOTE: Also added `is_destructive = false` to the pre_phases entry because `deny_unknown_fields` on `PhaseConfig` requires all required fields to be present (the round-trip test caught this).
+- [x] Write tests for `CliTool`: `binary_name()` returns correct values, `display_name()` returns correct values, `build_args()` for Claude without model, `build_args()` for Claude with model, `build_args()` for OpenCode without model, `build_args()` for OpenCode with model, `version_args()` returns correct values for both variants, `install_hint()` returns non-empty string for both variants, `default()` is `Claude`, serde deserialization from TOML strings (`"claude"` → `Claude`, `"opencode"` → `OpenCode`), serde rejects invalid values (e.g., `"gpt"` → error). Test `build_args()` with a prompt containing newlines, quotes, and special characters to verify the args vector is correct.
+- [x] Write tests for `AgentConfig` deserialization: full `[agent]` section parses, partial section (only `model`) defaults `cli` to Claude, missing `[agent]` section defaults to `{cli: Claude, model: None}`, invalid `cli` value produces parse error, `deny_unknown_fields` rejects typos (e.g., `cli_tool = "claude"`)
+- [x] Write tests for normalization: empty string `""` → `None`, whitespace `"  "` → `None`, tab/newline → `None`, valid string preserved, `None` stays `None`. Include a test that loads config via `load_config_from(Some(path), root)` (the `load_config_at` path) with `model = "  "` and asserts normalization to `None` — ensures both config loading paths are covered.
+- [x] Write test for load_config no-file defaults: call `load_config()` when no `phase-golem.toml` exists and verify `config.agent` defaults to `AgentConfig { cli: CliTool::Claude, model: None }`.
+- [x] Write tests for validation (allowlist `^[a-zA-Z0-9._/-]+$`): model with internal hyphens accepted (e.g., `claude-opus-4`), model with dots accepted (e.g., `gpt-4.1`), model with slashes accepted (e.g., `openai/gpt-4o`), model starting with `-` rejected, model starting with `--` rejected, model with spaces rejected (e.g., `"opus 4"`), model with special chars rejected (e.g., `"model;rm"`), `None` model passes validation
+- [x] Write tests for `PhaseConfig` backward compat: `destructive = true` parses as `is_destructive = true` via alias, `deny_unknown_fields` rejects unknown keys. Also verify that `CliTool` and `AgentConfig` are accessible as `phase_golem::config::CliTool` and `phase_golem::config::AgentConfig` from the test crate (confirms public export through the crate boundary).
+- [x] Write automated init template round-trip test: extract or replicate the `handle_init` template TOML string, parse it via `toml::from_str::<PhaseGolemConfig>()`, and assert success. This catches any `deny_unknown_fields` violations from stale field names (e.g., leftover `destructive` instead of `is_destructive`). Also assert the parsed config contains `[agent]` defaults (`cli = Claude, model = None`).
 
 **Verification:**
 
-- [ ] `cargo build` succeeds
-- [ ] `cargo test` passes (all existing tests + new config tests)
-- [ ] TOML without `[agent]` section still loads with defaults (`cli=Claude, model=None`)
-- [ ] TOML with `[agent]` section parses correctly
-- [ ] TOML with `destructive = false` in phase config still parses (alias works)
-- [ ] TOML with unknown key in `[agent]` section produces deserialization error
-- [ ] `handle_init` generated TOML parses successfully via `load_config` (automated round-trip test passes)
-- [ ] `handle_init` generated TOML uses `is_destructive` (not `destructive`) and includes `[agent]` section
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo build` succeeds
+- [x] `cargo test` passes (all existing tests + new config tests)
+- [x] TOML without `[agent]` section still loads with defaults (`cli=Claude, model=None`)
+- [x] TOML with `[agent]` section parses correctly
+- [x] TOML with `destructive = false` in phase config still parses (alias works)
+- [x] TOML with unknown key in `[agent]` section produces deserialization error
+- [x] `handle_init` generated TOML parses successfully via `load_config` (automated round-trip test passes)
+- [x] `handle_init` generated TOML uses `is_destructive` (not `destructive`) and includes `[agent]` section
+- [x] Code review passes (`/code-review` → fix issues → repeat until pass)
 
 **Commit:** `[HAMY-001][P1] Feature: Add CliTool enum, AgentConfig struct, config pipeline updates, and init template fixes`
 
@@ -136,6 +136,10 @@ The OpenCode invocation pattern (`opencode run [--model provider/model] [--quiet
 `deny_unknown_fields` on `AgentConfig` is a deliberate strictness choice for a new, small struct — it catches typos in `[agent]` config blocks. This is stricter than other config sections (which do not use `deny_unknown_fields`) and means future field additions require a new release. This trade-off is accepted; the benefit of typo detection outweighs the minor extensibility cost.
 
 **Followups:**
+
+- Pre-existing bug found and fixed: `handle_init` template pre_phases entry was missing `is_destructive` field, which would fail parsing with `deny_unknown_fields`. Added `is_destructive = false` to the pre_phases entry.
+- Model validation splits error message into two cases (invalid characters vs. leading hyphen) for clearer user feedback. This deviates slightly from the single error message in the SPEC but improves UX.
+- The SPEC's allowlist regex `^[a-zA-Z0-9._/-]+$` doesn't actually reject flag-like prefixes since `-` is in the character class. Added an explicit `starts_with('-')` check for defense-in-depth. This is stricter than the regex alone.
 
 ---
 
@@ -276,6 +280,7 @@ The per-phase logging in `executor.rs` requires no signature changes because `ex
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| Phase 1 | complete | pending | Config foundation, init template fixes, 66 config tests pass |
 
 ## Followups Summary
 

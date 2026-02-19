@@ -11,6 +11,7 @@ pub struct PhaseGolemConfig {
     pub project: ProjectConfig,
     pub guardrails: GuardrailsConfig,
     pub execution: ExecutionConfig,
+    pub agent: AgentConfig,
     pub pipelines: HashMap<String, PipelineConfig>,
 }
 
@@ -40,6 +41,76 @@ pub struct ExecutionConfig {
 }
 
 #[derive(Default, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CliTool {
+    #[default]
+    Claude,
+    OpenCode,
+}
+
+impl CliTool {
+    pub fn binary_name(&self) -> &str {
+        match self {
+            CliTool::Claude => "claude",
+            CliTool::OpenCode => "opencode",
+        }
+    }
+
+    pub fn display_name(&self) -> &str {
+        match self {
+            CliTool::Claude => "Claude CLI",
+            CliTool::OpenCode => "OpenCode CLI",
+        }
+    }
+
+    pub fn build_args(&self, prompt: &str, model: Option<&str>) -> Vec<String> {
+        match self {
+            CliTool::Claude => {
+                let mut args = vec!["--dangerously-skip-permissions".to_string()];
+                if let Some(m) = model {
+                    args.push("--model".to_string());
+                    args.push(m.to_string());
+                }
+                args.push("-p".to_string());
+                args.push(prompt.to_string());
+                args
+            }
+            CliTool::OpenCode => {
+                let mut args = vec!["run".to_string()];
+                if let Some(m) = model {
+                    args.push("--model".to_string());
+                    args.push(m.to_string());
+                }
+                args.push("--quiet".to_string());
+                args.push(prompt.to_string());
+                args
+            }
+        }
+    }
+
+    pub fn version_args(&self) -> Vec<&str> {
+        match self {
+            CliTool::Claude => vec!["--version"],
+            CliTool::OpenCode => vec!["--version"],
+        }
+    }
+
+    pub fn install_hint(&self) -> &str {
+        match self {
+            CliTool::Claude => "Install: https://docs.anthropic.com/en/docs/claude-code",
+            CliTool::OpenCode => "Install: https://github.com/opencode-ai/opencode",
+        }
+    }
+}
+
+#[derive(Default, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct AgentConfig {
+    pub cli: CliTool,
+    pub model: Option<String>,
+}
+
+#[derive(Default, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StalenessAction {
     #[default]
@@ -49,11 +120,13 @@ pub enum StalenessAction {
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PhaseConfig {
     pub name: String,
     /// Relative file paths to workflow files (relative to project root).
     #[serde(default)]
     pub workflows: Vec<String>,
+    #[serde(alias = "destructive")]
     pub is_destructive: bool,
     #[serde(default)]
     pub staleness: StalenessAction,
@@ -159,6 +232,17 @@ pub fn default_feature_pipeline() -> PipelineConfig {
     }
 }
 
+pub fn normalize_agent_config(config: &mut PhaseGolemConfig) {
+    if let Some(ref model) = config.agent.model {
+        let trimmed = model.trim();
+        if trimmed.is_empty() {
+            config.agent.model = None;
+        } else {
+            config.agent.model = Some(trimmed.to_string());
+        }
+    }
+}
+
 pub fn validate(config: &PhaseGolemConfig) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
 
@@ -168,6 +252,23 @@ pub fn validate(config: &PhaseGolemConfig) -> Result<(), Vec<String>> {
 
     if config.execution.max_concurrent < 1 {
         errors.push("execution.max_concurrent must be >= 1".to_string());
+    }
+
+    if let Some(ref model) = config.agent.model {
+        let is_valid = !model.is_empty()
+            && model
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-'));
+        if !is_valid {
+            errors.push(
+                "agent.model contains invalid characters (allowed: alphanumeric, '.', '_', '/', '-')"
+                    .to_string(),
+            );
+        } else if model.starts_with('-') {
+            errors.push(
+                "agent.model must not start with '-' (flag-like values are rejected)".to_string(),
+            );
+        }
     }
 
     for (pipeline_name, pipeline) in &config.pipelines {
@@ -236,10 +337,7 @@ pub fn load_config_from(
 /// Load config from a specific file path. Errors if the file does not exist.
 fn load_config_at(path: &Path) -> Result<PhaseGolemConfig, String> {
     if !path.exists() {
-        return Err(format!(
-            "Config file not found: {}",
-            path.display()
-        ));
+        return Err(format!("Config file not found: {}", path.display()));
     }
 
     let contents = std::fs::read_to_string(path)
@@ -248,6 +346,7 @@ fn load_config_at(path: &Path) -> Result<PhaseGolemConfig, String> {
     let mut config: PhaseGolemConfig = toml::from_str(&contents)
         .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
 
+    normalize_agent_config(&mut config);
     populate_default_pipelines(&mut config);
 
     validate(&config).map_err(|errors| {
@@ -279,6 +378,7 @@ pub fn load_config(project_root: &Path) -> Result<PhaseGolemConfig, String> {
     let mut config: PhaseGolemConfig = toml::from_str(&contents)
         .map_err(|e| format!("Failed to parse {}: {}", config_path.display(), e))?;
 
+    normalize_agent_config(&mut config);
     populate_default_pipelines(&mut config);
 
     validate(&config).map_err(|errors| {

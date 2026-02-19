@@ -797,17 +797,17 @@ items:
 - id: HAMY-001
   title: Multi-CLI Agent Support
   status: in_progress
-  phase: spec
+  phase: build
   size: medium
   complexity: medium
   risk: low
   impact: high
   requires_human_review: false
   created: 2026-02-15T00:00:00+00:00
-  updated: 2026-02-19T02:41:35.950013621+00:00
+  updated: 2026-02-19T03:07:04.201324196+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 620d4318d2357d82ac64a325bc1292f81ab8fabc
+  last_phase_commit: 45223df7bdc0bc86efc1c3fe110503b6c0adfd8e
 - id: HAMY-097
   title: Replace default feature pipeline with simple plan/build/review pipeline that doesn't depend on external skills
   status: new
@@ -898,4 +898,13 @@ items:
   origin: HAMY-001/spec
   created: 2026-02-19T02:57:38.105483165+00:00
   updated: 2026-02-19T02:57:38.105483165+00:00
-next_item_id: 107
+- id: HAMY-108
+  title: 'Pre-existing bug: handle_init pre_phases missing is_destructive field'
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: HAMY-001/build
+  created: 2026-02-19T03:07:04.214982573+00:00
+  updated: 2026-02-19T03:07:04.214982573+00:00
+next_item_id: 108

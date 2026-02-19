@@ -125,7 +125,15 @@ async fn main() {
     let result = match cli.command {
         Commands::Init { prefix } => handle_init(root, &prefix),
         Commands::Run { target, only, cap } => {
-            handle_run(root, config_path.as_deref(), &config_base, target, only, cap).await
+            handle_run(
+                root,
+                config_path.as_deref(),
+                &config_base,
+                target,
+                only,
+                cap,
+            )
+            .await
         }
         Commands::Status => handle_status(root, config_path.as_deref(), &config_base),
         Commands::Add {
@@ -133,7 +141,15 @@ async fn main() {
             size,
             risk,
             pipeline,
-        } => handle_add(root, config_path.as_deref(), &config_base, &title, size, risk, pipeline),
+        } => handle_add(
+            root,
+            config_path.as_deref(),
+            &config_base,
+            &title,
+            size,
+            risk,
+            pipeline,
+        ),
         Commands::Triage => handle_triage(root, config_path.as_deref(), &config_base).await,
         Commands::Advance { item_id, to } => {
             handle_advance(root, config_path.as_deref(), &config_base, &item_id, to)
@@ -155,7 +171,10 @@ fn resolve_backlog_path(config_base: &Path, config: &config::PhaseGolemConfig) -
 
 fn resolve_inbox_path(config_base: &Path, config: &config::PhaseGolemConfig) -> PathBuf {
     let backlog = resolve_backlog_path(config_base, config);
-    backlog.parent().unwrap_or(config_base).join("BACKLOG_INBOX.yaml")
+    backlog
+        .parent()
+        .unwrap_or(config_base)
+        .join("BACKLOG_INBOX.yaml")
 }
 
 fn handle_init(root: &Path, prefix: &str) -> Result<(), String> {
@@ -213,17 +232,21 @@ default_phase_cap = 100
 max_wip = 1
 max_concurrent = 1
 
+[agent]
+# cli = "claude"          # AI CLI tool: "claude", "opencode"
+# model = ""              # Model override (e.g., "opus", "sonnet")
+
 [pipelines.feature]
 pre_phases = [
-    {{ name = "research", workflows = [".claude/skills/changes/workflows/orchestration/research-scope.md"] }},
+    {{ name = "research", workflows = [".claude/skills/changes/workflows/orchestration/research-scope.md"], is_destructive = false }},
 ]
 phases = [
-    {{ name = "prd",           workflows = [".claude/skills/changes/workflows/0-prd/create-prd.md"],                     destructive = false }},
-    {{ name = "tech-research", workflows = [".claude/skills/changes/workflows/1-tech-research/tech-research.md"],       destructive = false }},
-    {{ name = "design",        workflows = [".claude/skills/changes/workflows/2-design/design.md"],                       destructive = false }},
-    {{ name = "spec",           workflows = [".claude/skills/changes/workflows/3-spec/create-spec.md"],                    destructive = false }},
-    {{ name = "build",          workflows = [".claude/skills/changes/workflows/4-build/implement-spec-autonomous.md"],   destructive = true }},
-    {{ name = "review",         workflows = [".claude/skills/changes/workflows/5-review/change-review.md"],               destructive = false }},
+    {{ name = "prd",           workflows = [".claude/skills/changes/workflows/0-prd/create-prd.md"],                     is_destructive = false }},
+    {{ name = "tech-research", workflows = [".claude/skills/changes/workflows/1-tech-research/tech-research.md"],       is_destructive = false }},
+    {{ name = "design",        workflows = [".claude/skills/changes/workflows/2-design/design.md"],                       is_destructive = false }},
+    {{ name = "spec",           workflows = [".claude/skills/changes/workflows/3-spec/create-spec.md"],                    is_destructive = false }},
+    {{ name = "build",          workflows = [".claude/skills/changes/workflows/4-build/implement-spec-autonomous.md"],   is_destructive = true }},
+    {{ name = "review",         workflows = [".claude/skills/changes/workflows/5-review/change-review.md"],               is_destructive = false }},
 ]
 "#,
             prefix = prefix
@@ -681,7 +704,11 @@ async fn handle_run(
     Ok(())
 }
 
-async fn handle_triage(root: &Path, config_path: Option<&Path>, config_base: &Path) -> Result<(), String> {
+async fn handle_triage(
+    root: &Path,
+    config_path: Option<&Path>,
+    config_base: &Path,
+) -> Result<(), String> {
     // Install signal handlers for graceful shutdown
     install_signal_handlers()?;
 
@@ -836,7 +863,11 @@ fn handle_add(
     Ok(())
 }
 
-fn handle_status(root: &Path, config_path: Option<&Path>, config_base: &Path) -> Result<(), String> {
+fn handle_status(
+    root: &Path,
+    config_path: Option<&Path>,
+    config_base: &Path,
+) -> Result<(), String> {
     let config = config::load_config_from(config_path, root)?;
     let backlog_file_path = resolve_backlog_path(config_base, &config);
     let backlog = backlog::load(&backlog_file_path, root)?;
@@ -889,7 +920,13 @@ fn handle_status(root: &Path, config_path: Option<&Path>, config_base: &Path) ->
     Ok(())
 }
 
-fn handle_advance(root: &Path, config_path: Option<&Path>, config_base: &Path, item_id: &str, to: Option<String>) -> Result<(), String> {
+fn handle_advance(
+    root: &Path,
+    config_path: Option<&Path>,
+    config_base: &Path,
+    item_id: &str,
+    to: Option<String>,
+) -> Result<(), String> {
     let config = config::load_config_from(config_path, root)?;
     let backlog_file_path = resolve_backlog_path(config_base, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;
@@ -965,7 +1002,13 @@ fn handle_advance(root: &Path, config_path: Option<&Path>, config_base: &Path, i
     Ok(())
 }
 
-fn handle_unblock(root: &Path, config_path: Option<&Path>, config_base: &Path, item_id: &str, notes: Option<String>) -> Result<(), String> {
+fn handle_unblock(
+    root: &Path,
+    config_path: Option<&Path>,
+    config_base: &Path,
+    item_id: &str,
+    notes: Option<String>,
+) -> Result<(), String> {
     let config = config::load_config_from(config_path, root)?;
     let backlog_file_path = resolve_backlog_path(config_base, &config);
     let mut backlog = backlog::load(&backlog_file_path, root)?;

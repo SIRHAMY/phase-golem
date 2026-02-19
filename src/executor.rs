@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent::AgentRunner;
 use crate::config::{
-    GuardrailsConfig, PhaseGolemConfig, PhaseConfig, PipelineConfig, StalenessAction,
+    GuardrailsConfig, PhaseConfig, PhaseGolemConfig, PipelineConfig, StalenessAction,
 };
 use crate::coordinator::CoordinatorHandle;
 use crate::prompt;

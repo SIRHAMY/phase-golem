@@ -1800,10 +1800,7 @@ fn halt_commit_message_cap_reached() {
         "[phase-golem] Save backlog state on halt ({:?})",
         HaltReason::CapReached
     );
-    assert_eq!(
-        msg,
-        "[phase-golem] Save backlog state on halt (CapReached)"
-    );
+    assert_eq!(msg, "[phase-golem] Save backlog state on halt (CapReached)");
 }
 
 #[test]
