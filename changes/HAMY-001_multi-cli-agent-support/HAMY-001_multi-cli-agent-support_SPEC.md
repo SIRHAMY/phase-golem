@@ -22,7 +22,7 @@ The change boundary is narrow: config parsing (new types), command construction 
 
 **Patterns to follow:**
 
-- `src/config.rs:42-49` (`StalenessAction` enum) — exact derive/serde pattern for `CliTool` enum
+- `src/config.rs:42-49` (`StalenessAction` enum) — derive/serde pattern for `CliTool` enum (NOTE: `CliTool` uses `rename_all = "lowercase"`, not `snake_case` like `StalenessAction`, because multi-word variants like `OpenCode` must serialize as `opencode` not `open_code`)
 - `src/config.rs:33-40` (`ExecutionConfig`) — `#[serde(default)]` struct pattern for `AgentConfig`
 - `src/config.rs:162-220` (`validate()`) — error accumulator pattern for model validation
 - `src/config.rs:267-296` (`load_config()`) — config loading flow for normalization insertion
@@ -78,12 +78,12 @@ Each phase should leave the codebase in a functional, stable state. Complete and
 
 **Tasks:**
 
-- [ ] Add `CliTool` enum to `config.rs` with `Claude` and `OpenCode` variants. Derives: `Default, Deserialize, Clone, Debug, PartialEq, Eq`. Attributes: `#[serde(rename_all = "snake_case")]`, `#[default]` on `Claude`. Implement methods: `binary_name() -> &str`, `display_name() -> &str`, `build_args(&self, prompt: &str, model: Option<&str>) -> Vec<String>`, `version_args() -> Vec<&str>`, `install_hint() -> &str` (returns install suggestion URL/command, e.g., `"Install: https://docs.anthropic.com/en/docs/claude-code"` for Claude, `"Install: https://github.com/opencode-ai/opencode"` for OpenCode).
+- [ ] Add `CliTool` enum to `config.rs` with `Claude` and `OpenCode` variants. Derives: `Default, Deserialize, Clone, Debug, PartialEq, Eq`. Attributes: `#[serde(rename_all = "lowercase")]` (NOT `snake_case` — `snake_case` would serialize `OpenCode` as `open_code` instead of `opencode`), `#[default]` on `Claude`. Implement methods: `binary_name() -> &str`, `display_name() -> &str`, `build_args(&self, prompt: &str, model: Option<&str>) -> Vec<String>`, `version_args() -> Vec<&str>`, `install_hint() -> &str` (returns install suggestion URL/command, e.g., `"Install: https://docs.anthropic.com/en/docs/claude-code"` for Claude, `"Install: https://github.com/opencode-ai/opencode"` for OpenCode).
 - [ ] Add `AgentConfig` struct to `config.rs` with fields `cli: CliTool` and `model: Option<String>`. Derives: `Default, Deserialize, Clone, Debug, PartialEq`. Attributes: `#[serde(default, deny_unknown_fields)]`.
 - [ ] Add `pub agent: AgentConfig` field to `PhaseGolemConfig` (between `execution` and `pipelines`)
 - [ ] Add `#[serde(alias = "destructive")]` to `PhaseConfig.is_destructive` AND `#[serde(deny_unknown_fields)]` to `PhaseConfig` struct — these MUST be applied together in the same edit. Without the alias, `deny_unknown_fields` would reject existing configs that use `destructive` instead of `is_destructive`. Before applying, audit all existing test TOML fixtures in `tests/config_test.rs` (and any other test files) for unknown fields in `PhaseConfig` blocks that would now be rejected.
 - [ ] Add `normalize_agent_config(config: &mut PhaseGolemConfig)` helper function. Trims `config.agent.model` and normalizes empty/whitespace-only strings to `None`.
-- [ ] Add model validation to `validate()`: reject `config.agent.model` values that start with `-` or `--` (flag-prefix check). Internal hyphens are valid (e.g., `claude-opus-4`). Error message: `"agent.model must not start with '-' (looks like a CLI flag)"`.
+- [ ] Add model validation to `validate()`: reject `config.agent.model` values that do not match the allowlist pattern `^[a-zA-Z0-9._/-]+$` (per PRD). This rejects whitespace, control characters, empty strings, and flag-like prefixes (`--`, `-`) as defense-in-depth. Use a simple character-by-character check (or `regex` crate if already a dependency; otherwise avoid adding a dep for this). Error message: `"agent.model contains invalid characters (allowed: letters, digits, '.', '_', '/', '-')"`. Note: this is stricter than just rejecting flag prefixes — it also rejects spaces, special chars, etc.
 - [ ] Call `normalize_agent_config(&mut config)` in `load_config()` — insert after `toml::from_str` (line 279), before `populate_default_pipelines` (line 282)
 - [ ] Call `normalize_agent_config(&mut config)` in `load_config_at()` — insert after `toml::from_str` (line 248), before `populate_default_pipelines` (line 251)
 - [ ] Update `handle_init()` template in `main.rs`: Add `[agent]` section between `[execution]` and `[pipelines.feature]` with commented defaults:
@@ -93,10 +93,11 @@ Each phase should leave the codebase in a functional, stable state. Complete and
   # model = ""              # Model override (e.g., "opus", "sonnet")
   ```
 - [ ] Fix `handle_init()` template in `main.rs`: Change all `destructive = false` to `is_destructive = false` and `destructive = true` to `is_destructive = true` in the generated pipeline TOML. There are 5 phases with `destructive = false` and 1 with `destructive = true` in the main `phases` array (the `pre_phases` entry does not have a `destructive` field, which is fine — serde will use the default). Count and verify each occurrence (6 total replacements) before committing.
-- [ ] Write tests for `CliTool`: `binary_name()` returns correct values, `display_name()` returns correct values, `build_args()` for Claude without model, `build_args()` for Claude with model, `build_args()` for OpenCode without model, `build_args()` for OpenCode with model, `version_args()` returns correct values for both variants, `default()` is `Claude`, serde deserialization from TOML strings. Test `build_args()` with a prompt containing newlines, quotes, and special characters to verify the args vector is correct.
+- [ ] Write tests for `CliTool`: `binary_name()` returns correct values, `display_name()` returns correct values, `build_args()` for Claude without model, `build_args()` for Claude with model, `build_args()` for OpenCode without model, `build_args()` for OpenCode with model, `version_args()` returns correct values for both variants, `install_hint()` returns non-empty string for both variants, `default()` is `Claude`, serde deserialization from TOML strings (`"claude"` → `Claude`, `"opencode"` → `OpenCode`), serde rejects invalid values (e.g., `"gpt"` → error). Test `build_args()` with a prompt containing newlines, quotes, and special characters to verify the args vector is correct.
 - [ ] Write tests for `AgentConfig` deserialization: full `[agent]` section parses, partial section (only `model`) defaults `cli` to Claude, missing `[agent]` section defaults to `{cli: Claude, model: None}`, invalid `cli` value produces parse error, `deny_unknown_fields` rejects typos (e.g., `cli_tool = "claude"`)
 - [ ] Write tests for normalization: empty string `""` → `None`, whitespace `"  "` → `None`, tab/newline → `None`, valid string preserved, `None` stays `None`. Include a test that loads config via `load_config_from(Some(path), root)` (the `load_config_at` path) with `model = "  "` and asserts normalization to `None` — ensures both config loading paths are covered.
-- [ ] Write tests for validation: model starting with `-` rejected, model starting with `--` rejected, model with internal hyphens accepted (e.g., `claude-opus-4`), `None` model passes
+- [ ] Write test for load_config no-file defaults: call `load_config()` when no `phase-golem.toml` exists and verify `config.agent` defaults to `AgentConfig { cli: CliTool::Claude, model: None }`.
+- [ ] Write tests for validation (allowlist `^[a-zA-Z0-9._/-]+$`): model with internal hyphens accepted (e.g., `claude-opus-4`), model with dots accepted (e.g., `gpt-4.1`), model with slashes accepted (e.g., `openai/gpt-4o`), model starting with `-` rejected, model starting with `--` rejected, model with spaces rejected (e.g., `"opus 4"`), model with special chars rejected (e.g., `"model;rm"`), `None` model passes validation
 - [ ] Write tests for `PhaseConfig` backward compat: `destructive = true` parses as `is_destructive = true` via alias, `deny_unknown_fields` rejects unknown keys. Also verify that `CliTool` and `AgentConfig` are accessible as `phase_golem::config::CliTool` and `phase_golem::config::AgentConfig` from the test crate (confirms public export through the crate boundary).
 - [ ] Write automated init template round-trip test: extract or replicate the `handle_init` template TOML string, parse it via `toml::from_str::<PhaseGolemConfig>()`, and assert success. This catches any `deny_unknown_fields` violations from stale field names (e.g., leftover `destructive` instead of `is_destructive`). Also assert the parsed config contains `[agent]` defaults (`cli = Claude, model = None`).
 
@@ -121,6 +122,8 @@ The `CliTool::build_args()` implementation for each variant:
 - **OpenCode:** `["run", "--model", "<model>", "--quiet", "<prompt>"]` (omit `--model` pair if model is `None`)
 
 The `normalize_agent_config` helper is called from both `load_config` and `load_config_at` because both paths parse TOML independently. The `load_config_from` function dispatches to one of these two, so it is transitively covered — no changes needed there. The third path in `load_config` (missing file → defaults) does NOT need normalization because `PhaseGolemConfig::default()` already has `model: None`.
+
+**Important ordering:** `normalize_agent_config` must be called BEFORE `validate()` in both loading paths. Normalization transforms `model = "  "` into `None`, which then passes validation. If validation runs first, the whitespace-only string would be rejected by the allowlist pattern. The correct pipeline order is: `toml::from_str` → `normalize_agent_config` → `populate_default_pipelines` → `validate()`.
 
 Line numbers in task descriptions (e.g., "line 279", "line 248") are hints based on the current source and will shift as code is added. Use the textual anchors ("after `toml::from_str`", "before `populate_default_pipelines`") as the primary reference.
 
@@ -194,6 +197,8 @@ The `"[pre] Verifying Claude CLI..."` log line (currently at `main.rs:284`) shou
 
 In `handle_triage`, the current ordering is: (1) signal handlers, (2) verify CLI, (3) acquire lock, (4) git checks, (5) load config. The new ordering should be: (1) signal handlers, (2) acquire lock, (3) git checks, (4) load config, (5) construct runner, (6) verify CLI. Lock acquisition and git checks remain before config load, matching `handle_run`'s pattern.
 
+**DESIGN doc contradiction:** The Design doc explicitly states post-result validation is "DEFERRED to a separate change", but this SPEC includes it in Phase 2. This is intentional — the PRD lists post-result validation as a Must Have, and the Design doc's deferral note is outdated. When implementing, follow this SPEC, not the Design doc's deferral note. Phase 3 includes a task to update the Design doc to reflect this decision.
+
 **Followups:**
 
 ---
@@ -218,6 +223,7 @@ In `handle_triage`, the current ordering is: (1) signal handlers, (2) verify CLI
 **Tasks:**
 
 - [ ] Add startup logging in `handle_run()` after runner construction and verification: log the resolved agent config. Format: `log_info!("[config] Agent: {} (model: {})", tool_display_name, model_or_default)` where `model_or_default` is `config.agent.model.as_deref().unwrap_or("default")`. Example output: `[config] Agent: Claude CLI (model: sonnet)` or `[config] Agent: Claude CLI (model: default)`. If `cli = OpenCode`, also log: `[config] Note: OpenCode CLI support is experimental.`
+- [ ] Add resolved binary path logging in `handle_run()` after runner verification: use `which::which(config.agent.cli.binary_name())` (if the `which` crate is available) or `std::process::Command::new("which").arg(binary_name).output()` to resolve and log the full path. Format: `log_info!("[config] Binary: {}", resolved_path)`. If resolution fails, log a warning but do not error (the verify step already confirmed the binary works). Check if the `which` crate is already a dependency before using it; if not, use the shell `which` command via `Command`.
 - [ ] Add same startup logging in `handle_triage()` after runner construction.
 - [ ] Update the verification log message in `handle_run()`: change `"[pre] Verifying Claude CLI..."` to use `config.agent.cli.display_name()` (e.g., `"[pre] Verifying Claude CLI..."` or `"[pre] Verifying OpenCode CLI..."`). Note: this line must reference the config, so it appears after config load.
 - [ ] Update the verification log message in `handle_triage()`: same change as `handle_run()` — use `config.agent.cli.display_name()` instead of hardcoded "Claude CLI".
@@ -230,7 +236,10 @@ In `handle_triage`, the current ordering is: (1) signal handlers, (2) verify CLI
 - [ ] `cargo build` succeeds
 - [ ] `cargo test` passes (no regressions)
 - [ ] Manual test: `phase-golem run` logs agent config at startup (e.g., `[config] Agent: Claude CLI (model: default)`)
+- [ ] Manual test: `phase-golem run` logs the resolved binary path at startup (e.g., `[config] Binary: /usr/local/bin/claude`)
 - [ ] Manual test: Each phase execution logs the CLI tool and model
+- [ ] Verify PRD open questions are updated with resolution notes
+- [ ] Verify Design doc post-result validation deferral note is updated
 - [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
 
 **Commit:** `[HAMY-001][P3] Feature: Add agent observability and update docs`
@@ -297,7 +306,7 @@ The per-phase logging in `executor.rs` requires no signature changes because `ex
 // In src/config.rs
 
 #[derive(Default, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub enum CliTool {
     #[default]
     Claude,

@@ -797,17 +797,17 @@ items:
 - id: HAMY-001
   title: Multi-CLI Agent Support
   status: in_progress
-  phase: design
+  phase: spec
   size: medium
   complexity: medium
   risk: low
   impact: high
   requires_human_review: false
   created: 2026-02-15T00:00:00+00:00
-  updated: 2026-02-19T02:41:35.908075629+00:00
+  updated: 2026-02-19T02:41:35.950013621+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 0cd13e29aaa314a39fd98808a52b7ab350f31649
+  last_phase_commit: 620d4318d2357d82ac64a325bc1292f81ab8fabc
 - id: HAMY-097
   title: Replace default feature pipeline with simple plan/build/review pipeline that doesn't depend on external skills
   status: new
@@ -863,4 +863,39 @@ items:
   origin: HAMY-001/design
   created: 2026-02-19T02:41:35.923374105+00:00
   updated: 2026-02-19T02:41:35.923374105+00:00
-next_item_id: 102
+- id: HAMY-103
+  title: OpenCode smoke test before graduating from experimental
+  status: new
+  requires_human_review: false
+  origin: HAMY-001/spec
+  created: 2026-02-19T02:57:38.105483165+00:00
+  updated: 2026-02-19T02:57:38.105483165+00:00
+- id: HAMY-104
+  title: Extract shared post-parse config pipeline to eliminate load_config/load_config_at duplication
+  status: new
+  requires_human_review: false
+  origin: HAMY-001/spec
+  created: 2026-02-19T02:57:38.105483165+00:00
+  updated: 2026-02-19T02:57:38.105483165+00:00
+- id: HAMY-105
+  title: Add config validation warning when model is set for CLI tool without --model support
+  status: new
+  requires_human_review: false
+  origin: HAMY-001/spec
+  created: 2026-02-19T02:57:38.105483165+00:00
+  updated: 2026-02-19T02:57:38.105483165+00:00
+- id: HAMY-106
+  title: Add Codex CLI as third CliTool variant
+  status: new
+  requires_human_review: false
+  origin: HAMY-001/spec
+  created: 2026-02-19T02:57:38.105483165+00:00
+  updated: 2026-02-19T02:57:38.105483165+00:00
+- id: HAMY-107
+  title: ACP (Agent Client Protocol) integration as future AcpAgentRunner
+  status: new
+  requires_human_review: false
+  origin: HAMY-001/spec
+  created: 2026-02-19T02:57:38.105483165+00:00
+  updated: 2026-02-19T02:57:38.105483165+00:00
+next_item_id: 107
