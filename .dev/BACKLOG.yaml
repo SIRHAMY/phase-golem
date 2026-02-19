@@ -797,17 +797,17 @@ items:
 - id: HAMY-001
   title: Multi-CLI Agent Support
   status: in_progress
-  phase: prd
+  phase: tech-research
   size: medium
   complexity: medium
   risk: low
   impact: high
   requires_human_review: false
   created: 2026-02-15T00:00:00+00:00
-  updated: 2026-02-19T02:37:49.535148166+00:00
+  updated: 2026-02-19T02:39:23.035132197+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: e81aa76fd04b91a80e1203d22c1432990ac7567c
+  last_phase_commit: 4007a2380e38813a1e311fb8bfaeb831319e56b3
 - id: HAMY-097
   title: Replace default feature pipeline with simple plan/build/review pipeline that doesn't depend on external skills
   status: new
@@ -827,4 +827,13 @@ items:
   origin: HAMY-001/prd
   created: 2026-02-19T02:37:49.549762317+00:00
   updated: 2026-02-19T02:37:49.549762317+00:00
-next_item_id: 98
+- id: HAMY-099
+  title: ACP protocol integration for universal CLI tool support
+  status: new
+  size: large
+  risk: medium
+  requires_human_review: false
+  origin: HAMY-001/tech-research
+  created: 2026-02-19T02:39:23.040782874+00:00
+  updated: 2026-02-19T02:39:23.040782874+00:00
+next_item_id: 99
