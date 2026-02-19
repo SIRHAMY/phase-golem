@@ -797,17 +797,17 @@ items:
 - id: HAMY-001
   title: Multi-CLI Agent Support
   status: in_progress
-  phase: build
+  phase: review
   size: medium
   complexity: medium
   risk: low
   impact: high
   requires_human_review: false
   created: 2026-02-15T00:00:00+00:00
-  updated: 2026-02-19T03:21:46.369896047+00:00
+  updated: 2026-02-19T03:25:21.893906206+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 94fc670a0537a90efd3236089dc2905b715325f0
+  last_phase_commit: 2b1c97db8e5d3ec8a0a37ec8aab0a65ca5134ba9
 - id: HAMY-097
   title: Replace default feature pipeline with simple plan/build/review pipeline that doesn't depend on external skills
   status: new
@@ -952,4 +952,31 @@ items:
   origin: HAMY-001/build
   created: 2026-02-19T03:21:46.384382303+00:00
   updated: 2026-02-19T03:21:46.384382303+00:00
-next_item_id: 113
+- id: HAMY-114
+  title: OpenCode smoke test before graduating from experimental
+  status: new
+  size: small
+  risk: medium
+  requires_human_review: false
+  origin: HAMY-001/review
+  created: 2026-02-19T03:25:21.909441188+00:00
+  updated: 2026-02-19T03:25:21.909441188+00:00
+- id: HAMY-115
+  title: Add Codex CLI as third CliTool variant
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: HAMY-001/review
+  created: 2026-02-19T03:25:21.909441188+00:00
+  updated: 2026-02-19T03:25:21.909441188+00:00
+- id: HAMY-116
+  title: Per-phase agent config overrides (HAMY-001b)
+  status: new
+  size: medium
+  risk: medium
+  requires_human_review: false
+  origin: HAMY-001/review
+  created: 2026-02-19T03:25:21.909441188+00:00
+  updated: 2026-02-19T03:25:21.909441188+00:00
+next_item_id: 116

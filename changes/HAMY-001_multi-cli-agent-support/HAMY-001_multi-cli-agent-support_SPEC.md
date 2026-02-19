@@ -316,6 +316,50 @@ Code review identified that startup logging (agent config, experimental warning,
 - [ ] Consider changing `CliAgentRunner::new(tool, model)` to `CliAgentRunner::new(agent_config)` — the current struct duplicates `AgentConfig` fields. If `AgentConfig` grows (e.g., for per-phase overrides in HAMY-001b), every new field must be threaded through separately.
 - [ ] Consider using the `which` crate for cross-platform binary path resolution if Windows support becomes relevant. Current `which` shell command only works on Unix-like systems.
 
+## Change Review
+
+**Reviewed:** 2026-02-18
+
+### PRD Alignment
+
+```
+PRD ALIGNMENT:
+- [x] PhaseGolemConfig gains AgentConfig field with serde defaults — implemented in Phase 1
+- [x] User can configure CLI tool via global [agent] section — implemented in Phase 1
+- [x] AgentRunner trait unchanged; CliAgentRunner parameterized; MockAgentRunner unaffected — implemented in Phase 2
+- [x] Correct command/arguments for configured CLI tool (unit tested per tool) — implemented in Phase 1 (build_args tests) + Phase 2 (runner integration)
+- [x] Default behavior remains claude when no CLI configured — implemented in Phase 1 (both absent section and omitted field tested)
+- [x] verify_cli_available() checks configured CLI tool with install hint — implemented in Phase 2
+- [x] All entry points updated: handle_run, handle_triage — implemented in Phase 2
+- [x] CLI tool field deserializes as enum via serde (invalid values = deser error) — implemented in Phase 1
+- [x] Config validation rejects model strings not matching allowlist — implemented in Phase 1
+- [x] Empty/whitespace model normalized to None — implemented in Phase 1
+- [x] Model warning for unsupported CLI tools — DEFERRED: both Claude and OpenCode support --model; tracked in Medium followups for when a tool without model support is added
+- [x] Effective agent config logged at startup — implemented in Phase 3
+- [x] Post-result item_id/phase validation (non-retryable) — implemented in Phase 2
+- [x] Fix destructive/is_destructive mismatch — implemented in Phase 1 (alias + template fix)
+- [x] Existing tests continue to pass — verified (581 tests pass)
+- [x] handle_init includes [agent] section with defaults — implemented in Phase 1 (Should Have)
+- [x] Log messages use configured tool's display name — implemented in Phase 3 (Should Have)
+- [x] Per-phase execution logs include CLI tool and model — implemented in Phase 3 (Should Have)
+```
+
+**Coverage: 17/17 requirements implemented** (1 deferred as currently academic — no CLI tool variant lacks model support)
+
+### Execution Review
+
+- All 3 phases completed successfully
+- All phases passed code review
+- No failed or partial phases
+- No verification items left unchecked
+- No uncommitted changes related to this feature
+- 581 tests passing, 0 failures
+- Commits are clean and well-structured (P1 → P2 → P3)
+
+### Concerns
+
+None. The implementation is clean and all PRD criteria are addressed. The one deferred criterion (model warning for unsupported CLI tools) is correctly noted as academic since both current variants support `--model`.
+
 ## Design Details
 
 ### Key Types
