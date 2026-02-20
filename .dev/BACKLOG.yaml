@@ -67,7 +67,8 @@ items:
   last_phase_commit: 213f17024dc32939b78b344fb5e26bd8b06abe15
 - id: WRK-020
   title: Consider wrapping kill_all_children in spawn_blocking for async call sites
-  status: ready
+  status: in_progress
+  phase: prd
   size: small
   complexity: low
   risk: low
@@ -75,8 +76,9 @@ items:
   requires_human_review: false
   origin: WRK-001/review
   created: 2026-02-12T20:12:47.653572849+00:00
-  updated: 2026-02-13T01:33:13.905667599+00:00
+  updated: 2026-02-20T20:35:49.000388103+00:00
   pipeline_type: feature
+  phase_pool: main
 - id: WRK-021
   title: Add test coverage for shutdown signal kill_process_group path
   status: ready
@@ -415,29 +417,6 @@ items:
   created: 2026-02-13T06:00:01.156449318+00:00
   updated: 2026-02-20T19:40:01.547332754+00:00
   pipeline_type: feature
-- id: WRK-061
-  title: Add inbox description rendering to triage prompt
-  status: in_progress
-  phase: review
-  size: small
-  complexity: low
-  risk: low
-  impact: medium
-  requires_human_review: false
-  origin: WRK-028/spec
-  created: 2026-02-13T06:34:25.816435218+00:00
-  updated: 2026-02-20T20:35:48.946669097+00:00
-  pipeline_type: feature
-  description:
-    context: |-
-      [Merged from WRK-067] Title: Add inbox description rendering to triage prompt. Origin: WRK-028/build
-      [Merged from WRK-072] Title: Add inbox description rendering to triage prompt. Origin: WRK-028/review
-    problem: ''
-    solution: ''
-    impact: ''
-    sizing_rationale: ''
-  phase_pool: main
-  last_phase_commit: 54f0b98b3985989bc88d77e67f9ca1b1ee700556
 - id: WRK-063
   title: Display impl for StructuredDescription
   status: ready
@@ -464,7 +443,13 @@ items:
   requires_human_review: false
   origin: WRK-028/spec
   created: 2026-02-13T06:34:25.816435218+00:00
-  updated: 2026-02-13T06:34:25.816435218+00:00
+  updated: 2026-02-20T20:36:37.767052447+00:00
+  description:
+    context: '[Merged from WRK-070] Title: Flexible deserialization for StructuredDescription. Origin: WRK-028/build'
+    problem: ''
+    solution: ''
+    impact: ''
+    sizing_rationale: ''
 - id: WRK-065
   title: Extract shared atomic_write_yaml helper to deduplicate temp-file pattern across save/migrate_v1_to_v2/migrate_v2_to_v3
   status: new
@@ -479,15 +464,6 @@ items:
   origin: WRK-028/build
   created: 2026-02-13T07:12:22.373899894+00:00
   updated: 2026-02-13T07:12:22.373899894+00:00
-- id: WRK-070
-  title: Flexible deserialization for StructuredDescription
-  status: new
-  size: small
-  risk: low
-  requires_human_review: false
-  origin: WRK-028/build
-  created: 2026-02-13T07:15:57.344215880+00:00
-  updated: 2026-02-13T07:15:57.344215880+00:00
 - id: WRK-071
   title: Extract shared atomic_write_yaml helper
   status: new
