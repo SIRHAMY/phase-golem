@@ -1,7 +1,7 @@
 # SPEC: Wrap kill_all_children in spawn_blocking for async call sites
 
 **ID:** WRK-017
-**Status:** Ready
+**Status:** Complete
 **Created:** 2026-02-19
 **PRD:** ./WRK-017_wrap-kill-all-children-in-spawn-blocking-for-async-call-sites_PRD.md
 **Execution Mode:** autonomous
@@ -46,7 +46,7 @@ The function signature and body of `kill_all_children()` are not modified — it
 
 > Wrap both async call sites of `kill_all_children()` in `tokio::task::spawn_blocking` with panic-logging error handling
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -62,8 +62,8 @@ The function signature and body of `kill_all_children()` are not modified — it
 
 **Tasks:**
 
-- [ ] Search `src/main.rs` for all `kill_all_children()` calls — confirm exactly 2 exist, both in async functions (`handle_run` and `handle_triage`)
-- [ ] In `handle_run`, replace the `kill_all_children();` call with:
+- [x] Search `src/main.rs` for all `kill_all_children()` calls — confirm exactly 2 exist, both in async functions (`handle_run` and `handle_triage`)
+- [x] In `handle_run`, replace the `kill_all_children();` call with:
   ```rust
   tokio::task::spawn_blocking(move || {
       kill_all_children();
@@ -71,19 +71,19 @@ The function signature and body of `kill_all_children()` are not modified — it
   .await
   .unwrap_or_else(|e| log_warn!("kill_all_children task panicked: {}", e));
   ```
-- [ ] In `handle_triage`, replace the `kill_all_children();` call with the same `spawn_blocking` wrapper (identical code)
-- [ ] Verify `tokio::task::spawn_blocking` is already accessible (it is — used elsewhere in `handle_run`)
-- [ ] Verify `log_warn!` macro is already imported (it is — imported at the top of main.rs)
+- [x] In `handle_triage`, replace the `kill_all_children();` call with the same `spawn_blocking` wrapper (identical code)
+- [x] Verify `tokio::task::spawn_blocking` is already accessible (it is — used elsewhere in `handle_run`)
+- [x] Verify `log_warn!` macro is already imported (it is — imported at the top of main.rs)
 
 **Verification:**
 
-- [ ] `cargo build` succeeds without warnings
-- [ ] `cargo test` passes (all existing tests pass without modification)
-- [ ] `cargo clippy` reports no new warnings
-- [ ] Both call sites use `move || { kill_all_children(); }` closure syntax, matching `kill_process_group()` at agent.rs:305
-- [ ] Both call sites use `.unwrap_or_else(|e| log_warn!("kill_all_children task panicked: {}", e))` — exact log message matches this pattern
-- [ ] No other `kill_all_children()` calls exist in async contexts without `spawn_blocking`
-- [ ] `kill_all_children()` function signature and body in `src/agent.rs` are unchanged
+- [x] `cargo build` succeeds without warnings
+- [x] `cargo test` passes (all existing tests pass without modification)
+- [x] `cargo clippy` reports no new warnings
+- [x] Both call sites use `move || { kill_all_children(); }` closure syntax, matching `kill_process_group()` at agent.rs:305
+- [x] Both call sites use `.unwrap_or_else(|e| log_warn!("kill_all_children task panicked: {}", e))` — exact log message matches this pattern
+- [x] No other `kill_all_children()` calls exist in async contexts without `spawn_blocking`
+- [x] `kill_all_children()` function signature and body in `src/agent.rs` are unchanged
 
 **Commit:** `[WRK-017][P1] Fix: Wrap kill_all_children in spawn_blocking at async call sites`
 
@@ -101,22 +101,23 @@ The function signature and body of `kill_all_children()` are not modified — it
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met:
-  - [ ] `handle_run` calls `kill_all_children()` via `spawn_blocking` and `.await`s the result
-  - [ ] `handle_triage` calls `kill_all_children()` via `spawn_blocking` and `.await`s the result
-  - [ ] Error handling uses `.await.unwrap_or_else(|e| ...)` with `log_warn!`, matching `kill_process_group()` pattern
-  - [ ] Errors from JoinHandle are logged but not propagated
-  - [ ] `kill_all_children()` function signature and body are not modified
-  - [ ] Existing tests pass without modification
-- [ ] Tests pass
-- [ ] No regressions introduced
-- [ ] Code reviewed (if applicable)
+- [x] All phases complete
+- [x] All PRD success criteria met:
+  - [x] `handle_run` calls `kill_all_children()` via `spawn_blocking` and `.await`s the result
+  - [x] `handle_triage` calls `kill_all_children()` via `spawn_blocking` and `.await`s the result
+  - [x] Error handling uses `.await.unwrap_or_else(|e| ...)` with `log_warn!`, matching `kill_process_group()` pattern
+  - [x] Errors from JoinHandle are logged but not propagated
+  - [x] `kill_all_children()` function signature and body are not modified
+  - [x] Existing tests pass without modification
+- [x] Tests pass
+- [x] No regressions introduced
+- [x] Code reviewed (if applicable)
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| 1 | complete | `[WRK-017][P1] Fix: Wrap kill_all_children in spawn_blocking at async call sites` | Both call sites wrapped, all verification passed, code review clean |
 
 ## Followups Summary
 
@@ -142,13 +143,19 @@ The alternative (`block_in_place`) was rejected in the design phase: it is not u
 
 ## Retrospective
 
-[Fill in after completion]
-
 ### What worked well?
+
+- Mechanical change with clear precedent made implementation straightforward
+- All dependencies (tokio, log_warn!) already in scope — zero friction
+- Single-phase SPEC was appropriate for this scope
 
 ### What was harder than expected?
 
+- Nothing — this was as straightforward as expected for a two-line mechanical change
+
 ### What would we do differently next time?
+
+- Nothing — the light-mode SPEC approach was well-matched to this task's complexity
 
 ## Assumptions
 

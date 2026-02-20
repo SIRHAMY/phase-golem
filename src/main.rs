@@ -632,7 +632,11 @@ async fn handle_run(
     let summary = scheduler::run_scheduler(coord_handle, runner, config, params, cancel).await?;
 
     // Kill any remaining child processes
-    kill_all_children();
+    tokio::task::spawn_blocking(move || {
+        kill_all_children();
+    })
+    .await
+    .unwrap_or_else(|e| log_warn!("kill_all_children task panicked: {}", e));
 
     // Await coordinator shutdown (ensures save_backlog() completes)
     if let Err(err) = coord_task.await {
@@ -848,7 +852,11 @@ async fn handle_triage(
 
     // Shutdown coordinator and clean up
     drop(coordinator_handle);
-    kill_all_children();
+    tokio::task::spawn_blocking(move || {
+        kill_all_children();
+    })
+    .await
+    .unwrap_or_else(|e| log_warn!("kill_all_children task panicked: {}", e));
 
     log_info!("Triaged {} item(s)", triaged_count);
 

@@ -1014,9 +1014,7 @@ fn preflight_phase3_runs_when_phase1_passes_but_phase2_fails() {
         .iter()
         .any(|e| e.condition.contains("Workflow file not found")));
     // Phase 3 ran (because Phase 1 passed) and caught the invalid phase reference
-    assert!(errors
-        .iter()
-        .any(|e| e.condition.contains("unknown phase")));
+    assert!(errors.iter().any(|e| e.condition.contains("unknown phase")));
 }
 
 #[test]
