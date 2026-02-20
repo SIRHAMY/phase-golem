@@ -102,14 +102,14 @@ items:
 - id: WRK-025
   title: Clean up stale .phase-golem result files on startup and shutdown
   status: in_progress
-  phase: design
+  phase: spec
   size: small
   complexity: low
   risk: low
   impact: low
   requires_human_review: false
   created: 2026-02-12T23:00:00.000000000+00:00
-  updated: 2026-02-20T21:49:46.131100483+00:00
+  updated: 2026-02-20T21:59:40.262773717+00:00
   pipeline_type: feature
   description:
     context: Phase execution writes result JSON files to .phase-golem/ (e.g. phase_result_WRK-001_build.json). These are cleaned up after successful reads in agent.rs.
@@ -118,7 +118,7 @@ items:
     impact: Prevents disk space accumulation and eliminates risk of reading stale results from prior runs.
     sizing_rationale: Small/low — a glob + delete at startup in main.rs. Low impact because the practical risk is minor (stale reads are unlikely but possible).
   phase_pool: main
-  last_phase_commit: e03bf9972eec86d967f56eb6868d49b0a0d4d69f
+  last_phase_commit: 1ce4d090efd842a2b54314411d00aaae6b4ce7d0
 - id: WRK-031
   title: Add validation warning when next_item_id < max(current items) on BACKLOG.yaml load
   status: ready
@@ -1043,4 +1043,13 @@ items:
   origin: WRK-024/review
   created: 2026-02-20T21:35:14.100998832+00:00
   updated: 2026-02-20T21:35:14.100998832+00:00
-next_item_id: 138
+- id: HAMY-139
+  title: Extract result file naming convention into shared constants
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-025/spec
+  created: 2026-02-20T21:59:40.278212301+00:00
+  updated: 2026-02-20T21:59:40.278212301+00:00
+next_item_id: 139
