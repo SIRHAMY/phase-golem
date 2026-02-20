@@ -398,24 +398,10 @@ items:
   created: 2026-02-13T04:19:23.747896981+00:00
   updated: 2026-02-20T02:52:57.592293884+00:00
   pipeline_type: feature
-- id: WRK-054
-  title: Add --auto-advance flag for multi-target runs
-  status: in_progress
-  phase: review
-  size: small
-  complexity: low
-  risk: low
-  impact: medium
-  requires_human_review: false
-  origin: WRK-030/review
-  created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T15:00:39.456726141+00:00
-  pipeline_type: feature
-  phase_pool: main
-  last_phase_commit: e45e33d3f32a48b3d850efd4d70caaa643c2a43e
 - id: WRK-055
   title: Support multiple --only filters with AND logic
-  status: ready
+  status: in_progress
+  phase: prd
   size: small
   complexity: low
   risk: low
@@ -423,8 +409,9 @@ items:
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T03:49:10.077751771+00:00
+  updated: 2026-02-20T15:00:39.516097710+00:00
   pipeline_type: feature
+  phase_pool: main
 - id: WRK-056
   title: Support comma-separated OR values within --only filter
   status: new
