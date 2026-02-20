@@ -51,7 +51,7 @@ items:
 - id: WRK-018
   title: Add test coverage for shutdown signal kill_process_group path
   status: in_progress
-  phase: build
+  phase: review
   size: small
   complexity: low
   risk: low
@@ -59,10 +59,10 @@ items:
   requires_human_review: false
   origin: WRK-001/build
   created: 2026-02-12T20:10:57.116194714+00:00
-  updated: 2026-02-20T20:06:49.981420714+00:00
+  updated: 2026-02-20T20:08:09.901931105+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 48879735b18c88200e9f9a882a146dc229e62fd5
+  last_phase_commit: 3ae16718d8a3f3769deae9238dfeb28b843ab583
 - id: WRK-019
   title: Wrap blocking filesystem ops in run_subprocess_agent with async equivalents
   status: ready
