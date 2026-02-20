@@ -418,7 +418,7 @@ items:
 - id: WRK-061
   title: Add inbox description rendering to triage prompt
   status: in_progress
-  phase: design
+  phase: spec
   size: small
   complexity: low
   risk: low
@@ -426,7 +426,7 @@ items:
   requires_human_review: false
   origin: WRK-028/spec
   created: 2026-02-13T06:34:25.816435218+00:00
-  updated: 2026-02-20T20:23:51.669061982+00:00
+  updated: 2026-02-20T20:30:03.234656370+00:00
   pipeline_type: feature
   description:
     context: |-
@@ -437,7 +437,7 @@ items:
     impact: ''
     sizing_rationale: ''
   phase_pool: main
-  last_phase_commit: 1fdbb51a33d93b2f07e887dd524144d7a0249aee
+  last_phase_commit: 6bd79bf2d2ce006bd647a391c1ea4a76b6462742
 - id: WRK-063
   title: Display impl for StructuredDescription
   status: ready
