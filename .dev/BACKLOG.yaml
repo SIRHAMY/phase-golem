@@ -48,21 +48,6 @@ items:
   pipeline_type: feature
   phase_pool: main
   last_phase_commit: fe2d97f0b873bfdffe9874c5157a153d5067c0a4
-- id: WRK-017
-  title: Wrap kill_all_children in spawn_blocking for async call sites
-  status: in_progress
-  phase: review
-  size: small
-  complexity: low
-  risk: low
-  impact: low
-  requires_human_review: false
-  origin: WRK-001/build
-  created: 2026-02-12T20:10:57.116194714+00:00
-  updated: 2026-02-20T03:47:15.927138212+00:00
-  pipeline_type: feature
-  phase_pool: main
-  last_phase_commit: 45e519603f73e5bf52e55ea08d9d17cfc555943d
 - id: WRK-018
   title: Add test coverage for shutdown signal kill_process_group path
   status: ready
@@ -415,7 +400,8 @@ items:
   pipeline_type: feature
 - id: WRK-054
   title: Add --auto-advance flag for multi-target runs
-  status: ready
+  status: in_progress
+  phase: prd
   size: small
   complexity: low
   risk: low
@@ -423,8 +409,9 @@ items:
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T03:21:07.050175516+00:00
+  updated: 2026-02-20T03:47:15.980190776+00:00
   pipeline_type: feature
+  phase_pool: main
 - id: WRK-055
   title: Support multiple --only filters with AND logic
   status: new
