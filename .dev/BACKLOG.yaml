@@ -67,6 +67,23 @@ items:
   last_phase_commit: 213f17024dc32939b78b344fb5e26bd8b06abe15
 - id: WRK-020
   title: Consider wrapping kill_all_children in spawn_blocking for async call sites
+  status: blocked
+  phase: prd
+  size: small
+  complexity: low
+  risk: low
+  impact: low
+  requires_human_review: false
+  origin: WRK-001/review
+  blocked_from_status: in_progress
+  blocked_reason: WRK-020 and WRK-017 both address wrapping kill_all_children in spawn_blocking for async call sites. Both originated from WRK-001 (WRK-017 from build, WRK-020 from review). WRK-017 has already been completed — it is no longer in the backlog, and its build phase produced follow-up item HAMY-119. The WRK-017 PRD explicitly documents WRK-020 as a duplicate. A separate backlog item (HAMY-118) already exists to close WRK-020 as duplicate. No PRD is needed since the work is done.
+  created: 2026-02-12T20:12:47.653572849+00:00
+  updated: 2026-02-20T20:37:32.213834763+00:00
+  pipeline_type: feature
+  phase_pool: main
+  last_phase_commit: facc75fe7678f3511a8e8edb2ac110357e82eaae
+- id: WRK-021
+  title: Add test coverage for shutdown signal kill_process_group path
   status: in_progress
   phase: prd
   size: small
@@ -76,21 +93,9 @@ items:
   requires_human_review: false
   origin: WRK-001/review
   created: 2026-02-12T20:12:47.653572849+00:00
-  updated: 2026-02-20T20:35:49.000388103+00:00
+  updated: 2026-02-20T20:37:32.243269451+00:00
   pipeline_type: feature
   phase_pool: main
-- id: WRK-021
-  title: Add test coverage for shutdown signal kill_process_group path
-  status: ready
-  size: small
-  complexity: low
-  risk: low
-  impact: low
-  requires_human_review: false
-  origin: WRK-001/review
-  created: 2026-02-12T20:12:47.653572849+00:00
-  updated: 2026-02-13T01:34:04.299520048+00:00
-  pipeline_type: feature
 - id: WRK-024
   title: Investigate using immutable data structures for backlog snapshots to avoid cloning
   status: ready
@@ -437,13 +442,16 @@ items:
     sizing_rationale: ''
 - id: WRK-064
   title: Flexible deserialization for StructuredDescription
-  status: new
+  status: ready
   size: small
+  complexity: low
   risk: low
+  impact: low
   requires_human_review: false
   origin: WRK-028/spec
   created: 2026-02-13T06:34:25.816435218+00:00
-  updated: 2026-02-20T20:36:37.767052447+00:00
+  updated: 2026-02-20T20:36:37.813431636+00:00
+  pipeline_type: feature
   description:
     context: '[Merged from WRK-070] Title: Flexible deserialization for StructuredDescription. Origin: WRK-028/build'
     problem: ''
@@ -456,7 +464,13 @@ items:
   requires_human_review: false
   origin: WRK-028/build
   created: 2026-02-13T07:12:22.373899894+00:00
-  updated: 2026-02-13T07:12:22.373899894+00:00
+  updated: 2026-02-20T20:38:09.924732980+00:00
+  description:
+    context: '[Merged from WRK-071] Title: Extract shared atomic_write_yaml helper. Origin: WRK-028/build'
+    problem: ''
+    solution: ''
+    impact: ''
+    sizing_rationale: ''
 - id: WRK-066
   title: Change map_v2_item to take ownership (V2BacklogItem) instead of reference for zero-cost field moves
   status: new
@@ -464,15 +478,6 @@ items:
   origin: WRK-028/build
   created: 2026-02-13T07:12:22.373899894+00:00
   updated: 2026-02-13T07:12:22.373899894+00:00
-- id: WRK-071
-  title: Extract shared atomic_write_yaml helper
-  status: new
-  size: small
-  risk: low
-  requires_human_review: false
-  origin: WRK-028/build
-  created: 2026-02-13T07:15:57.344215880+00:00
-  updated: 2026-02-13T07:15:57.344215880+00:00
 - id: WRK-074
   title: Close WRK-040 as duplicate of WRK-034
   status: new
