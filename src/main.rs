@@ -325,6 +325,67 @@ phases = [
     Ok(())
 }
 
+/// Delete all `phase_result_*.json` files from the runtime directory.
+///
+/// Used at startup (before agents spawn) and shutdown (after all agents complete)
+/// as a defense-in-depth layer against stale result files from crashed runs.
+/// Swallows all errors — cleanup failure is non-critical.
+// NOTE: must match executor::result_file_path() naming convention
+async fn cleanup_stale_result_files(runtime_dir: &Path, context: &str) {
+    let mut entries = match tokio::fs::read_dir(runtime_dir).await {
+        Ok(entries) => entries,
+        Err(err) => {
+            log_warn!(
+                "[{}] Failed to read {} for cleanup: {}",
+                context,
+                runtime_dir.display(),
+                err
+            );
+            return;
+        }
+    };
+
+    let mut deleted_count: u32 = 0;
+    loop {
+        let entry = match entries.next_entry().await {
+            Ok(Some(entry)) => entry,
+            Ok(None) => break,
+            Err(err) => {
+                log_warn!(
+                    "[{}] Failed to read directory entry during cleanup: {}",
+                    context,
+                    err
+                );
+                break;
+            }
+        };
+
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        // NOTE: must match executor::result_file_path() naming convention
+        if name.starts_with("phase_result_") && name.ends_with(".json") {
+            if let Err(err) = tokio::fs::remove_file(entry.path()).await {
+                log_warn!(
+                    "[{}] Failed to delete stale result file {}: {}",
+                    context,
+                    entry.path().display(),
+                    err
+                );
+                continue;
+            }
+            deleted_count += 1;
+        }
+    }
+
+    if deleted_count > 0 {
+        log_info!(
+            "[{}] Cleaned up {} stale result file(s) from .phase-golem/",
+            context,
+            deleted_count
+        );
+    }
+}
+
 async fn handle_run(
     root: &Path,
     config_path: Option<&Path>,
@@ -344,6 +405,7 @@ async fn handle_run(
     log_info!("[pre] Acquiring lock...");
     let runtime_dir = root.join(".phase-golem");
     let _lock = lock::try_acquire(&runtime_dir)?;
+    cleanup_stale_result_files(&runtime_dir, "pre").await;
     log_info!("[pre] Checking git preconditions...");
     phase_golem::git::check_preconditions(Some(root))?;
 
@@ -719,6 +781,8 @@ async fn handle_run(
             }
         }
     }
+
+    cleanup_stale_result_files(&runtime_dir, "post").await;
 
     // Print summary
     log_info!("\n--- Run Summary ---");
@@ -1174,4 +1238,116 @@ pub fn find_change_dir(changes_dir: &Path, item_id: &str) -> Result<PathBuf, Str
         item_id,
         changes_dir.display()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs as std_fs;
+
+    #[tokio::test]
+    async fn cleanup_deletes_matching_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std_fs::write(
+            dir.path().join("phase_result_WRK-001_build.json"),
+            "{}",
+        )
+        .unwrap();
+        std_fs::write(
+            dir.path().join("phase_result_WRK-002_prd.json"),
+            "{}",
+        )
+        .unwrap();
+
+        cleanup_stale_result_files(dir.path(), "test").await;
+
+        assert!(!dir.path().join("phase_result_WRK-001_build.json").exists());
+        assert!(!dir.path().join("phase_result_WRK-002_prd.json").exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_ignores_non_matching_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std_fs::write(dir.path().join("phase-golem.lock"), "lock").unwrap();
+        std_fs::write(dir.path().join("other.json"), "{}").unwrap();
+        std_fs::write(
+            dir.path().join("phase_result_WRK-001_build.txt"),
+            "{}",
+        )
+        .unwrap();
+
+        cleanup_stale_result_files(dir.path(), "test").await;
+
+        assert!(dir.path().join("phase-golem.lock").exists());
+        assert!(dir.path().join("other.json").exists());
+        assert!(dir.path().join("phase_result_WRK-001_build.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_handles_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nonexistent");
+
+        cleanup_stale_result_files(&missing, "test").await;
+        // Should not panic
+    }
+
+    #[tokio::test]
+    async fn cleanup_handles_empty_directory() {
+        let dir = tempfile::tempdir().unwrap();
+
+        cleanup_stale_result_files(dir.path(), "test").await;
+        // Should not panic
+    }
+
+    #[tokio::test]
+    async fn cleanup_continues_after_partial_failure() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Regular file that should be deleted
+        std_fs::write(
+            dir.path().join("phase_result_WRK-001_build.json"),
+            "{}",
+        )
+        .unwrap();
+
+        // Subdirectory with matching name — remove_file will fail with EISDIR
+        std_fs::create_dir(dir.path().join("phase_result_stuck.json")).unwrap();
+
+        // Another regular file that should be deleted
+        std_fs::write(
+            dir.path().join("phase_result_WRK-002_prd.json"),
+            "{}",
+        )
+        .unwrap();
+
+        cleanup_stale_result_files(dir.path(), "test").await;
+
+        assert!(!dir.path().join("phase_result_WRK-001_build.json").exists());
+        assert!(!dir.path().join("phase_result_WRK-002_prd.json").exists());
+        // Subdirectory should still exist (remove_file failed on it)
+        assert!(dir.path().join("phase_result_stuck.json").exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_handles_directory_entry_with_matching_name() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Subdirectory with matching name
+        std_fs::create_dir(dir.path().join("phase_result_WRK-003_test.json")).unwrap();
+
+        // Regular matching file
+        std_fs::write(
+            dir.path().join("phase_result_WRK-001_build.json"),
+            "{}",
+        )
+        .unwrap();
+
+        cleanup_stale_result_files(dir.path(), "test").await;
+
+        // Regular file should be deleted
+        assert!(!dir.path().join("phase_result_WRK-001_build.json").exists());
+        // Directory should still exist (remove_file can't delete directories)
+        assert!(dir.path().join("phase_result_WRK-003_test.json").exists());
+    }
 }

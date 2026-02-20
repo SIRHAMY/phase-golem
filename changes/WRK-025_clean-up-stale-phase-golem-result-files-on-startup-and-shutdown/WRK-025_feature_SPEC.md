@@ -1,7 +1,7 @@
 # SPEC: Clean Up Stale .phase-golem Result Files on Startup and Shutdown
 
 **ID:** WRK-025
-**Status:** Draft
+**Status:** Complete
 **Created:** 2026-02-20
 **PRD:** ./WRK-025_feature_PRD.md
 **Execution Mode:** autonomous
@@ -53,7 +53,7 @@ The function uses `tokio::fs::read_dir` with `starts_with("phase_result_")` and 
 
 > Add `cleanup_stale_result_files()` to `main.rs` with startup and shutdown call sites, plus unit tests
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -71,16 +71,16 @@ The function uses `tokio::fs::read_dir` with `starts_with("phase_result_")` and 
 
 **Tasks:**
 
-- [ ] Add `async fn cleanup_stale_result_files(runtime_dir: &Path, context: &str)` to `src/main.rs`:
+- [x] Add `async fn cleanup_stale_result_files(runtime_dir: &Path, context: &str)` to `src/main.rs`:
   - Call `tokio::fs::read_dir(runtime_dir).await`; on error, `log_warn!("[{}] Failed to read .phase-golem/ for cleanup: {}", context, err)` and return
   - Iterate entries with `next_entry().await`; on iteration error, `log_warn!` and break
   - For each entry, check `file_name().to_string_lossy()` with `starts_with("phase_result_")` && `ends_with(".json")`
   - Delete matching files with `tokio::fs::remove_file(entry.path()).await`; on error, `log_warn!("[{}] Failed to delete stale result file {}: {}", context, path, err)` — **continue to next file, do not break or return**
   - Track count of deleted files; if count > 0, `log_info!("[{}] Cleaned up {} stale result file(s) from .phase-golem/", context, count)`. When count == 0, emit no log (silent no-op).
   - Function signature returns `()` — never propagates errors
-- [ ] Insert startup call: add `cleanup_stale_result_files(&runtime_dir, "pre").await;` immediately after `let _lock = lock::try_acquire(&runtime_dir)?;` and before `log_info!("[pre] Checking git preconditions...")` (semantic anchors; currently lines 346–347, but use the surrounding code as the anchor if line numbers have shifted)
-- [ ] Insert shutdown call: add `cleanup_stale_result_files(&runtime_dir, "post").await;` after the closing `}` of the entire `if let Err(err) = coord_task.await { ... } else { ... }` block, before `log_info!("\n--- Run Summary ---")` (semantic anchors; currently after line 721, before line 723). **Important:** the call must be outside both branches of the if/else, so cleanup runs regardless of whether the coordinator completed normally or panicked.
-- [ ] Add `#[cfg(test)]` module in `src/main.rs` with unit tests (all tests use `#[tokio::test]`, not `#[test]`, since the function is async):
+- [x] Insert startup call: add `cleanup_stale_result_files(&runtime_dir, "pre").await;` immediately after `let _lock = lock::try_acquire(&runtime_dir)?;` and before `log_info!("[pre] Checking git preconditions...")` (semantic anchors; currently lines 346–347, but use the surrounding code as the anchor if line numbers have shifted)
+- [x] Insert shutdown call: add `cleanup_stale_result_files(&runtime_dir, "post").await;` after the closing `}` of the entire `if let Err(err) = coord_task.await { ... } else { ... }` block, before `log_info!("\n--- Run Summary ---")` (semantic anchors; currently after line 721, before line 723). **Important:** the call must be outside both branches of the if/else, so cleanup runs regardless of whether the coordinator completed normally or panicked.
+- [x] Add `#[cfg(test)]` module in `src/main.rs` with unit tests (all tests use `#[tokio::test]`, not `#[test]`, since the function is async):
   - `cleanup_deletes_matching_files` — create temp dir (via `tempfile::tempdir()`) with `phase_result_WRK-001_build.json` and `phase_result_WRK-002_prd.json`, call cleanup, assert files are deleted
   - `cleanup_ignores_non_matching_files` — create temp dir with `phase-golem.lock`, `other.json`, `phase_result_WRK-001_build.txt`, call cleanup, assert non-matching files still exist
   - `cleanup_handles_missing_directory` — call cleanup on a non-existent path, assert no panic
@@ -90,16 +90,16 @@ The function uses `tokio::fs::read_dir` with `starts_with("phase_result_")` and 
 
 **Verification:**
 
-- [ ] `cargo build` succeeds without warnings
-- [ ] `cargo test --all` passes (all existing tests + new tests)
-- [ ] `cargo clippy` produces no new warnings
-- [ ] Code review confirms: `cleanup_stale_result_files` call appears after `lock::try_acquire` and before `log_info!("[pre] Checking git preconditions...")` (startup ordering)
-- [ ] Code review confirms: shutdown call is outside the `if let Err(err) = coord_task.await` block, before `log_info!("\n--- Run Summary ---")`
-- [ ] Code review confirms: both cleanup calls execute while `_lock` is in scope (before `handle_run()` returns)
-- [ ] Manual verification (startup): create dummy `phase_result_test_build.json` in `.phase-golem/`, run `phase-golem run`, confirm file is deleted at startup (visible in `[pre]` info-level log)
-- [ ] Manual verification (shutdown): after a normal run with at least one phase execution, confirm no `phase_result_*.json` files remain in `.phase-golem/` (visible in `[post]` info-level log if any were present)
-- [ ] Performance: cleanup completes in under 100ms for typical file counts (< 100 files) — met by design (single sequential `read_dir` over local files)
-- [ ] Code review passes
+- [x] `cargo build` succeeds without warnings
+- [x] `cargo test --all` passes (all existing tests + new tests)
+- [x] `cargo clippy` produces no new warnings
+- [x] Code review confirms: `cleanup_stale_result_files` call appears after `lock::try_acquire` and before `log_info!("[pre] Checking git preconditions...")` (startup ordering)
+- [x] Code review confirms: shutdown call is outside the `if let Err(err) = coord_task.await` block, before `log_info!("\n--- Run Summary ---")`
+- [x] Code review confirms: both cleanup calls execute while `_lock` is in scope (before `handle_run()` returns)
+- [x] Manual verification (startup): create dummy `phase_result_test_build.json` in `.phase-golem/`, run `phase-golem run`, confirm file is deleted at startup (visible in `[pre]` info-level log) — verified by unit tests; manual run skipped (autonomous mode, no running environment)
+- [x] Manual verification (shutdown): after a normal run with at least one phase execution, confirm no `phase_result_*.json` files remain in `.phase-golem/` (visible in `[post]` info-level log if any were present) — verified by unit tests; manual run skipped (autonomous mode)
+- [x] Performance: cleanup completes in under 100ms for typical file counts (< 100 files) — met by design (single sequential `read_dir` over local files)
+- [x] Code review passes
 
 **Commit:** `[WRK-025][P1] Feature: startup/shutdown cleanup of stale result files`
 
@@ -121,22 +121,23 @@ The function uses `tokio::fs::read_dir` with `starts_with("phase_result_")` and 
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met:
-  - [ ] Startup: all `phase_result_*.json` deleted before agents spawn
-  - [ ] Startup: cleanup runs after lock acquisition, before coordinator starts
-  - [ ] Startup: each file deletion failure logged as warning, startup continues
-  - [ ] Startup: if `.phase-golem/` unreadable, warning logged, no abort
-  - [ ] Shutdown: all `phase_result_*.json` deleted while lock held, after agents complete and coordinator has shut down
-  - [ ] Logging: info-level summary when stale files found, no log when zero files
-- [ ] Tests pass
-- [ ] No regressions introduced
-- [ ] Code reviewed
+- [x] All phases complete
+- [x] All PRD success criteria met:
+  - [x] Startup: all `phase_result_*.json` deleted before agents spawn
+  - [x] Startup: cleanup runs after lock acquisition, before coordinator starts
+  - [x] Startup: each file deletion failure logged as warning, startup continues
+  - [x] Startup: if `.phase-golem/` unreadable, warning logged, no abort
+  - [x] Shutdown: all `phase_result_*.json` deleted while lock held, after agents complete and coordinator has shut down
+  - [x] Logging: info-level summary when stale files found, no log when zero files
+- [x] Tests pass
+- [x] No regressions introduced
+- [x] Code reviewed
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| 1 | complete | pending | Added cleanup function, startup/shutdown call sites, and 6 unit tests. Code review passed. |
 
 ## Followups Summary
 
@@ -149,6 +150,7 @@ The function uses `tokio::fs::read_dir` with `starts_with("phase_result_")` and 
 ### Low
 
 - [ ] Extract naming convention constants — `"phase_result_"` prefix and `".json"` suffix should be shared constants between `executor.rs` and `main.rs` for compile-time coupling
+- [ ] Add symlink check before deletion in `cleanup_stale_result_files` and existing cleanup paths in `agent.rs` — low priority, requires write access to locked runtime directory to exploit
 
 ## Design Details
 
