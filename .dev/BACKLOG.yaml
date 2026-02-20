@@ -398,24 +398,10 @@ items:
   created: 2026-02-13T04:19:23.747896981+00:00
   updated: 2026-02-20T02:52:57.592293884+00:00
   pipeline_type: feature
-- id: WRK-055
-  title: Support multiple --only filters with AND logic
-  status: in_progress
-  phase: review
-  size: small
-  complexity: low
-  risk: low
-  impact: medium
-  requires_human_review: false
-  origin: WRK-030/review
-  created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T15:57:53.985757175+00:00
-  pipeline_type: feature
-  phase_pool: main
-  last_phase_commit: db99c63216fdd541bf664108e56aab83b7a7ce95
 - id: WRK-056
   title: Support comma-separated OR values within --only filter
-  status: ready
+  status: in_progress
+  phase: prd
   size: small
   complexity: low
   risk: low
@@ -423,8 +409,9 @@ items:
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T15:02:05.011752830+00:00
+  updated: 2026-02-20T15:57:54.046703170+00:00
   pipeline_type: feature
+  phase_pool: main
 - id: WRK-057
   title: Add triage prompt schema support for producing structured descriptions via SetDescription
   status: new
@@ -433,7 +420,17 @@ items:
   requires_human_review: false
   origin: WRK-028/prd
   created: 2026-02-13T05:36:21.766249174+00:00
-  updated: 2026-02-13T05:36:21.766249174+00:00
+  updated: 2026-02-20T15:59:31.924613473+00:00
+  description:
+    context: |-
+      [Merged from WRK-060] Title: Update triage prompts to produce SetDescription with StructuredDescription. Origin: WRK-028/design
+      [Merged from WRK-062] Title: Triage prompt schema changes for structured description output. Origin: WRK-028/spec
+      [Merged from WRK-068] Title: Triage prompt schema changes for structured descriptions. Origin: WRK-028/build
+      [Merged from WRK-073] Title: Add triage prompt schema for structured description output. Origin: WRK-028/review
+    problem: ''
+    solution: ''
+    impact: ''
+    sizing_rationale: ''
 - id: WRK-058
   title: Extract previous_summaries threshold multiplier to named constant
   status: new
@@ -452,29 +449,11 @@ items:
   origin: WRK-022/build
   created: 2026-02-13T06:00:01.156449318+00:00
   updated: 2026-02-13T06:00:01.156449318+00:00
-- id: WRK-060
-  title: Update triage prompts to produce SetDescription with StructuredDescription
-  status: new
-  size: small
-  risk: low
-  requires_human_review: false
-  origin: WRK-028/design
-  created: 2026-02-13T06:09:29.066343465+00:00
-  updated: 2026-02-13T06:09:29.066343465+00:00
 - id: WRK-061
   title: Add inbox description rendering to triage prompt
   status: new
   size: small
   risk: low
-  requires_human_review: false
-  origin: WRK-028/spec
-  created: 2026-02-13T06:34:25.816435218+00:00
-  updated: 2026-02-13T06:34:25.816435218+00:00
-- id: WRK-062
-  title: Triage prompt schema changes for structured description output
-  status: new
-  size: medium
-  risk: medium
   requires_human_review: false
   origin: WRK-028/spec
   created: 2026-02-13T06:34:25.816435218+00:00
@@ -520,15 +499,6 @@ items:
   origin: WRK-028/build
   created: 2026-02-13T07:15:57.344215880+00:00
   updated: 2026-02-13T07:15:57.344215880+00:00
-- id: WRK-068
-  title: Triage prompt schema changes for structured descriptions
-  status: new
-  size: medium
-  risk: low
-  requires_human_review: false
-  origin: WRK-028/build
-  created: 2026-02-13T07:15:57.344215880+00:00
-  updated: 2026-02-13T07:15:57.344215880+00:00
 - id: WRK-069
   title: Display impl for StructuredDescription
   status: new
@@ -561,15 +531,6 @@ items:
   status: new
   size: small
   risk: low
-  requires_human_review: false
-  origin: WRK-028/review
-  created: 2026-02-13T07:19:12.377717576+00:00
-  updated: 2026-02-13T07:19:12.377717576+00:00
-- id: WRK-073
-  title: Add triage prompt schema for structured description output
-  status: new
-  size: medium
-  risk: medium
   requires_human_review: false
   origin: WRK-028/review
   created: 2026-02-13T07:19:12.377717576+00:00
@@ -1027,4 +988,40 @@ items:
   origin: WRK-055/review
   created: 2026-02-20T15:57:54.001289909+00:00
   updated: 2026-02-20T15:57:54.001289909+00:00
-next_item_id: 125
+- id: HAMY-126
+  title: Close WRK-060 as duplicate of WRK-057
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-057/triage
+  created: 2026-02-20T15:59:31.891175957+00:00
+  updated: 2026-02-20T15:59:31.891175957+00:00
+- id: HAMY-127
+  title: Close WRK-062 as duplicate of WRK-057
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-057/triage
+  created: 2026-02-20T15:59:31.891175957+00:00
+  updated: 2026-02-20T15:59:31.891175957+00:00
+- id: HAMY-128
+  title: Close WRK-068 as duplicate of WRK-057
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-057/triage
+  created: 2026-02-20T15:59:31.891175957+00:00
+  updated: 2026-02-20T15:59:31.891175957+00:00
+- id: HAMY-129
+  title: Close WRK-073 as duplicate of WRK-057
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-057/triage
+  created: 2026-02-20T15:59:31.891175957+00:00
+  updated: 2026-02-20T15:59:31.891175957+00:00
+next_item_id: 129
