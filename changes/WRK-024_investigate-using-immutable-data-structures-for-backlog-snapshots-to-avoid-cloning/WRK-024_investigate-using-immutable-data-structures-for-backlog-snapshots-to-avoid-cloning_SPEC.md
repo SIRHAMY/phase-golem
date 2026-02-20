@@ -112,7 +112,7 @@ Each handler is classified by its snapshot usage pattern:
 
 > Pre-fetch one snapshot in `handle_task_completion()` and pass to Type A/B handlers, removing their redundant `get_snapshot()` calls
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -124,50 +124,42 @@ Each handler is classified by its snapshot usage pattern:
 
 **Tasks:**
 
-- [ ] Add `let snapshot = coordinator.get_snapshot().await?;` at the top of `handle_task_completion()` (line 1067, before the `match`)
-- [ ] Add `snapshot: &BacklogFile` parameter to `handle_subphase_complete()` (line 1228)
-- [ ] Remove `let snapshot = coordinator.get_snapshot().await?;` from `handle_subphase_complete()` body (line 1247)
-- [ ] Update `handle_subphase_complete()` call site in `handle_task_completion()` to pass `&snapshot`
-- [ ] Add `snapshot: &BacklogFile` parameter to `handle_phase_failed()` (line 1283)
-- [ ] Remove `let snapshot = coordinator.get_snapshot().await?;` from `handle_phase_failed()` body (line 1293)
-- [ ] Update `handle_phase_failed()` call site in `handle_task_completion()` to pass `&snapshot`
-- [ ] Add `snapshot: &BacklogFile` parameter to `handle_phase_blocked()` (line 1312)
-- [ ] Remove `let snapshot = coordinator.get_snapshot().await?;` from `handle_phase_blocked()` body (line 1322)
-- [ ] Update `handle_phase_blocked()` call site in `handle_task_completion()` to pass `&snapshot`
-- [ ] Replace inline `coordinator.get_snapshot().await?` in the Cancelled branch (line 1103) with the pre-fetched `snapshot`
-- [ ] Add `snapshot: &BacklogFile` parameter to `handle_triage_success()` (line 1444) for its initial worklog read at line 1464
-- [ ] Remove the first `let snapshot = coordinator.get_snapshot().await?;` from `handle_triage_success()` (line 1464) — use passed snapshot for worklog
-- [ ] Keep the second `let snapshot = coordinator.get_snapshot().await?;` in `handle_triage_success()` (line 1501) — this reads post-mutation state after `apply_triage_result()`
-- [ ] Update `handle_triage_success()` call site in `handle_task_completion()` to pass `&snapshot`
-- [ ] Do NOT add snapshot parameter to `handle_phase_success()` — it mutates (assessments, follow-ups) before its first read (line 1156), so the pre-fetched snapshot would be useless
-- [ ] Do NOT modify `process_merges()` or `apply_triage_result()` — they have internal mutate-then-read loops that require fresh snapshots
-- [ ] Verify `drain_join_set()` still compiles — it also calls `handle_task_completion()`, but since the pre-fetch is added inside the function body (not changing its external signature), no call-site updates are needed. Confirm this explicitly.
-- [ ] Add comment block at top of `handle_task_completion()` documenting the snapshot freshness contract:
-  ```
-  // Snapshot freshness contract:
-  // - Handlers that read the backlog before mutating (subphase_complete, failed,
-  //   blocked, cancelled) use the pre-fetched snapshot passed by reference.
-  // - Handlers that mutate first then read (phase_success, triage_success via
-  //   process_merges/apply_triage_result) manage their own
-  //   coordinator.get_snapshot() calls at mutation boundaries.
-  ```
-- [ ] Run `cargo build` to confirm no compile errors
-- [ ] Run `cargo test` to confirm no regressions
+- [x] Add `let snapshot = coordinator.get_snapshot().await?;` at the top of `handle_task_completion()` (line 1067, before the `match`)
+- [x] Add `snapshot: &BacklogFile` parameter to `handle_subphase_complete()` (line 1228)
+- [x] Remove `let snapshot = coordinator.get_snapshot().await?;` from `handle_subphase_complete()` body (line 1247)
+- [x] Update `handle_subphase_complete()` call site in `handle_task_completion()` to pass `&snapshot`
+- [x] Add `snapshot: &BacklogFile` parameter to `handle_phase_failed()` (line 1283)
+- [x] Remove `let snapshot = coordinator.get_snapshot().await?;` from `handle_phase_failed()` body (line 1293)
+- [x] Update `handle_phase_failed()` call site in `handle_task_completion()` to pass `&snapshot`
+- [x] Add `snapshot: &BacklogFile` parameter to `handle_phase_blocked()` (line 1312)
+- [x] Remove `let snapshot = coordinator.get_snapshot().await?;` from `handle_phase_blocked()` body (line 1322)
+- [x] Update `handle_phase_blocked()` call site in `handle_task_completion()` to pass `&snapshot`
+- [x] Replace inline `coordinator.get_snapshot().await?` in the Cancelled branch (line 1103) with the pre-fetched `snapshot`
+- [x] Add `snapshot: &BacklogFile` parameter to `handle_triage_success()` (line 1444) for its initial worklog read at line 1464
+- [x] Remove the first `let snapshot = coordinator.get_snapshot().await?;` from `handle_triage_success()` (line 1464) — use passed snapshot for worklog
+- [x] Keep the second `let snapshot = coordinator.get_snapshot().await?;` in `handle_triage_success()` (line 1501) — this reads post-mutation state after `apply_triage_result()`
+- [x] Update `handle_triage_success()` call site in `handle_task_completion()` to pass `&snapshot`
+- [x] Do NOT add snapshot parameter to `handle_phase_success()` — it mutates (assessments, follow-ups) before its first read (line 1156), so the pre-fetched snapshot would be useless
+- [x] Do NOT modify `process_merges()` or `apply_triage_result()` — they have internal mutate-then-read loops that require fresh snapshots
+- [x] Verify `drain_join_set()` still compiles — it also calls `handle_task_completion()`, but since the pre-fetch is added inside the function body (not changing its external signature), no call-site updates are needed. Confirm this explicitly.
+- [x] Add comment block at top of `handle_task_completion()` documenting the snapshot freshness contract (updated from SPEC template to accurately reflect hybrid triage_success pattern per code review)
+- [x] Run `cargo build` to confirm no compile errors
+- [x] Run `cargo test` to confirm no regressions
 
 **Verification:**
 
-- [ ] `cargo build` succeeds
-- [ ] `cargo test` passes (all existing tests)
-- [ ] `handle_task_completion()` has exactly one `coordinator.get_snapshot().await?` call at its top
-- [ ] `handle_subphase_complete()`, `handle_phase_failed()`, `handle_phase_blocked()` have zero `get_snapshot()` calls in their bodies
-- [ ] `handle_triage_success()` has exactly one internal `get_snapshot()` call (line 1501 for post-mutation check), down from two
-- [ ] `handle_phase_success()` signature is unchanged (still fetches its own snapshot at line 1156)
-- [ ] `process_merges()` and `apply_triage_result()` are unchanged
-- [ ] Executor spawn closures (lines 871-943, 1584-1618) are unchanged
-- [ ] Snapshot freshness contract comment is present at top of `handle_task_completion()` and accurately lists all handlers as implemented
-- [ ] `drain_join_set()` compiles without changes (it calls `handle_task_completion()` whose external signature is unchanged)
-- [ ] Total `get_snapshot()` calls in `scheduler.rs` reduced from 13 to 8 (main loop, executor spawn x2, handle_task_completion pre-fetch, handle_phase_success, handle_triage_success post-mutation, process_merges, apply_triage_result)
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo build` succeeds
+- [x] `cargo test` passes (all existing tests — 660 passed, 0 failed)
+- [x] `handle_task_completion()` has exactly one `coordinator.get_snapshot().await?` call at its top
+- [x] `handle_subphase_complete()`, `handle_phase_failed()`, `handle_phase_blocked()` have zero `get_snapshot()` calls in their bodies
+- [x] `handle_triage_success()` has exactly one internal `get_snapshot()` call (line 1526 for post-mutation check), down from two
+- [x] `handle_phase_success()` signature is unchanged (still fetches its own snapshot at line 1181)
+- [x] `process_merges()` and `apply_triage_result()` are unchanged
+- [x] Executor spawn closures (lines 871-943, 1610-1618) are unchanged
+- [x] Snapshot freshness contract comment is present at top of `handle_task_completion()` and accurately lists all handlers as implemented
+- [x] `drain_join_set()` compiles without changes (it calls `handle_task_completion()` whose external signature is unchanged)
+- [x] Total `get_snapshot()` calls in `scheduler.rs` reduced from 12 to 8 (main loop, executor spawn x2, handle_task_completion pre-fetch, handle_phase_success, handle_triage_success post-mutation, process_merges, apply_triage_result)
+- [x] Code review passes — Ready to Merge verdict after fixing freshness contract comment accuracy
 
 **Commit:** `[WRK-024][P2] Clean: share pre-fetched snapshot across task completion handlers`
 
@@ -198,17 +190,18 @@ Lifetime safety: The `&snapshot` borrow in Type A handlers does not cross any pr
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met (recommendation delivered via Design doc; this SPEC implements the recommended approach)
-- [ ] Tests pass
-- [ ] No regressions introduced
-- [ ] Code reviewed (if applicable)
+- [x] All phases complete
+- [x] All PRD success criteria met (recommendation delivered via Design doc; this SPEC implements the recommended approach)
+- [x] Tests pass (660 passed, 0 failed)
+- [x] No regressions introduced
+- [x] Code reviewed — Ready to Merge verdict
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
 | Phase 1: Main Loop & Promote Caching | complete | `[WRK-024][P1] Clean: pass tick snapshot to handle_promote by reference` | All tasks done, code review passed (Ready to Merge) |
+| Phase 2: Task Completion Snapshot Sharing | complete | `[WRK-024][P2] Clean: share pre-fetched snapshot across task completion handlers` | All tasks done, code review fixed comment accuracy, Ready to Merge |
 
 ## Followups Summary
 
@@ -283,10 +276,16 @@ Both functions have internal mutate-then-read loops. `process_merges()` calls `g
 
 ## Retrospective
 
-[Fill in after completion]
-
 ### What worked well?
+
+- Handler classification audit in SPEC design phase made implementation mechanical — each handler's strategy was pre-determined, so coding was just following the plan.
+- Two-phase approach kept each change small and independently verifiable.
+- Code review caught an inaccurate comment that would have misled future readers about the `handle_triage_success` hybrid pattern.
 
 ### What was harder than expected?
 
+- Nothing was unexpectedly difficult. The implementation was straightforward mechanical refactoring as predicted by the SPEC.
+
 ### What would we do differently next time?
+
+- The SPEC's freshness contract comment template should have accounted for the hybrid `handle_triage_success` pattern from the start, rather than oversimplifying into two clean categories. The handler audit table already documented the hybrid behavior, but the comment template didn't reflect it.

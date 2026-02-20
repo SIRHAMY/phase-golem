@@ -1064,10 +1064,27 @@ async fn handle_task_completion(
     state: &mut SchedulerState,
     previous_summaries: &mut HashMap<String, String>,
 ) -> Result<(), String> {
+    // Snapshot freshness contract:
+    // - Handlers that read the backlog before mutating (subphase_complete, failed,
+    //   blocked, cancelled) use the pre-fetched snapshot passed by reference.
+    // - triage_success uses the pre-fetched snapshot for its initial worklog write,
+    //   then re-fetches after mutations (process_merges/apply_triage_result).
+    // - phase_success mutates first (assessments, follow-ups), then fetches its
+    //   own snapshot at the mutation boundary — it does not use the pre-fetched one.
+    let snapshot = coordinator.get_snapshot().await?;
+
     match exec_result {
         PhaseExecutionResult::Success(phase_result) => {
             if phase_result.phase == "triage" {
-                handle_triage_success(item_id, &phase_result, coordinator, config, state).await
+                handle_triage_success(
+                    &snapshot,
+                    item_id,
+                    &phase_result,
+                    coordinator,
+                    config,
+                    state,
+                )
+                .await
             } else {
                 handle_phase_success(
                     item_id,
@@ -1082,6 +1099,7 @@ async fn handle_task_completion(
         }
         PhaseExecutionResult::SubphaseComplete(phase_result) => {
             handle_subphase_complete(
+                &snapshot,
                 item_id,
                 phase_result,
                 coordinator,
@@ -1092,15 +1110,23 @@ async fn handle_task_completion(
             .await
         }
         PhaseExecutionResult::Failed(reason) => {
-            handle_phase_failed(item_id, &reason, coordinator, state, previous_summaries).await
+            handle_phase_failed(&snapshot, item_id, &reason, coordinator, state, previous_summaries)
+                .await
         }
         PhaseExecutionResult::Blocked(reason) => {
-            handle_phase_blocked(item_id, &reason, coordinator, state, previous_summaries).await
+            handle_phase_blocked(
+                &snapshot,
+                item_id,
+                &reason,
+                coordinator,
+                state,
+                previous_summaries,
+            )
+            .await
         }
         PhaseExecutionResult::Cancelled => {
             log_info!("[{}] Phase cancelled", item_id);
             // Write worklog entry
-            let snapshot = coordinator.get_snapshot().await?;
             if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
                 let phase = item.phase.as_deref().unwrap_or("unknown");
                 let _ = coordinator
@@ -1226,6 +1252,7 @@ async fn handle_phase_success(
 }
 
 async fn handle_subphase_complete(
+    snapshot: &BacklogFile,
     item_id: &str,
     phase_result: PhaseResult,
     coordinator: &CoordinatorHandle,
@@ -1244,7 +1271,6 @@ async fn handle_subphase_complete(
     );
 
     // Write worklog entry
-    let snapshot = coordinator.get_snapshot().await?;
     if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
         let _ = coordinator
             .write_worklog(item.clone(), &phase, "Subphase Complete", &summary)
@@ -1281,6 +1307,7 @@ async fn handle_subphase_complete(
 }
 
 async fn handle_phase_failed(
+    snapshot: &BacklogFile,
     item_id: &str,
     reason: &str,
     coordinator: &CoordinatorHandle,
@@ -1290,7 +1317,6 @@ async fn handle_phase_failed(
     log_info!("[{}] Phase failed: {}", item_id, reason);
 
     // Write worklog entry
-    let snapshot = coordinator.get_snapshot().await?;
     if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
         let phase = item.phase.as_deref().unwrap_or("unknown");
         let _ = coordinator
@@ -1310,6 +1336,7 @@ async fn handle_phase_failed(
 }
 
 async fn handle_phase_blocked(
+    snapshot: &BacklogFile,
     item_id: &str,
     reason: &str,
     coordinator: &CoordinatorHandle,
@@ -1319,7 +1346,6 @@ async fn handle_phase_blocked(
     log_info!("[{}] Phase blocked: {}", item_id, reason);
 
     // Write worklog entry
-    let snapshot = coordinator.get_snapshot().await?;
     if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
         let phase = item.phase.as_deref().unwrap_or("unknown");
         let _ = coordinator
@@ -1442,6 +1468,7 @@ async fn process_merges(
 }
 
 async fn handle_triage_success(
+    snapshot: &BacklogFile,
     item_id: &str,
     phase_result: &PhaseResult,
     coordinator: &CoordinatorHandle,
@@ -1461,7 +1488,6 @@ async fn handle_triage_success(
     );
 
     // Write worklog entry for triage
-    let snapshot = coordinator.get_snapshot().await?;
     if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
         let outcome = match phase_result.result {
             ResultCode::PhaseComplete => "Complete",
