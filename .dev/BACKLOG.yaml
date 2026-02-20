@@ -2,32 +2,36 @@ schema_version: 3
 items:
 - id: WRK-009
   title: Call validate() on the no-config-file default path for defense-in-depth
-  status: in_progress
+  status: blocked
   phase: spec
   size: small
   complexity: low
   risk: low
   impact: low
   requires_human_review: false
+  blocked_from_status: in_progress
+  blocked_reason: 'Phase spec failed after 3 attempts. Last error: Agent failed (exit code Some(1)): Result file not found: ./.phase-golem/phase_result_WRK-009_spec.json'
   created: 2026-02-12T16:23:33.711239234+00:00
-  updated: 2026-02-14T03:21:13.841333432+00:00
+  updated: 2026-02-20T02:22:50.020069609+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 215d95eca66065d72bac552a90563aba4c42d307
+  last_phase_commit: 8957cea715e8f9607e0b6112ab5ef80c00756b1c
 - id: WRK-010
   title: Log warning when load_config silently injects default pipeline
-  status: in_progress
+  status: blocked
   phase: design
   size: small
   complexity: low
   risk: low
   impact: low
   requires_human_review: false
+  blocked_from_status: in_progress
+  blocked_reason: 'Phase design failed after 3 attempts. Last error: Agent failed (exit code Some(1)): Result file not found: ./.phase-golem/phase_result_WRK-010_design.json'
   created: 2026-02-12T16:23:33.714704757+00:00
-  updated: 2026-02-14T03:21:54.807734101+00:00
+  updated: 2026-02-20T02:22:50.337808876+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: cdab169a2c48ae4cac7de8ba78c7aa8cf8eb5eb4
+  last_phase_commit: 8957cea715e8f9607e0b6112ab5ef80c00756b1c
 - id: WRK-012
   title: Replace timing-based shutdown test with event-based synchronization
   status: in_progress
