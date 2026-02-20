@@ -58,9 +58,10 @@ items:
   impact: low
   requires_human_review: false
   created: 2026-02-12T16:23:33.732040439+00:00
-  updated: 2026-02-20T02:52:19.757823683+00:00
+  updated: 2026-02-20T03:00:47.179173637+00:00
   pipeline_type: feature
   phase_pool: main
+  last_phase_commit: f2c0478d917ad243367215bfe3a801564deabf6d
 - id: WRK-017
   title: Wrap kill_all_children in spawn_blocking for async call sites
   status: ready
@@ -411,13 +412,18 @@ items:
   pipeline_type: feature
 - id: WRK-053
   title: Extract default_pipelines to common if signatures align across 3+ files
-  status: new
+  status: blocked
   size: small
+  complexity: low
   risk: low
+  impact: low
   requires_human_review: false
   origin: WRK-013/spec
+  blocked_from_status: new
+  blocked_reason: The item's own title includes the gate 'if signatures align across 3+ files'. Currently only 2 files define default_pipelines(). The function bodies are nearly identical and extraction would be trivial once a third consumer appears. Until then, the duplication across 2 files is acceptable and doesn't warrant extraction per the project's own threshold.
   created: 2026-02-13T04:19:23.747896981+00:00
-  updated: 2026-02-13T04:19:23.747896981+00:00
+  updated: 2026-02-20T02:52:57.592293884+00:00
+  pipeline_type: feature
 - id: WRK-054
   title: Add --auto-advance flag for multi-target runs
   status: new
