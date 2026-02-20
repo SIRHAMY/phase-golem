@@ -390,9 +390,11 @@ pub async fn execute_phase(
             config_base,
         );
 
-        // Run workflows sequentially
+        // Currently workflows are encoded in the prompt, and a single agent run
+        // executes them all. Multi-workflow phases run as a single agent invocation
+        // (the prompt lists all workflow files).
         let workflow_result = tokio::select! {
-            result = run_workflows_sequentially(runner, &prompt, &result_path, timeout) => result,
+            result = runner.run_agent(&prompt, &result_path, timeout) => result,
             _ = cancel.cancelled() => return PhaseExecutionResult::Cancelled,
         };
 
@@ -464,19 +466,6 @@ pub async fn execute_phase(
         "Phase {} failed: retry loop exited unexpectedly",
         phase_config.name
     ))
-}
-
-/// Run all workflows for a phase sequentially. If any workflow fails, the phase fails.
-async fn run_workflows_sequentially(
-    runner: &impl AgentRunner,
-    prompt: &str,
-    result_path: &Path,
-    timeout: Duration,
-) -> Result<PhaseResult, String> {
-    // Currently workflows are encoded in the prompt, and a single agent run
-    // executes them all. Multi-workflow phases run as a single agent invocation
-    // (the prompt lists all workflow files).
-    runner.run_agent(prompt, result_path, timeout).await
 }
 
 // --- Prompt building ---

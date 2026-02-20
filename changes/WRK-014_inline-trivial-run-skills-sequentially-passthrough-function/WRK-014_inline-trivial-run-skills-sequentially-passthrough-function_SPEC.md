@@ -1,7 +1,7 @@
 # SPEC: Inline trivial `run_workflows_sequentially` passthrough function
 
 **ID:** WRK-014
-**Status:** Draft
+**Status:** Complete
 **Created:** 2026-02-19
 **PRD:** ./WRK-014_inline-trivial-run-skills-sequentially-passthrough-function_PRD.md
 **Execution Mode:** autonomous
@@ -42,7 +42,7 @@ Classic "Inline Method" refactor: replace the function call at the single call s
 
 > Replace `run_workflows_sequentially` call with direct `runner.run_agent()` invocation and delete the function
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -54,23 +54,23 @@ Classic "Inline Method" refactor: replace the function call at the single call s
 
 **Tasks:**
 
-- [ ] Pre-implementation check: run `grep -n "run_workflows_sequentially" src/executor.rs` to confirm the exact line numbers of the call site and function definition, and verify there is exactly one call site
-- [ ] Replace the comment `// Run workflows sequentially` above the `tokio::select!` block with the three-line comment from the function body:
+- [x] Pre-implementation check: run `grep -n "run_workflows_sequentially" src/executor.rs` to confirm the exact line numbers of the call site and function definition, and verify there is exactly one call site
+- [x] Replace the comment `// Run workflows sequentially` above the `tokio::select!` block with the three-line comment from the function body:
   ```
   // Currently workflows are encoded in the prompt, and a single agent run
   // executes them all. Multi-workflow phases run as a single agent invocation
   // (the prompt lists all workflow files).
   ```
-- [ ] In the `tokio::select!` block, replace `run_workflows_sequentially(runner, &prompt, &result_path, timeout)` with `runner.run_agent(&prompt, &result_path, timeout)`. **Important:** Do not add an explicit `.await` — `tokio::select!` awaits the future implicitly. Ensure parameters match: `&prompt`, `&result_path`, `timeout` (same references as the original call site)
-- [ ] Delete the `run_workflows_sequentially` function definition (doc-comment, signature, and body — approximately lines 469–480)
+- [x] In the `tokio::select!` block, replace `run_workflows_sequentially(runner, &prompt, &result_path, timeout)` with `runner.run_agent(&prompt, &result_path, timeout)`. **Important:** Do not add an explicit `.await` — `tokio::select!` awaits the future implicitly. Ensure parameters match: `&prompt`, `&result_path`, `timeout` (same references as the original call site)
+- [x] Delete the `run_workflows_sequentially` function definition (doc-comment, signature, and body — approximately lines 469–480)
 
 **Verification:**
 
-- [ ] `cargo check` passes with no errors or warnings
-- [ ] `cargo test` passes — all existing tests pass without modification (confirms zero behavioral change)
-- [ ] `grep -r "run_workflows_sequentially" src/ tests/` returns no results (function fully removed)
-- [ ] `grep -A 3 "Currently workflows are encoded" src/executor.rs` confirms the three-line comment appears directly above the `tokio::select!` block
-- [ ] Code review: confirm the `tokio::select!` block structure is preserved — same `.await` topology, same cancellation branch, same parameter references (`&prompt`, `&result_path`, `timeout`)
+- [x] `cargo check` passes with no errors or warnings
+- [x] `cargo test` passes — all existing tests pass without modification (confirms zero behavioral change)
+- [x] `grep -r "run_workflows_sequentially" src/ tests/` returns no results (function fully removed)
+- [x] `grep -A 3 "Currently workflows are encoded" src/executor.rs` confirms the three-line comment appears directly above the `tokio::select!` block
+- [x] Code review: confirm the `tokio::select!` block structure is preserved — same `.await` topology, same cancellation branch, same parameter references (`&prompt`, `&result_path`, `timeout`)
 
 **Commit:** `[WRK-014][P1] Clean: Inline run_workflows_sequentially at call site`
 
@@ -87,21 +87,22 @@ None.
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met:
-  - [ ] `run_workflows_sequentially` removed from `src/executor.rs`
-  - [ ] `runner.run_agent(...)` inlined at the call site in `execute_phase`
-  - [ ] Code compiles without errors or warnings (`cargo check`)
-  - [ ] All existing tests pass without modification (`cargo test`)
-  - [ ] No behavioral change (verified by test passage)
-  - [ ] Inlined call retains the existing comment from the function body
-- [ ] Tests pass
-- [ ] No regressions introduced
+- [x] All phases complete
+- [x] All PRD success criteria met:
+  - [x] `run_workflows_sequentially` removed from `src/executor.rs`
+  - [x] `runner.run_agent(...)` inlined at the call site in `execute_phase`
+  - [x] Code compiles without errors or warnings (`cargo check`)
+  - [x] All existing tests pass without modification (`cargo test`)
+  - [x] No behavioral change (verified by test passage)
+  - [x] Inlined call retains the existing comment from the function body
+- [x] Tests pass
+- [x] No regressions introduced
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| 1: Inline and delete | complete | `[WRK-014][P1] Clean: Inline run_workflows_sequentially at call site` | All tasks done, all verification passed, code review clean |
 
 ## Followups Summary
 
