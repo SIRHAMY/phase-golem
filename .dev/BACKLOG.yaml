@@ -401,7 +401,7 @@ items:
 - id: WRK-055
   title: Support multiple --only filters with AND logic
   status: in_progress
-  phase: tech-research
+  phase: design
   size: small
   complexity: low
   risk: low
@@ -409,10 +409,10 @@ items:
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T15:13:31.832458885+00:00
+  updated: 2026-02-20T15:13:31.879097058+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 0f2c8ae5df4b3847326cc8721e3ef9997a0516e8
+  last_phase_commit: 0140ce6bd7c2f3a78bda6209a136c7c781dd8bf4
 - id: WRK-056
   title: Support comma-separated OR values within --only filter
   status: ready
@@ -1002,4 +1002,11 @@ items:
   origin: WRK-054/review
   created: 2026-02-20T15:00:39.470429987+00:00
   updated: 2026-02-20T15:00:39.470429987+00:00
-next_item_id: 122
+- id: HAMY-123
+  title: Add visual separator and work item title/description to phase start logging
+  status: new
+  requires_human_review: false
+  origin: inbox
+  created: 2026-02-20T15:13:31.871057759+00:00
+  updated: 2026-02-20T15:13:31.871057759+00:00
+next_item_id: 123
