@@ -46,7 +46,7 @@ The change follows the same vertical-slice pattern as WRK-055, touching the same
 
 > Rename `value` to `values: Vec<FilterValue>`, extract helpers, add `FilterValue::Display`, migrate existing tests — identical behavior
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -65,22 +65,22 @@ The change follows the same vertical-slice pattern as WRK-055, touching the same
 
 **Tasks:**
 
-- [ ] Rename `FilterCriterion.value: FilterValue` to `FilterCriterion.values: Vec<FilterValue>` (line 28-32)
-- [ ] Add `impl Display for FilterValue` — extract value-to-string logic from current `FilterCriterion::Display` (lines 51-64). Status variant uses lowercase string mapping; Dimension/Size use their existing `Display` impls; Tag/PipelineType use the string directly.
-- [ ] Update `impl Display for FilterCriterion` — iterate `self.values`, call `.to_string()` on each via `FilterValue::Display`, join with `,`, write `field=joined_values`. Single-value case produces identical output (no comma).
-- [ ] Extract `fn parse_single_value(field: &FilterField, token: &str) -> Result<FilterValue, String>` — private helper containing the per-field value-parsing branches from `parse_filter()` (lines 82-138). The field name dispatch (`match field_str.to_lowercase()...`) stays in `parse_filter()`; only the value-parsing logic (e.g., `parse_dimension_level(token)`, `parse_item_status(token)`) moves into `parse_single_value()`. No behavior change.
-- [ ] Update `parse_filter()` — call `parse_single_value()` for the single token, wrap result in `vec![value]` to construct `FilterCriterion { field, values: vec![value] }`. The existing `value_str.is_empty()` check (line 77) is retained before calling `parse_single_value()`. No comma splitting yet — that's Phase 2.
-- [ ] Extract `fn matches_single_value(field: &FilterField, value: &FilterValue, item: &BacklogItem) -> bool` — private helper containing the exact match body from current `matches_item()` (lines 144-161). No behavior change.
-- [ ] Update `matches_item()` — replace body with `criterion.values.iter().any(|v| matches_single_value(&criterion.field, v, item))`. For single-element Vec, `.any()` is equivalent to the current direct match.
-- [ ] Migrate 14 `.value` assertion sites in `tests/filter_test.rs` to `.values` — pattern: `assert_eq!(f.value, FilterValue::X(y))` → `assert_eq!(f.values, vec![FilterValue::X(y)])`. Sites: lines 25, 32, 39, 46, 53, 60, 67, 147, 153, 166, 174, 180, 188, 441.
+- [x] Rename `FilterCriterion.value: FilterValue` to `FilterCriterion.values: Vec<FilterValue>` (line 28-32)
+- [x] Add `impl Display for FilterValue` — extract value-to-string logic from current `FilterCriterion::Display` (lines 51-64). Status variant uses lowercase string mapping; Dimension/Size use their existing `Display` impls; Tag/PipelineType use the string directly.
+- [x] Update `impl Display for FilterCriterion` — iterate `self.values`, call `.to_string()` on each via `FilterValue::Display`, join with `,`, write `field=joined_values`. Single-value case produces identical output (no comma).
+- [x] Extract `fn parse_single_value(field: &FilterField, token: &str) -> Result<FilterValue, String>` — private helper containing the per-field value-parsing branches from `parse_filter()` (lines 82-138). The field name dispatch (`match field_str.to_lowercase()...`) stays in `parse_filter()`; only the value-parsing logic (e.g., `parse_dimension_level(token)`, `parse_item_status(token)`) moves into `parse_single_value()`. No behavior change.
+- [x] Update `parse_filter()` — call `parse_single_value()` for the single token, wrap result in `vec![value]` to construct `FilterCriterion { field, values: vec![value] }`. The existing `value_str.is_empty()` check (line 77) is retained before calling `parse_single_value()`. No comma splitting yet — that's Phase 2.
+- [x] Extract `fn matches_single_value(field: &FilterField, value: &FilterValue, item: &BacklogItem) -> bool` — private helper containing the exact match body from current `matches_item()` (lines 144-161). No behavior change.
+- [x] Update `matches_item()` — replace body with `criterion.values.iter().any(|v| matches_single_value(&criterion.field, v, item))`. For single-element Vec, `.any()` is equivalent to the current direct match.
+- [x] Migrate 14 `.value` assertion sites in `tests/filter_test.rs` to `.values` — pattern: `assert_eq!(f.value, FilterValue::X(y))` → `assert_eq!(f.values, vec![FilterValue::X(y)])`. Sites: lines 25, 32, 39, 46, 53, 60, 67, 147, 153, 166, 174, 180, 188, 441.
 
 **Verification:**
 
-- [ ] `cargo build` succeeds with no errors or warnings
-- [ ] `cargo test` — all existing tests pass (zero behavior change)
-- [ ] No changes to public API signatures: `parse_filter()`, `matches_item()`, `validate_filter_criteria()`, `apply_filters()`, `format_filter_criteria()` all retain identical signatures
-- [ ] Display roundtrip test (`filter_criterion_display_roundtrip`) still passes
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo build` succeeds with no errors or warnings
+- [x] `cargo test` — all existing tests pass (zero behavior change)
+- [x] No changes to public API signatures: `parse_filter()`, `matches_item()`, `validate_filter_criteria()`, `apply_filters()`, `format_filter_criteria()` all retain identical signatures
+- [x] Display roundtrip test (`filter_criterion_display_roundtrip`) still passes
+- [x] Code review passes (`/code-review` → fix issues → repeat until pass)
 
 **Commit:** `[WRK-056][P1] Clean: Restructure FilterCriterion for multi-value support`
 
@@ -167,6 +167,7 @@ The change follows the same vertical-slice pattern as WRK-055, touching the same
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| Phase 1: Structural Refactor | complete | pending | All tasks done, all tests pass, code review passed |
 
 ## Followups Summary
 

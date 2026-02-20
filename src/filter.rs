@@ -28,7 +28,7 @@ pub enum FilterValue {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FilterCriterion {
     pub field: FilterField,
-    pub value: FilterValue,
+    pub values: Vec<FilterValue>,
 }
 
 impl std::fmt::Display for FilterField {
@@ -46,23 +46,81 @@ impl std::fmt::Display for FilterField {
     }
 }
 
+impl std::fmt::Display for FilterValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FilterValue::Status(s) => match s {
+                ItemStatus::New => write!(f, "new"),
+                ItemStatus::Scoping => write!(f, "scoping"),
+                ItemStatus::Ready => write!(f, "ready"),
+                ItemStatus::InProgress => write!(f, "in_progress"),
+                ItemStatus::Done => write!(f, "done"),
+                ItemStatus::Blocked => write!(f, "blocked"),
+            },
+            FilterValue::Dimension(d) => write!(f, "{}", d),
+            FilterValue::Size(s) => write!(f, "{}", s),
+            FilterValue::Tag(t) => write!(f, "{}", t),
+            FilterValue::PipelineType(p) => write!(f, "{}", p),
+        }
+    }
+}
+
 impl std::fmt::Display for FilterCriterion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value_str = match &self.value {
-            FilterValue::Status(s) => match s {
-                ItemStatus::New => "new".to_string(),
-                ItemStatus::Scoping => "scoping".to_string(),
-                ItemStatus::Ready => "ready".to_string(),
-                ItemStatus::InProgress => "in_progress".to_string(),
-                ItemStatus::Done => "done".to_string(),
-                ItemStatus::Blocked => "blocked".to_string(),
-            },
-            FilterValue::Dimension(d) => d.to_string(),
-            FilterValue::Size(s) => s.to_string(),
-            FilterValue::Tag(t) => t.clone(),
-            FilterValue::PipelineType(p) => p.clone(),
-        };
-        write!(f, "{}={}", self.field, value_str)
+        let values_str: Vec<String> = self.values.iter().map(|v| v.to_string()).collect();
+        write!(f, "{}={}", self.field, values_str.join(","))
+    }
+}
+
+fn parse_single_value(field: &FilterField, token: &str) -> Result<FilterValue, String> {
+    match field {
+        FilterField::Status => {
+            let status = parse_item_status(token).map_err(|_| {
+                format!(
+                    "Invalid value '{}' for field 'status'. Valid values: new, scoping, ready, in_progress, done, blocked",
+                    token
+                )
+            })?;
+            Ok(FilterValue::Status(status))
+        }
+        FilterField::Impact => {
+            let level = parse_dimension_level(token).map_err(|_| {
+                format!(
+                    "Invalid value '{}' for field 'impact'. Valid values: low, medium, high",
+                    token
+                )
+            })?;
+            Ok(FilterValue::Dimension(level))
+        }
+        FilterField::Size => {
+            let size = parse_size_level(token).map_err(|_| {
+                format!(
+                    "Invalid value '{}' for field 'size'. Valid values: small, medium, large",
+                    token
+                )
+            })?;
+            Ok(FilterValue::Size(size))
+        }
+        FilterField::Risk => {
+            let level = parse_dimension_level(token).map_err(|_| {
+                format!(
+                    "Invalid value '{}' for field 'risk'. Valid values: low, medium, high",
+                    token
+                )
+            })?;
+            Ok(FilterValue::Dimension(level))
+        }
+        FilterField::Complexity => {
+            let level = parse_dimension_level(token).map_err(|_| {
+                format!(
+                    "Invalid value '{}' for field 'complexity'. Valid values: low, medium, high",
+                    token
+                )
+            })?;
+            Ok(FilterValue::Dimension(level))
+        }
+        FilterField::Tag => Ok(FilterValue::Tag(token.to_string())),
+        FilterField::PipelineType => Ok(FilterValue::PipelineType(token.to_string())),
     }
 }
 
@@ -78,57 +136,14 @@ pub fn parse_filter(raw: &str) -> Result<FilterCriterion, String> {
         return Err(format!("Filter must be in format KEY=VALUE, got: {}", raw));
     }
 
-    let (field, value) = match field_str.to_lowercase().as_str() {
-        "status" => {
-            let status = parse_item_status(value_str).map_err(|_| {
-                format!(
-                    "Invalid value '{}' for field 'status'. Valid values: new, scoping, ready, in_progress, done, blocked",
-                    value_str
-                )
-            })?;
-            (FilterField::Status, FilterValue::Status(status))
-        }
-        "impact" => {
-            let level = parse_dimension_level(value_str).map_err(|_| {
-                format!(
-                    "Invalid value '{}' for field 'impact'. Valid values: low, medium, high",
-                    value_str
-                )
-            })?;
-            (FilterField::Impact, FilterValue::Dimension(level))
-        }
-        "size" => {
-            let size = parse_size_level(value_str).map_err(|_| {
-                format!(
-                    "Invalid value '{}' for field 'size'. Valid values: small, medium, large",
-                    value_str
-                )
-            })?;
-            (FilterField::Size, FilterValue::Size(size))
-        }
-        "risk" => {
-            let level = parse_dimension_level(value_str).map_err(|_| {
-                format!(
-                    "Invalid value '{}' for field 'risk'. Valid values: low, medium, high",
-                    value_str
-                )
-            })?;
-            (FilterField::Risk, FilterValue::Dimension(level))
-        }
-        "complexity" => {
-            let level = parse_dimension_level(value_str).map_err(|_| {
-                format!(
-                    "Invalid value '{}' for field 'complexity'. Valid values: low, medium, high",
-                    value_str
-                )
-            })?;
-            (FilterField::Complexity, FilterValue::Dimension(level))
-        }
-        "tag" => (FilterField::Tag, FilterValue::Tag(value_str.to_string())),
-        "pipeline_type" => (
-            FilterField::PipelineType,
-            FilterValue::PipelineType(value_str.to_string()),
-        ),
+    let field = match field_str.to_lowercase().as_str() {
+        "status" => FilterField::Status,
+        "impact" => FilterField::Impact,
+        "size" => FilterField::Size,
+        "risk" => FilterField::Risk,
+        "complexity" => FilterField::Complexity,
+        "tag" => FilterField::Tag,
+        "pipeline_type" => FilterField::PipelineType,
         _ => {
             return Err(format!(
                 "Unknown filter field: {}. Supported: status, impact, size, risk, complexity, tag, pipeline_type",
@@ -137,11 +152,16 @@ pub fn parse_filter(raw: &str) -> Result<FilterCriterion, String> {
         }
     };
 
-    Ok(FilterCriterion { field, value })
+    let value = parse_single_value(&field, value_str)?;
+
+    Ok(FilterCriterion {
+        field,
+        values: vec![value],
+    })
 }
 
-pub fn matches_item(criterion: &FilterCriterion, item: &BacklogItem) -> bool {
-    match (&criterion.field, &criterion.value) {
+fn matches_single_value(field: &FilterField, value: &FilterValue, item: &BacklogItem) -> bool {
+    match (field, value) {
         (FilterField::Status, FilterValue::Status(target)) => item.status == *target,
         (FilterField::Impact, FilterValue::Dimension(target)) => {
             item.impact.as_ref() == Some(target)
@@ -159,6 +179,14 @@ pub fn matches_item(criterion: &FilterCriterion, item: &BacklogItem) -> bool {
         // but return false for safety.
         _ => false,
     }
+}
+
+/// OR logic: item matches if ANY value in the criterion matches.
+pub fn matches_item(criterion: &FilterCriterion, item: &BacklogItem) -> bool {
+    criterion
+        .values
+        .iter()
+        .any(|v| matches_single_value(&criterion.field, v, item))
 }
 
 pub fn validate_filter_criteria(criteria: &[FilterCriterion]) -> Result<(), String> {

@@ -22,49 +22,49 @@ fn make_backlog(items: Vec<phase_golem::types::BacklogItem>) -> BacklogFile {
 fn parse_filter_status() {
     let f = parse_filter("status=ready").unwrap();
     assert_eq!(f.field, FilterField::Status);
-    assert_eq!(f.value, FilterValue::Status(ItemStatus::Ready));
+    assert_eq!(f.values, vec![FilterValue::Status(ItemStatus::Ready)]);
 }
 
 #[test]
 fn parse_filter_impact() {
     let f = parse_filter("impact=high").unwrap();
     assert_eq!(f.field, FilterField::Impact);
-    assert_eq!(f.value, FilterValue::Dimension(DimensionLevel::High));
+    assert_eq!(f.values, vec![FilterValue::Dimension(DimensionLevel::High)]);
 }
 
 #[test]
 fn parse_filter_size() {
     let f = parse_filter("size=small").unwrap();
     assert_eq!(f.field, FilterField::Size);
-    assert_eq!(f.value, FilterValue::Size(SizeLevel::Small));
+    assert_eq!(f.values, vec![FilterValue::Size(SizeLevel::Small)]);
 }
 
 #[test]
 fn parse_filter_risk() {
     let f = parse_filter("risk=low").unwrap();
     assert_eq!(f.field, FilterField::Risk);
-    assert_eq!(f.value, FilterValue::Dimension(DimensionLevel::Low));
+    assert_eq!(f.values, vec![FilterValue::Dimension(DimensionLevel::Low)]);
 }
 
 #[test]
 fn parse_filter_complexity() {
     let f = parse_filter("complexity=medium").unwrap();
     assert_eq!(f.field, FilterField::Complexity);
-    assert_eq!(f.value, FilterValue::Dimension(DimensionLevel::Medium));
+    assert_eq!(f.values, vec![FilterValue::Dimension(DimensionLevel::Medium)]);
 }
 
 #[test]
 fn parse_filter_tag() {
     let f = parse_filter("tag=v1").unwrap();
     assert_eq!(f.field, FilterField::Tag);
-    assert_eq!(f.value, FilterValue::Tag("v1".to_string()));
+    assert_eq!(f.values, vec![FilterValue::Tag("v1".to_string())]);
 }
 
 #[test]
 fn parse_filter_pipeline_type() {
     let f = parse_filter("pipeline_type=feature").unwrap();
     assert_eq!(f.field, FilterField::PipelineType);
-    assert_eq!(f.value, FilterValue::PipelineType("feature".to_string()));
+    assert_eq!(f.values, vec![FilterValue::PipelineType("feature".to_string())]);
 }
 
 // --- Invalid field name ---
@@ -144,13 +144,13 @@ fn parse_filter_equals_but_empty_field() {
 #[test]
 fn parse_filter_case_insensitive_impact() {
     let f = parse_filter("impact=HIGH").unwrap();
-    assert_eq!(f.value, FilterValue::Dimension(DimensionLevel::High));
+    assert_eq!(f.values, vec![FilterValue::Dimension(DimensionLevel::High)]);
 }
 
 #[test]
 fn parse_filter_case_insensitive_status_in_progress() {
     let f = parse_filter("status=IN_PROGRESS").unwrap();
-    assert_eq!(f.value, FilterValue::Status(ItemStatus::InProgress));
+    assert_eq!(f.values, vec![FilterValue::Status(ItemStatus::InProgress)]);
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn parse_filter_case_insensitive_field_name() {
 fn parse_filter_case_insensitive_size() {
     let f = parse_filter("SIZE=LARGE").unwrap();
     assert_eq!(f.field, FilterField::Size);
-    assert_eq!(f.value, FilterValue::Size(SizeLevel::Large));
+    assert_eq!(f.values, vec![FilterValue::Size(SizeLevel::Large)]);
 }
 
 // --- Case-sensitive matching for tag and pipeline_type ---
@@ -171,13 +171,13 @@ fn parse_filter_case_insensitive_size() {
 #[test]
 fn parse_filter_tag_preserves_case() {
     let f = parse_filter("tag=V1").unwrap();
-    assert_eq!(f.value, FilterValue::Tag("V1".to_string()));
+    assert_eq!(f.values, vec![FilterValue::Tag("V1".to_string())]);
 }
 
 #[test]
 fn parse_filter_pipeline_type_preserves_case() {
     let f = parse_filter("pipeline_type=Feature").unwrap();
-    assert_eq!(f.value, FilterValue::PipelineType("Feature".to_string()));
+    assert_eq!(f.values, vec![FilterValue::PipelineType("Feature".to_string())]);
 }
 
 // --- status=in_progress parses and matches ItemStatus::InProgress ---
@@ -185,7 +185,7 @@ fn parse_filter_pipeline_type_preserves_case() {
 #[test]
 fn parse_and_match_status_in_progress() {
     let f = parse_filter("status=in_progress").unwrap();
-    assert_eq!(f.value, FilterValue::Status(ItemStatus::InProgress));
+    assert_eq!(f.values, vec![FilterValue::Status(ItemStatus::InProgress)]);
 
     let mut item = make_item("WRK-001", ItemStatus::InProgress);
     item.phase = Some("build".to_string());
@@ -438,7 +438,7 @@ fn parse_filter_tag_with_equals_in_value() {
     // "tag=key=value" should parse with field=tag, value="key=value"
     let f = parse_filter("tag=key=value").unwrap();
     assert_eq!(f.field, FilterField::Tag);
-    assert_eq!(f.value, FilterValue::Tag("key=value".to_string()));
+    assert_eq!(f.values, vec![FilterValue::Tag("key=value".to_string())]);
 }
 
 // --- validate_filter_criteria tests ---
