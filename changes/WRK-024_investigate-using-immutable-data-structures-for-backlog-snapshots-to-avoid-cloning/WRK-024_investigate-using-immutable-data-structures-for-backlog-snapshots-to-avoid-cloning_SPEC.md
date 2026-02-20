@@ -66,7 +66,7 @@ Each handler is classified by its snapshot usage pattern:
 
 > Pass tick snapshot by reference to `handle_promote()`, removing its redundant `get_snapshot()` call
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -82,21 +82,21 @@ Each handler is classified by its snapshot usage pattern:
 
 **Tasks:**
 
-- [ ] Add `snapshot: &BacklogFile` as first parameter to `handle_promote()` (line 1513)
-- [ ] Remove `let snapshot = coordinator.get_snapshot().await?;` from `handle_promote()` body (line 1518)
-- [ ] Update `handle_promote()` call site at line 809 to pass `&snapshot`
-- [ ] Verify `handle_promote()` compiles — the existing `snapshot.items.iter().find(...)` at line 1519 should work unchanged since it already borrows the local `snapshot`
-- [ ] Run `cargo build` to confirm no compile errors
-- [ ] Run `cargo test` to confirm no regressions
+- [x] Add `snapshot: &BacklogFile` as first parameter to `handle_promote()` (line 1513)
+- [x] Remove `let snapshot = coordinator.get_snapshot().await?;` from `handle_promote()` body (line 1518)
+- [x] Update `handle_promote()` call site at line 809 to pass `&snapshot`
+- [x] Verify `handle_promote()` compiles — the existing `snapshot.items.iter().find(...)` at line 1519 should work unchanged since it already borrows the local `snapshot`
+- [x] Run `cargo build` to confirm no compile errors
+- [x] Run `cargo test` to confirm no regressions
 
 **Verification:**
 
-- [ ] `cargo build` succeeds
-- [ ] `cargo test` passes (all existing tests)
-- [ ] `handle_promote()` signature includes `snapshot: &BacklogFile` parameter
-- [ ] No `get_snapshot()` call remains inside `handle_promote()` body
-- [ ] Executor spawn closures (lines 871-943, 1584-1618) are unchanged
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo build` succeeds
+- [x] `cargo test` passes (all existing tests — 177 passed, 0 failed)
+- [x] `handle_promote()` signature includes `snapshot: &BacklogFile` parameter
+- [x] No `get_snapshot()` call remains inside `handle_promote()` body
+- [x] Executor spawn closures (lines 871-943, 1584-1618) are unchanged
+- [x] Code review passes — Ready to Merge verdict, no critical/high issues
 
 **Commit:** `[WRK-024][P1] Clean: pass tick snapshot to handle_promote by reference`
 
@@ -208,6 +208,7 @@ Lifetime safety: The `&snapshot` borrow in Type A handlers does not cross any pr
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| Phase 1: Main Loop & Promote Caching | complete | `[WRK-024][P1] Clean: pass tick snapshot to handle_promote by reference` | All tasks done, code review passed (Ready to Merge) |
 
 ## Followups Summary
 

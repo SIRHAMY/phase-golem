@@ -102,14 +102,14 @@ items:
 - id: WRK-024
   title: Investigate using immutable data structures for backlog snapshots to avoid cloning
   status: in_progress
-  phase: spec
+  phase: build
   size: small
   complexity: low
   risk: low
   impact: low
   requires_human_review: false
   created: 2026-02-12T23:00:00.000000000+00:00
-  updated: 2026-02-20T21:18:49.327008882+00:00
+  updated: 2026-02-20T21:23:40.924438859+00:00
   pipeline_type: feature
   description:
     context: The coordinator provides backlog snapshots to the scheduler via handle_get_snapshot(), which does a full .clone() of all backlog items. This happens 3-4 times per scheduler loop iteration.
@@ -118,7 +118,7 @@ items:
     impact: Reduces memory allocation churn proportional to backlog size, improving performance for large backlogs.
     sizing_rationale: Medium size and complexity because it touches the coordinator-scheduler boundary and may require rethinking ownership patterns. Low risk since it's an internal optimization with no behavioral change. Investigation may conclude it's not worth the added complexity.
   phase_pool: main
-  last_phase_commit: 0fe59d81ee3398c265b5fc1720e750d2e26da68c
+  last_phase_commit: 251331898169e0564e143c714ffea06658523a83
 - id: WRK-025
   title: Clean up stale .phase-golem result files on startup and shutdown
   status: ready

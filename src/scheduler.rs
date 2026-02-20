@@ -806,7 +806,7 @@ pub async fn run_scheduler(
         for action in actions {
             match action {
                 SchedulerAction::Promote(item_id) => {
-                    handle_promote(&coordinator, &item_id, &config).await?;
+                    handle_promote(&snapshot, &coordinator, &item_id, &config).await?;
                 }
                 SchedulerAction::Triage(item_id) => {
                     if state.is_cap_reached() {
@@ -1511,11 +1511,11 @@ async fn handle_triage_success(
 // --- Promotion ---
 
 async fn handle_promote(
+    snapshot: &BacklogFile,
     coordinator: &CoordinatorHandle,
     item_id: &str,
     config: &PhaseGolemConfig,
 ) -> Result<(), String> {
-    let snapshot = coordinator.get_snapshot().await?;
     let item = snapshot
         .items
         .iter()
