@@ -48,31 +48,19 @@ items:
   pipeline_type: feature
   phase_pool: main
   last_phase_commit: fe2d97f0b873bfdffe9874c5157a153d5067c0a4
-- id: WRK-014
-  title: Inline trivial run_skills_sequentially passthrough function
-  status: in_progress
-  phase: review
-  size: small
-  complexity: low
-  risk: low
-  impact: low
-  requires_human_review: false
-  created: 2026-02-12T16:23:33.728299028+00:00
-  updated: 2026-02-20T02:52:19.710591748+00:00
-  pipeline_type: feature
-  phase_pool: main
-  last_phase_commit: 5d7e7fa1917cfc82ee19044b34669439fff008df
 - id: WRK-015
   title: Gate preflight Phase 3 item validation on Phase 1 structural validation passing
-  status: ready
+  status: in_progress
+  phase: prd
   size: small
   complexity: low
   risk: low
   impact: low
   requires_human_review: false
   created: 2026-02-12T16:23:33.732040439+00:00
-  updated: 2026-02-12T20:02:46.560992303+00:00
+  updated: 2026-02-20T02:52:19.757823683+00:00
   pipeline_type: feature
+  phase_pool: main
 - id: WRK-017
   title: Wrap kill_all_children in spawn_blocking for async call sites
   status: ready
