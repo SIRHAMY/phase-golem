@@ -110,9 +110,10 @@ items:
   requires_human_review: false
   origin: WRK-027/spec
   created: 2026-02-12T23:27:39.836709312+00:00
-  updated: 2026-02-20T22:06:19.600505380+00:00
+  updated: 2026-02-20T22:12:32.165517579+00:00
   pipeline_type: feature
   phase_pool: main
+  last_phase_commit: 729e7849ead484291422f0020e7a67a5b422a543
 - id: WRK-033
   title: Add human-in-the-loop commands for non-autonomous item management
   status: blocked
@@ -466,17 +467,24 @@ items:
   pipeline_type: feature
 - id: WRK-075
   title: Auto re-triage stale pre-phase items after configurable idle period
-  status: new
+  status: scoping
+  phase: research
+  size: medium
+  complexity: medium
+  risk: medium
+  impact: medium
   requires_human_review: false
   origin: inbox
   created: 2026-02-13T16:38:30.850798755+00:00
-  updated: 2026-02-20T22:08:10.790020491+00:00
+  updated: 2026-02-20T22:08:10.846746132+00:00
+  pipeline_type: feature
   description:
     context: '[Merged from WRK-076] Title: Auto re-triage stale pre-phase items after configurable idle period. Origin: inbox'
     problem: ''
     solution: ''
     impact: ''
     sizing_rationale: ''
+  phase_pool: pre
 - id: WRK-077
   title: Close WRK-037 as already implemented (duplicate ID validation exists)
   status: new
