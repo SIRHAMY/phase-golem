@@ -132,9 +132,10 @@ items:
   requires_human_review: false
   origin: WRK-029/build
   created: 2026-02-13T00:47:47.897857708+00:00
-  updated: 2026-02-20T22:37:24.182883395+00:00
+  updated: 2026-02-20T22:44:39.334242352+00:00
   pipeline_type: feature
   phase_pool: main
+  last_phase_commit: ac32117d4e39f0aac65078b6db5634217af72a06
 - id: WRK-036
   title: Parameterize scheduler dependency filtering tests
   status: ready
@@ -454,7 +455,7 @@ items:
   pipeline_type: feature
 - id: WRK-075
   title: Auto re-triage stale pre-phase items after configurable idle period
-  status: scoping
+  status: blocked
   phase: research
   size: medium
   complexity: medium
@@ -462,8 +463,10 @@ items:
   impact: medium
   requires_human_review: false
   origin: inbox
+  blocked_from_status: scoping
+  blocked_reason: Exceeds autonomous guardrail thresholds
   created: 2026-02-13T16:38:30.850798755+00:00
-  updated: 2026-02-20T22:40:04.172752189+00:00
+  updated: 2026-02-20T22:40:04.202163915+00:00
   pipeline_type: feature
   description:
     context: '[Merged from WRK-076] Title: Auto re-triage stale pre-phase items after configurable idle period. Origin: inbox'
