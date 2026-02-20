@@ -124,7 +124,7 @@ items:
 - id: WRK-035
   title: Pre-build HashMap for O(1) dependency lookups in scheduler
   status: in_progress
-  phase: prd
+  phase: tech-research
   size: small
   complexity: low
   risk: low
@@ -132,10 +132,10 @@ items:
   requires_human_review: false
   origin: WRK-029/build
   created: 2026-02-13T00:47:47.897857708+00:00
-  updated: 2026-02-20T22:44:39.334242352+00:00
+  updated: 2026-02-20T22:49:03.849426491+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: ac32117d4e39f0aac65078b6db5634217af72a06
+  last_phase_commit: 5685dcbd9af6a749439796b7db5235456fa18964
 - id: WRK-036
   title: Parameterize scheduler dependency filtering tests
   status: ready
