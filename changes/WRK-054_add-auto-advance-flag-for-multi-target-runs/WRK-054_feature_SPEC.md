@@ -180,8 +180,8 @@ The dedup test uses a unit test on `build_summary()` directly because: (a) trigg
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
-| 1 | complete | pending | All production code implemented, tests compile, code review passed |
-| 2 | complete | pending | All 6 tests added, code review passed with quick-win fixes applied |
+| 1 | complete | 39c6a59 | All production code implemented, tests compile, code review passed |
+| 2 | complete | e45e33d | All 6 tests added, code review passed with quick-win fixes applied |
 
 ## Followups Summary
 
@@ -199,6 +199,7 @@ The dedup test uses a unit test on `build_summary()` directly because: (a) trigg
 
 - [ ] Distinct summary messaging for all-blocked runs — PRD Should Have criterion for different messaging when `items_completed` is empty and `items_blocked` is non-empty. Currently the summary output is the same structure regardless; the exit code is the only differentiation.
 - [ ] Extract test helper/builder for scheduler integration tests — all ~12 multi-target tests repeat ~25 lines of identical scaffold. A builder function would reduce boilerplate and make test intent clearer. Pre-existing concern, not introduced by this change.
+- [ ] Auto-advance skip log message omits "next target" name — PRD Should Have says `[target] WRK-005 blocked (1/3). Auto-advancing to WRK-010.` but implementation only shows `Auto-advancing.` without naming the next target. Minor UX gap.
 
 ## Design Details
 
@@ -274,6 +275,14 @@ Decisions made without human input:
 
 ### What worked well?
 
+- Two-phase split (production code + tests) was the right granularity for a small change. Each phase was independently verifiable.
+- Thorough SPEC with exact line references and pattern examples made implementation straightforward — minimal ambiguity during build.
+- The Design doc's decision matrix for exit codes and circuit breaker reset prevented scope creep during implementation.
+
 ### What was harder than expected?
 
+- Nothing significant. The change was well-scoped and the existing infrastructure (block detection, target advancement, circuit breaker) was cleanly structured for the addition.
+
 ### What would we do differently next time?
+
+- Include the "next target" name in the auto-advance log message from the start (PRD Should Have criterion was partially missed). A quick code review against the PRD's exact message format would have caught this.

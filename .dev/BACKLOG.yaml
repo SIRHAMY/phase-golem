@@ -401,7 +401,7 @@ items:
 - id: WRK-054
   title: Add --auto-advance flag for multi-target runs
   status: in_progress
-  phase: build
+  phase: review
   size: small
   complexity: low
   risk: low
@@ -409,10 +409,10 @@ items:
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T14:58:09.010287552+00:00
+  updated: 2026-02-20T15:00:39.456726141+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 39c6a59c21309571ab859c1f7afa47831301723c
+  last_phase_commit: e45e33d3f32a48b3d850efd4d70caaa643c2a43e
 - id: WRK-055
   title: Support multiple --only filters with AND logic
   status: ready
@@ -993,4 +993,22 @@ items:
   origin: WRK-054/build
   created: 2026-02-20T14:58:09.025909333+00:00
   updated: 2026-02-20T14:58:09.025909333+00:00
-next_item_id: 120
+- id: HAMY-121
+  title: Add CLI-level integration test for exit codes
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-054/review
+  created: 2026-02-20T15:00:39.470429987+00:00
+  updated: 2026-02-20T15:00:39.470429987+00:00
+- id: HAMY-122
+  title: Add distinct summary messaging for all-blocked runs
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-054/review
+  created: 2026-02-20T15:00:39.470429987+00:00
+  updated: 2026-02-20T15:00:39.470429987+00:00
+next_item_id: 122
