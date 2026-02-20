@@ -99,36 +99,17 @@ items:
   pipeline_type: feature
   phase_pool: main
   last_phase_commit: 579d0b22a25c127d6db3e65acf7783e569ab8fbc
-- id: WRK-024
-  title: Investigate using immutable data structures for backlog snapshots to avoid cloning
-  status: in_progress
-  phase: review
-  size: small
-  complexity: low
-  risk: low
-  impact: low
-  requires_human_review: false
-  created: 2026-02-12T23:00:00.000000000+00:00
-  updated: 2026-02-20T21:35:14.085195549+00:00
-  pipeline_type: feature
-  description:
-    context: The coordinator provides backlog snapshots to the scheduler via handle_get_snapshot(), which does a full .clone() of all backlog items. This happens 3-4 times per scheduler loop iteration.
-    problem: With large backlogs (1000+ items with rich metadata), each clone is a significant allocation. This isn't a leak but creates per-iteration memory pressure that scales with backlog size.
-    solution: Investigate using Arc-wrapped immutable data structures (e.g. im-rs crate, or Arc<Vec<BacklogItem>> with copy-on-write semantics) so snapshots can be shared cheaply without deep cloning. Alternatively, consider whether the scheduler can borrow the data instead of owning it.
-    impact: Reduces memory allocation churn proportional to backlog size, improving performance for large backlogs.
-    sizing_rationale: Medium size and complexity because it touches the coordinator-scheduler boundary and may require rethinking ownership patterns. Low risk since it's an internal optimization with no behavioral change. Investigation may conclude it's not worth the added complexity.
-  phase_pool: main
-  last_phase_commit: bc10e924c6e2f550fe3f631ecdadf97743e0fcdc
 - id: WRK-025
   title: Clean up stale .phase-golem result files on startup and shutdown
-  status: ready
+  status: in_progress
+  phase: prd
   size: small
   complexity: low
   risk: low
   impact: low
   requires_human_review: false
   created: 2026-02-12T23:00:00.000000000+00:00
-  updated: 2026-02-13T01:04:42.344661226+00:00
+  updated: 2026-02-20T21:35:14.150065814+00:00
   pipeline_type: feature
   description:
     context: Phase execution writes result JSON files to .phase-golem/ (e.g. phase_result_WRK-001_build.json). These are cleaned up after successful reads in agent.rs.
@@ -136,6 +117,7 @@ items:
     solution: On orchestrator startup, delete all .phase-golem/phase_result_*.json files. Optionally also clean up on graceful shutdown. This is safe because result files are ephemeral — they only need to exist between agent write and executor read within a single run.
     impact: Prevents disk space accumulation and eliminates risk of reading stale results from prior runs.
     sizing_rationale: Small/low — a glob + delete at startup in main.rs. Low impact because the practical risk is minor (stale reads are unlikely but possible).
+  phase_pool: main
 - id: WRK-031
   title: Add validation warning when next_item_id < max(current items) on BACKLOG.yaml load
   status: ready
@@ -281,8 +263,14 @@ items:
   requires_human_review: false
   origin: WRK-037/triage
   created: 2026-02-13T01:34:40.597996219+00:00
-  updated: 2026-02-13T01:37:08.318439108+00:00
+  updated: 2026-02-20T21:35:50.033425182+00:00
   pipeline_type: feature
+  description:
+    context: '[Merged from WRK-074] Title: Close WRK-040 as duplicate of WRK-034. Origin: WRK-040/prd'
+    problem: ''
+    solution: ''
+    impact: ''
+    sizing_rationale: ''
 - id: WRK-045
   title: Close WRK-036 as subset of WRK-039
   status: ready
@@ -493,15 +481,6 @@ items:
   created: 2026-02-13T07:12:22.373899894+00:00
   updated: 2026-02-20T20:39:52.778988123+00:00
   pipeline_type: feature
-- id: WRK-074
-  title: Close WRK-040 as duplicate of WRK-034
-  status: new
-  size: small
-  risk: low
-  requires_human_review: false
-  origin: WRK-040/prd
-  created: 2026-02-13T12:54:25.344822239+00:00
-  updated: 2026-02-13T12:54:25.344822239+00:00
 - id: WRK-075
   title: Auto re-triage stale pre-phase items after configurable idle period
   status: new
