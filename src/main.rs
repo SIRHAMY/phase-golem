@@ -63,6 +63,9 @@ enum Commands {
         /// Maximum number of phase executions
         #[arg(long, default_value = "100")]
         cap: u32,
+        /// Skip blocked targets and continue to the next (multi-target mode)
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        auto_advance: bool,
     },
     /// Show backlog status
     Status,
@@ -124,7 +127,12 @@ async fn main() {
 
     let result = match cli.command {
         Commands::Init { prefix } => handle_init(root, &prefix),
-        Commands::Run { target, only, cap } => {
+        Commands::Run {
+            target,
+            only,
+            cap,
+            auto_advance,
+        } => {
             handle_run(
                 root,
                 config_path.as_deref(),
@@ -132,6 +140,7 @@ async fn main() {
                 target,
                 only,
                 cap,
+                auto_advance,
             )
             .await
         }
@@ -323,6 +332,7 @@ async fn handle_run(
     target: Vec<String>,
     only: Option<String>,
     cap: u32,
+    auto_advance: bool,
 ) -> Result<(), String> {
     // Install signal handlers for graceful shutdown
     install_signal_handlers()?;
@@ -627,6 +637,7 @@ async fn handle_run(
         cap,
         root: root.to_path_buf(),
         config_base: config_base.to_path_buf(),
+        auto_advance,
     };
 
     let summary = scheduler::run_scheduler(coord_handle, runner, config, params, cancel).await?;
@@ -736,6 +747,10 @@ async fn handle_run(
         _ => {}
     }
     log_info!("Halt reason: {:?}", summary.halt_reason);
+
+    if summary.items_completed.is_empty() && !summary.items_blocked.is_empty() {
+        return Err("All targets blocked; no items completed".to_string());
+    }
 
     Ok(())
 }

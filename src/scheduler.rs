@@ -56,6 +56,7 @@ pub struct RunParams {
     /// When `--config` is used, this is the config file's parent directory.
     /// Otherwise, equals `root`.
     pub config_base: PathBuf,
+    pub auto_advance: bool,
 }
 
 // --- Running task tracking ---
@@ -611,23 +612,45 @@ pub async fn run_scheduler(
             if state.current_target_index < params.targets.len() {
                 let target_id = &params.targets[state.current_target_index];
                 if state.items_blocked.contains(target_id) {
-                    log_info!(
-                        "[target] {} blocked ({}/{}). Halting.",
-                        target_id,
-                        state.current_target_index + 1,
-                        params.targets.len()
-                    );
-                    drain_join_set(
-                        &mut join_set,
-                        &mut running,
-                        &mut state,
-                        &coordinator,
-                        &config,
-                        &mut previous_summaries,
-                    )
-                    .await;
-                    let _ = coordinator.batch_commit().await;
-                    return Ok(build_summary(state, HaltReason::TargetBlocked));
+                    if params.auto_advance {
+                        log_info!(
+                            "[target] {} blocked ({}/{}). Auto-advancing.",
+                            target_id,
+                            state.current_target_index + 1,
+                            params.targets.len()
+                        );
+                        drain_join_set(
+                            &mut join_set,
+                            &mut running,
+                            &mut state,
+                            &coordinator,
+                            &config,
+                            &mut previous_summaries,
+                        )
+                        .await;
+                        let _ = coordinator.batch_commit().await;
+                        state.consecutive_exhaustions = 0;
+                        state.current_target_index += 1;
+                        continue;
+                    } else {
+                        log_info!(
+                            "[target] {} blocked ({}/{}). Halting.",
+                            target_id,
+                            state.current_target_index + 1,
+                            params.targets.len()
+                        );
+                        drain_join_set(
+                            &mut join_set,
+                            &mut running,
+                            &mut state,
+                            &coordinator,
+                            &config,
+                            &mut previous_summaries,
+                        )
+                        .await;
+                        let _ = coordinator.batch_commit().await;
+                        return Ok(build_summary(state, HaltReason::TargetBlocked));
+                    }
                 }
             }
             // Advance past Done/archived/pre-Blocked targets
@@ -1773,7 +1796,9 @@ impl SchedulerState {
     }
 }
 
-fn build_summary(state: SchedulerState, halt_reason: HaltReason) -> RunSummary {
+fn build_summary(mut state: SchedulerState, halt_reason: HaltReason) -> RunSummary {
+    state.items_blocked.sort();
+    state.items_blocked.dedup();
     RunSummary {
         phases_executed: state.phases_executed,
         items_completed: state.items_completed,

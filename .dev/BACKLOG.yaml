@@ -401,7 +401,7 @@ items:
 - id: WRK-054
   title: Add --auto-advance flag for multi-target runs
   status: in_progress
-  phase: spec
+  phase: build
   size: small
   complexity: low
   risk: low
@@ -409,10 +409,10 @@ items:
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T04:20:55.758826547+00:00
+  updated: 2026-02-20T14:50:23.983731600+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: cbab26ac620a04df186eb162bac56b113a5b7da7
+  last_phase_commit: 374af3885185fad09c1a23e3ac06134c1f871198
 - id: WRK-055
   title: Support multiple --only filters with AND logic
   status: ready

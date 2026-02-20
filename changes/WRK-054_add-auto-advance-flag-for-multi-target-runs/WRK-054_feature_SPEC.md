@@ -53,7 +53,7 @@ Each phase should leave the codebase in a functional, stable state. Complete and
 
 > Add `auto_advance` field to `RunParams`, CLI flag, conditional block detection branch, exit code logic, and `items_blocked` deduplication
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -73,25 +73,25 @@ Each phase should leave the codebase in a functional, stable state. Complete and
 
 **Tasks:**
 
-- [ ] Add `pub auto_advance: bool` field to `RunParams` struct in `src/scheduler.rs` (after `config_base` field, line 59)
-- [ ] Add `--auto-advance` boolean flag to `Run` variant in `src/main.rs` using `#[arg(long, action = clap::ArgAction::SetTrue)]`. Do not add `conflicts_with`; per PRD, the flag is silently ignored in non-target modes (filter mode already handles blocks via its own mechanism)
-- [ ] Thread `auto_advance` value from the parsed `Run` variant into `RunParams` construction in `handle_run()` (`src/main.rs` line 624-630)
-- [ ] Implement conditional auto-advance branch at block detection site (`src/scheduler.rs` lines 613-631):
+- [x] Add `pub auto_advance: bool` field to `RunParams` struct in `src/scheduler.rs` (after `config_base` field, line 59)
+- [x] Add `--auto-advance` boolean flag to `Run` variant in `src/main.rs` using `#[arg(long, action = clap::ArgAction::SetTrue)]`. Do not add `conflicts_with`; per PRD, the flag is silently ignored in non-target modes (filter mode already handles blocks via its own mechanism)
+- [x] Thread `auto_advance` value from the parsed `Run` variant into `RunParams` construction in `handle_run()` (`src/main.rs` line 624-630)
+- [x] Implement conditional auto-advance branch at block detection site (`src/scheduler.rs` lines 613-631):
   - If `params.auto_advance`: log skip with format `log_info!("[target] {} blocked ({}/{}). Auto-advancing.", target_id, state.current_target_index + 1, params.targets.len())`, call `drain_join_set()`, call `coordinator.batch_commit()`, reset `state.consecutive_exhaustions = 0`, increment `state.current_target_index += 1`, `continue`
   - Else: existing halt behavior (unchanged)
   - Note: `drain_join_set()` is called defensively despite PRD assumption "drain not needed" (max_wip=1 means join set is empty). The drain mirrors the existing halt path for correctness if max_wip changes in the future.
-- [ ] Add `items_blocked` deduplication in `build_summary()` (`src/scheduler.rs` line 1776): call `.sort()` then `.dedup()` on `state.items_blocked` before constructing `RunSummary`. Since `build_summary()` takes `SchedulerState` by value, the mutation is safe (the state is consumed).
-- [ ] Add exit code logic in `handle_run()` after the summary is printed (`src/main.rs` after line 738): if `summary.items_completed.is_empty() && !summary.items_blocked.is_empty()`, return `Err("All targets blocked; no items completed".to_string())` to trigger exit 1
-- [ ] Update all existing `RunParams` struct literals in `tests/scheduler_test.rs` to include `auto_advance: false`. Note: the helper function `run_params()` at line 194 constructs `RunParams` and needs updating too — updating the helper propagates to all its callers.
+- [x] Add `items_blocked` deduplication in `build_summary()` (`src/scheduler.rs` line 1776): call `.sort()` then `.dedup()` on `state.items_blocked` before constructing `RunSummary`. Since `build_summary()` takes `SchedulerState` by value, the mutation is safe (the state is consumed).
+- [x] Add exit code logic in `handle_run()` after the summary is printed (`src/main.rs` after line 738): if `summary.items_completed.is_empty() && !summary.items_blocked.is_empty()`, return `Err("All targets blocked; no items completed".to_string())` to trigger exit 1
+- [x] Update all existing `RunParams` struct literals in `tests/scheduler_test.rs` to include `auto_advance: false`. Note: the helper function `run_params()` at line 194 constructs `RunParams` and needs updating too — updating the helper propagates to all its callers.
 
 **Verification:**
 
-- [ ] `cargo build` succeeds with no errors or warnings
-- [ ] `cargo clippy` passes with no new warnings
-- [ ] `cargo run -- run --help` shows the `--auto-advance` flag in help output
-- [ ] Existing tests pass: `cargo test` (no regressions — test fixup ensures compilation)
-- [ ] Verify that `state.consecutive_exhaustions = 0` is written BEFORE the `continue` statement in the auto-advance branch (visual inspection)
-- [ ] Code review passes (`/code-review` -> fix issues -> repeat until pass)
+- [x] `cargo build` succeeds with no errors or warnings
+- [x] `cargo clippy` passes with no new warnings
+- [x] `cargo run -- run --help` shows the `--auto-advance` flag in help output
+- [x] Existing tests pass: `cargo test` (no regressions — test fixup ensures compilation)
+- [x] Verify that `state.consecutive_exhaustions = 0` is written BEFORE the `continue` statement in the auto-advance branch (visual inspection)
+- [x] Code review passes (`/code-review` -> fix issues -> repeat until pass)
 
 **Commit:** `[WRK-054][P1] Feature: Add --auto-advance flag with skip logic, exit codes, and dedup`
 
@@ -178,6 +178,7 @@ The dedup test uses a unit test on `build_summary()` directly because: (a) trigg
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| 1 | complete | pending | All production code implemented, tests compile, code review passed |
 
 ## Followups Summary
 

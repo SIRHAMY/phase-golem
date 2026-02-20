@@ -198,6 +198,7 @@ fn run_params(root: &Path, target: Option<&str>, cap: u32) -> RunParams {
         cap,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     }
 }
 
@@ -1871,6 +1872,7 @@ async fn test_multi_target_processes_in_order() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -1917,6 +1919,7 @@ async fn test_multi_target_halts_on_block() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -1959,6 +1962,7 @@ async fn test_multi_target_all_done_at_startup() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2003,6 +2007,7 @@ async fn test_multi_target_skips_done_targets() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2047,6 +2052,7 @@ async fn test_multi_target_single_element_backward_compat() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2092,6 +2098,7 @@ async fn test_multi_target_target_archived_during_run() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2138,6 +2145,7 @@ async fn test_multi_target_skips_pre_blocked_targets() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2188,6 +2196,7 @@ async fn test_filter_restricts_scheduler_to_matching_items() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2231,6 +2240,7 @@ async fn test_filter_no_matching_items_halts() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2272,6 +2282,7 @@ async fn test_filter_all_exhausted_halts() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2321,6 +2332,7 @@ async fn test_integration_single_target_backward_compat() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2381,6 +2393,7 @@ async fn test_integration_multi_target_sequential() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2434,6 +2447,7 @@ async fn test_integration_multi_target_with_block() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2488,6 +2502,7 @@ async fn test_integration_filter_impact_high() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
@@ -2536,6 +2551,7 @@ async fn test_integration_filter_no_matches() {
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
+        auto_advance: false,
     };
 
     let summary =
