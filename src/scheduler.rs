@@ -1633,6 +1633,15 @@ pub async fn apply_triage_result(
             .await?;
     }
 
+    // Apply structured description if provided and non-empty
+    if let Some(ref description) = result.description {
+        if !description.is_empty() {
+            coordinator
+                .update_item(item_id, ItemUpdate::SetDescription(description.clone()))
+                .await?;
+        }
+    }
+
     // Apply pipeline_type if provided
     if let Some(ref pipeline_type) = result.pipeline_type {
         // Validate pipeline type exists

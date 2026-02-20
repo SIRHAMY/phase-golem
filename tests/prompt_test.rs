@@ -518,6 +518,36 @@ fn triage_prompt_uses_triage_phase_string() {
 }
 
 #[test]
+fn triage_prompt_contains_description_instructions() {
+    let item = make_item("WRK-010", "Fix login bug");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
+
+    let prompt_text = prompt::build_triage_prompt(&item, result_path, &default_pipelines(), None);
+
+    assert!(prompt_text.contains("structured description"));
+    assert!(prompt_text.contains("`context`"));
+    assert!(prompt_text.contains("`problem`"));
+    assert!(prompt_text.contains("`solution`"));
+    assert!(prompt_text.contains("`impact`"));
+    assert!(prompt_text.contains("`sizing_rationale`"));
+}
+
+#[test]
+fn triage_output_schema_contains_description_field() {
+    let item = make_item("WRK-010", "Fix login bug");
+    let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");
+
+    let prompt_text = prompt::build_triage_prompt(&item, result_path, &default_pipelines(), None);
+
+    assert!(prompt_text.contains("\"description\""));
+    assert!(prompt_text.contains("\"context\""));
+    assert!(prompt_text.contains("\"problem\""));
+    assert!(prompt_text.contains("\"solution\""));
+    assert!(prompt_text.contains("\"impact\""));
+    assert!(prompt_text.contains("\"sizing_rationale\""));
+}
+
+#[test]
 fn triage_prompt_uses_item_to_triage_heading() {
     let item = make_item("WRK-010", "Fix login bug");
     let result_path = Path::new(".phase-golem/phase_result_WRK-010_triage.json");

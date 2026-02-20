@@ -17,7 +17,7 @@ use phase_golem::scheduler::{
 };
 use phase_golem::types::{
     BacklogFile, BacklogItem, DimensionLevel, FollowUp, ItemStatus, PhasePool, PhaseResult,
-    ResultCode, SchedulerAction, SizeLevel, UpdatedAssessments,
+    ResultCode, SchedulerAction, SizeLevel, StructuredDescription, UpdatedAssessments,
 };
 
 // --- Test helpers ---
@@ -1100,6 +1100,158 @@ async fn triage_with_invalid_pipeline_type_blocks() {
         .as_ref()
         .unwrap()
         .contains("nonexistent_pipeline"));
+}
+
+// --- Triage description application tests ---
+
+#[tokio::test]
+async fn triage_applies_description_when_present() {
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    let item = make_item("WRK-001", "Item", ItemStatus::New);
+    let backlog = common::make_backlog(vec![item]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    let config = default_config();
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let mut triage_result = triage_result_with_assessments("WRK-001");
+    triage_result.description = Some(StructuredDescription {
+        context: "Originated from user feedback".to_string(),
+        problem: "Login fails on mobile".to_string(),
+        solution: "Fix responsive CSS".to_string(),
+        impact: "Unblocks mobile users".to_string(),
+        sizing_rationale: "Single file CSS fix".to_string(),
+    });
+
+    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
+        .await
+        .expect("apply_triage_result should succeed");
+
+    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
+    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+
+    assert!(item.description.is_some());
+    let desc = item.description.as_ref().unwrap();
+    assert_eq!(desc.context, "Originated from user feedback");
+    assert_eq!(desc.problem, "Login fails on mobile");
+}
+
+#[tokio::test]
+async fn triage_does_not_apply_description_when_none() {
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    let item = make_item("WRK-001", "Item", ItemStatus::New);
+    let backlog = common::make_backlog(vec![item]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    let config = default_config();
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let triage_result = triage_result_with_assessments("WRK-001");
+    assert!(triage_result.description.is_none());
+
+    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
+        .await
+        .expect("apply_triage_result should succeed");
+
+    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
+    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+
+    assert!(item.description.is_none());
+}
+
+#[tokio::test]
+async fn triage_does_not_apply_empty_description() {
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    let item = make_item("WRK-001", "Item", ItemStatus::New);
+    let backlog = common::make_backlog(vec![item]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    let config = default_config();
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let mut triage_result = triage_result_with_assessments("WRK-001");
+    triage_result.description = Some(StructuredDescription::default());
+
+    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
+        .await
+        .expect("apply_triage_result should succeed");
+
+    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
+    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+
+    assert!(item.description.is_none());
+}
+
+#[tokio::test]
+async fn triage_applies_partial_description() {
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    let item = make_item("WRK-001", "Item", ItemStatus::New);
+    let backlog = common::make_backlog(vec![item]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    let config = default_config();
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let mut triage_result = triage_result_with_assessments("WRK-001");
+    triage_result.description = Some(StructuredDescription {
+        context: "From user feedback".to_string(),
+        problem: "Login broken".to_string(),
+        solution: String::new(),
+        impact: String::new(),
+        sizing_rationale: String::new(),
+    });
+
+    let desc = triage_result.description.as_ref().unwrap();
+    assert!(!desc.is_empty());
+
+    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
+        .await
+        .expect("apply_triage_result should succeed");
+
+    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
+    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+
+    assert!(item.description.is_some());
+    let desc = item.description.as_ref().unwrap();
+    assert_eq!(desc.context, "From user feedback");
+    assert_eq!(desc.problem, "Login broken");
+    assert!(desc.solution.is_empty());
 }
 
 // ============================================================

@@ -131,13 +131,19 @@ pub fn build_triage_prompt(
            - **Complexity:** Low (single pattern), Medium (design decisions), High (new architecture)\n\
            - **Risk:** Low (no shared interfaces), Medium (modifies shared code), High (breaking changes)\n\
            - **Impact:** Low (nice-to-have), Medium (meaningful improvement), High (critical/blocking)\n\
-        5. **Decide routing:**\n\
+        5. **Write a structured description** — produce a `description` object in your output with these fields:\n\
+           - `context`: Background and origin of the work item\n\
+           - `problem`: What issue or gap this addresses\n\
+           - `solution`: Proposed approach or implementation strategy\n\
+           - `impact`: Expected benefit or value delivered\n\
+           - `sizing_rationale`: Reasoning behind your size/complexity assessment\n\
+        6. **Decide routing:**\n\
            - If the item is **small size AND low risk**: promote directly (no idea file needed).\n\
              Set `requires_human_review: false` in your result.\n\
            - If the item is **medium+ size OR medium+ risk**: create an idea file at\n\
              `_ideas/{{item_id}}_{{slug}}.md` with problem statement, proposed approach, and assessment.\n\
              Set `requires_human_review` based on risk level (true if high risk).\n\
-        6. **Report your assessment** in the structured output.\n\n\
+        7. **Report your assessment** in the structured output.\n\n\
         Also use `blocked` if the work is not needed (e.g., already implemented, obsolete, out of scope).\n\n\
         Use your judgment. When uncertain, err on the side of creating an idea file and flagging for review.",
         pipeline_list,
@@ -178,7 +184,14 @@ fn build_triage_output_suffix(item_id: &str, result_path: &Path) -> String {
         \x20     \"suggested_risk\": \"low | medium | high (optional)\"\n\
         \x20   }}\n\
         \x20 ],\n\
-        \x20 \"duplicates\": [\"WRK-xxx\"]\n\
+        \x20 \"duplicates\": [\"WRK-xxx\"],\n\
+        \x20 \"description\": {{\n\
+        \x20   \"context\": \"Background and origin of the work item (optional)\",\n\
+        \x20   \"problem\": \"What issue or gap this addresses (optional)\",\n\
+        \x20   \"solution\": \"Proposed approach or implementation strategy (optional)\",\n\
+        \x20   \"impact\": \"Expected benefit or value delivered (optional)\",\n\
+        \x20   \"sizing_rationale\": \"Reasoning behind size/complexity assessment (optional)\"\n\
+        \x20 }}\n\
         }}\n\
         ```\n\n\
         **Result codes:**\n\

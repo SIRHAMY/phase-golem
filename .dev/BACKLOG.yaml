@@ -409,7 +409,7 @@ items:
   requires_human_review: false
   origin: WRK-028/prd
   created: 2026-02-13T05:36:21.766249174+00:00
-  updated: 2026-02-20T19:27:49.914917709+00:00
+  updated: 2026-02-20T19:36:43.119387606+00:00
   pipeline_type: feature
   description:
     context: |-
@@ -422,7 +422,7 @@ items:
     impact: ''
     sizing_rationale: ''
   phase_pool: main
-  last_phase_commit: 62fbcc2baa77c2c3d49346a4d02753dea0109033
+  last_phase_commit: 3ea41d2baa5c3fdbef16a77defd24f72045af08f
 - id: WRK-058
   title: Extract previous_summaries threshold multiplier to named constant
   status: ready

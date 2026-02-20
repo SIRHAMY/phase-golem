@@ -19,7 +19,7 @@ pub enum CoordinatorCommand {
     },
     CompletePhase {
         item_id: String,
-        result: PhaseResult,
+        result: Box<PhaseResult>,
         is_destructive: bool,
         reply: oneshot::Sender<Result<(), String>>,
     },
@@ -119,7 +119,7 @@ impl CoordinatorHandle {
         self.send_command(
             CoordinatorCommand::CompletePhase {
                 item_id: item_id.to_string(),
-                result,
+                result: Box::new(result),
                 is_destructive,
                 reply,
             },
