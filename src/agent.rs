@@ -393,3 +393,43 @@ impl AgentRunner for MockAgentRunner {
             .unwrap_or_else(|| Err("MockAgentRunner: no more results in sequence".to_string()))
     }
 }
+
+/// Set the shutdown flag for testing. Only available in test builds.
+// Relaxed is safe: .await on subprocess wait() ensures visibility before flag check
+#[cfg(test)]
+fn set_shutdown_flag_for_testing(value: bool) {
+    shutdown_flag().store(value, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn shutdown_flag_returns_error_after_subprocess_exits() {
+        let dir = TempDir::new().unwrap();
+        let result_path = dir.path().join("result.json");
+
+        set_shutdown_flag_for_testing(true);
+
+        let fixture_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_agent_success.sh");
+        let mut cmd = tokio::process::Command::new("bash");
+        cmd.arg(&fixture_path).arg(&result_path);
+
+        let result = run_subprocess_agent(cmd, &result_path, Duration::from_secs(30)).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Shutdown requested"),
+            "Expected 'Shutdown requested' in: {}",
+            err
+        );
+
+        set_shutdown_flag_for_testing(false);
+    }
+}

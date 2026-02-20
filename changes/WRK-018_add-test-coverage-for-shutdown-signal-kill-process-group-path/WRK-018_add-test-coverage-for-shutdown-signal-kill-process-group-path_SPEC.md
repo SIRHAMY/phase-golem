@@ -53,7 +53,7 @@ Zero production code changes. The setter and test module compile only during `ca
 
 > Add `#[cfg(test)]` setter function and unit test for the shutdown signal path in `src/agent.rs`
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -70,9 +70,9 @@ Zero production code changes. The setter and test module compile only during `ca
 
 **Tasks:**
 
-- [ ] Add `#[cfg(test)] fn set_shutdown_flag_for_testing(value: bool)` at the end of `src/agent.rs`, before the test module. Implementation: `shutdown_flag().store(value, Ordering::Relaxed)`. Include inline comment: `// Relaxed is safe: .await on subprocess wait() ensures visibility before flag check`
-- [ ] Add `#[cfg(test)] mod tests {}` block at the end of `src/agent.rs` with `use super::*;` and necessary imports (`tempfile::TempDir`, `std::path::Path`, `std::time::Duration`)
-- [ ] Implement `#[tokio::test] async fn shutdown_flag_returns_error_after_subprocess_exits()`:
+- [x] Add `#[cfg(test)] fn set_shutdown_flag_for_testing(value: bool)` at the end of `src/agent.rs`, before the test module. Implementation: `shutdown_flag().store(value, Ordering::Relaxed)`. Include inline comment: `// Relaxed is safe: .await on subprocess wait() ensures visibility before flag check`
+- [x] Add `#[cfg(test)] mod tests {}` block at the end of `src/agent.rs` with `use super::*;` and necessary imports (`tempfile::TempDir`, `std::path::Path`, `std::time::Duration`)
+- [x] Implement `#[tokio::test] async fn shutdown_flag_returns_error_after_subprocess_exits()`:
   - Create `TempDir`, build result path as `dir.path().join("result.json")`
   - Call `set_shutdown_flag_for_testing(true)`
   - Build `tokio::process::Command` for `bash` with `.arg(fixture_path).arg(&result_path)` where fixture path is `Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_agent_success.sh")`
@@ -82,9 +82,9 @@ Zero production code changes. The setter and test module compile only during `ca
 
 **Verification:**
 
-- [ ] `cargo test -p phase_golem tests::shutdown_flag_returns_error_after_subprocess_exits` passes
-- [ ] `cargo test` (full suite) passes with no regressions
-- [ ] `cargo clippy` produces no new warnings
+- [x] `cargo test -p phase_golem tests::shutdown_flag_returns_error_after_subprocess_exits` passes
+- [x] `cargo test` (full suite) passes with no regressions
+- [x] `cargo clippy` produces no new warnings
 
 **Commit:** `[WRK-018][P1] Feature: Add unit test for shutdown signal kill_process_group path`
 
@@ -101,16 +101,17 @@ Zero production code changes. The setter and test module compile only during `ca
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met
-- [ ] Tests pass
-- [ ] No regressions introduced
-- [ ] Code reviewed (if applicable)
+- [x] All phases complete
+- [x] All PRD success criteria met
+- [x] Tests pass
+- [x] No regressions introduced
+- [x] Code reviewed (if applicable)
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| 1 | complete | pending | All tasks done, verification passed, code review clean |
 
 ## Followups Summary
 
