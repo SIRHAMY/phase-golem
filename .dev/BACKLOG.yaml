@@ -50,7 +50,8 @@ items:
   last_phase_commit: fe2d97f0b873bfdffe9874c5157a153d5067c0a4
 - id: WRK-018
   title: Add test coverage for shutdown signal kill_process_group path
-  status: ready
+  status: in_progress
+  phase: prd
   size: small
   complexity: low
   risk: low
@@ -58,8 +59,9 @@ items:
   requires_human_review: false
   origin: WRK-001/build
   created: 2026-02-12T20:10:57.116194714+00:00
-  updated: 2026-02-12T20:12:53.464268951+00:00
+  updated: 2026-02-20T19:38:51.073852077+00:00
   pipeline_type: feature
+  phase_pool: main
 - id: WRK-019
   title: Wrap blocking filesystem ops in run_subprocess_agent with async equivalents
   status: ready
@@ -398,31 +400,6 @@ items:
   created: 2026-02-13T04:19:23.747896981+00:00
   updated: 2026-02-20T02:52:57.592293884+00:00
   pipeline_type: feature
-- id: WRK-057
-  title: Add triage prompt schema support for producing structured descriptions via SetDescription
-  status: in_progress
-  phase: review
-  size: small
-  complexity: low
-  risk: low
-  impact: medium
-  requires_human_review: false
-  origin: WRK-028/prd
-  created: 2026-02-13T05:36:21.766249174+00:00
-  updated: 2026-02-20T19:38:51.014840760+00:00
-  pipeline_type: feature
-  description:
-    context: |-
-      [Merged from WRK-060] Title: Update triage prompts to produce SetDescription with StructuredDescription. Origin: WRK-028/design
-      [Merged from WRK-062] Title: Triage prompt schema changes for structured description output. Origin: WRK-028/spec
-      [Merged from WRK-068] Title: Triage prompt schema changes for structured descriptions. Origin: WRK-028/build
-      [Merged from WRK-073] Title: Add triage prompt schema for structured description output. Origin: WRK-028/review
-    problem: ''
-    solution: ''
-    impact: ''
-    sizing_rationale: ''
-  phase_pool: main
-  last_phase_commit: ad46da8ec0f372232f0c6cd73a5f825b202e83f0
 - id: WRK-058
   title: Extract previous_summaries threshold multiplier to named constant
   status: ready
