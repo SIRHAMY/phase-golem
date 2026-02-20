@@ -401,7 +401,7 @@ items:
 - id: WRK-056
   title: Support comma-separated OR values within --only filter
   status: in_progress
-  phase: build
+  phase: review
   size: small
   complexity: low
   risk: low
@@ -409,10 +409,10 @@ items:
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T18:52:37.368911394+00:00
+  updated: 2026-02-20T18:53:52.798810670+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: a449ead20bc6784a712db6792065685f9e7b1d29
+  last_phase_commit: 838041c49eb82a3509fca712cddee9ba04e9321b
 - id: WRK-057
   title: Add triage prompt schema support for producing structured descriptions via SetDescription
   status: ready
