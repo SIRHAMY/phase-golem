@@ -46,6 +46,7 @@ pub fn load(path: &Path, project_root: &Path) -> Result<BacklogFile, String> {
         if schema_version <= 2 {
             let backlog = crate::migration::migrate_v2_to_v3(path)?;
             // File is now v3 on disk; return the migrated backlog directly
+            warn_if_next_id_behind(&backlog, path, project_root);
             return Ok(backlog);
         }
     }
@@ -62,6 +63,7 @@ pub fn load(path: &Path, project_root: &Path) -> Result<BacklogFile, String> {
     let backlog: BacklogFile = serde_yaml_ng::from_value(parsed_yaml)
         .map_err(|e| format!("Failed to parse YAML from {}: {}", path.display(), e))?;
 
+    warn_if_next_id_behind(&backlog, path, project_root);
     Ok(backlog)
 }
 
@@ -106,19 +108,7 @@ pub fn save(path: &Path, backlog: &BacklogFile) -> Result<(), String> {
 /// increments by 1, and returns the formatted ID and the new suffix.
 /// Zero-pads to 3 digits minimum.
 pub fn generate_next_id(backlog: &BacklogFile, prefix: &str) -> (String, u32) {
-    let prefix_with_dash = format!("{}-", prefix);
-
-    let max_num = backlog
-        .items
-        .iter()
-        .filter_map(|item| {
-            item.id
-                .strip_prefix(&prefix_with_dash)
-                .and_then(|suffix| suffix.parse::<u32>().ok())
-        })
-        .max()
-        .unwrap_or(0)
-        .max(backlog.next_item_id);
+    let max_num = max_item_suffix(&backlog.items, prefix).max(backlog.next_item_id);
 
     let next = max_num + 1;
     (format!("{}-{:03}", prefix, next), next)
@@ -473,6 +463,44 @@ pub fn merge_item(
 
 // --- Internal helpers ---
 
+/// Compute the maximum numeric ID suffix across items matching the given prefix.
+/// Returns 0 if no items match or the items slice is empty.
+fn max_item_suffix(items: &[BacklogItem], prefix: &str) -> u32 {
+    let prefix_with_dash = format!("{}-", prefix);
+
+    items
+        .iter()
+        .filter_map(|item| {
+            item.id
+                .strip_prefix(&prefix_with_dash)
+                .and_then(|suffix| suffix.parse::<u32>().ok())
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// Log a warning if next_item_id is behind the max item ID suffix.
+/// Loads config for prefix. Skips silently if config loading fails.
+fn warn_if_next_id_behind(backlog: &BacklogFile, path: &Path, project_root: &Path) {
+    let config = match load_config(project_root).ok() {
+        Some(c) => c,
+        None => return,
+    };
+
+    let prefix = &config.project.prefix;
+    let max_suffix = max_item_suffix(&backlog.items, prefix);
+
+    if backlog.next_item_id < max_suffix {
+        log_warn!(
+            "[backlog] next_item_id ({}) is behind max item suffix ({}) in {}. Consider setting next_item_id to {}.",
+            backlog.next_item_id,
+            max_suffix,
+            path.display(),
+            max_suffix
+        );
+    }
+}
+
 /// Append a worklog entry for an archived item.
 fn write_archive_worklog_entry(worklog_path: &Path, item: &BacklogItem) -> Result<(), String> {
     let parent = worklog_path.parent().ok_or_else(|| {
@@ -518,4 +546,60 @@ fn write_archive_worklog_entry(worklog_path: &Path, item: &BacklogItem) -> Resul
     })?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_item(id: &str) -> BacklogItem {
+        BacklogItem {
+            id: id.to_string(),
+            title: format!("Test item {}", id),
+            created: "2026-02-10T00:00:00+00:00".to_string(),
+            updated: "2026-02-10T00:00:00+00:00".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn max_item_suffix_empty_items_returns_zero() {
+        assert_eq!(max_item_suffix(&[], "WRK"), 0);
+    }
+
+    #[test]
+    fn max_item_suffix_matching_prefix_returns_correct_max() {
+        let items = vec![make_item("WRK-003"), make_item("WRK-010"), make_item("WRK-007")];
+        assert_eq!(max_item_suffix(&items, "WRK"), 10);
+    }
+
+    #[test]
+    fn max_item_suffix_non_matching_prefix_returns_zero() {
+        let items = vec![make_item("OTHER-005"), make_item("OTHER-010")];
+        assert_eq!(max_item_suffix(&items, "WRK"), 0);
+    }
+
+    #[test]
+    fn max_item_suffix_non_numeric_suffixes_filtered_out() {
+        let items = vec![make_item("WRK-abc"), make_item("WRK-def")];
+        assert_eq!(max_item_suffix(&items, "WRK"), 0);
+    }
+
+    #[test]
+    fn max_item_suffix_mixed_valid_invalid_returns_max_from_valid() {
+        let items = vec![
+            make_item("WRK-005"),
+            make_item("WRK-abc"),
+            make_item("OTHER-100"),
+            make_item("WRK-012"),
+            make_item("WRK-"),
+        ];
+        assert_eq!(max_item_suffix(&items, "WRK"), 12);
+    }
+
+    #[test]
+    fn max_item_suffix_non_default_prefix() {
+        let items = vec![make_item("PROJ-001"), make_item("PROJ-042"), make_item("WRK-999")];
+        assert_eq!(max_item_suffix(&items, "PROJ"), 42);
+    }
 }

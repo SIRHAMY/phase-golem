@@ -1564,3 +1564,109 @@ items:
         err_msg
     );
 }
+
+// =============================================================================
+// next_item_id validation warning tests (load-path)
+// =============================================================================
+
+#[test]
+fn load_with_next_item_id_behind_max_succeeds() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("BACKLOG.yaml");
+
+    // next_item_id=3 but items include WRK-010
+    fs::write(
+        &path,
+        r#"schema_version: 3
+next_item_id: 3
+items:
+  - id: WRK-010
+    title: High ID item
+    status: new
+    created: "2026-02-10T00:00:00+00:00"
+    updated: "2026-02-10T00:00:00+00:00"
+"#,
+    )
+    .unwrap();
+
+    let backlog = backlog::load(&path, dir.path()).unwrap();
+    assert_eq!(backlog.items.len(), 1);
+    assert_eq!(backlog.next_item_id, 3);
+}
+
+#[test]
+fn load_with_next_item_id_equal_to_max_succeeds() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("BACKLOG.yaml");
+
+    // next_item_id == max suffix (boundary: no warning)
+    fs::write(
+        &path,
+        r#"schema_version: 3
+next_item_id: 10
+items:
+  - id: WRK-010
+    title: Boundary item
+    status: new
+    created: "2026-02-10T00:00:00+00:00"
+    updated: "2026-02-10T00:00:00+00:00"
+"#,
+    )
+    .unwrap();
+
+    let backlog = backlog::load(&path, dir.path()).unwrap();
+    assert_eq!(backlog.items.len(), 1);
+    assert_eq!(backlog.next_item_id, 10);
+}
+
+#[test]
+fn load_with_next_item_id_above_max_succeeds() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("BACKLOG.yaml");
+
+    // Normal case: next_item_id > max suffix
+    fs::write(
+        &path,
+        r#"schema_version: 3
+next_item_id: 20
+items:
+  - id: WRK-010
+    title: Normal item
+    status: new
+    created: "2026-02-10T00:00:00+00:00"
+    updated: "2026-02-10T00:00:00+00:00"
+"#,
+    )
+    .unwrap();
+
+    let backlog = backlog::load(&path, dir.path()).unwrap();
+    assert_eq!(backlog.items.len(), 1);
+    assert_eq!(backlog.next_item_id, 20);
+}
+
+#[test]
+fn load_with_empty_items_and_zero_next_item_id_succeeds() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("BACKLOG.yaml");
+
+    let yaml = "schema_version: 3\nnext_item_id: 0\nitems: []\n";
+    fs::write(&path, yaml).unwrap();
+
+    let backlog = backlog::load(&path, dir.path()).unwrap();
+    assert!(backlog.items.is_empty());
+    assert_eq!(backlog.next_item_id, 0);
+}
+
+#[test]
+fn load_with_empty_items_and_nonzero_next_item_id_succeeds() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("BACKLOG.yaml");
+
+    // Archived items scenario: no items but next_item_id is nonzero
+    let yaml = "schema_version: 3\nnext_item_id: 15\nitems: []\n";
+    fs::write(&path, yaml).unwrap();
+
+    let backlog = backlog::load(&path, dir.path()).unwrap();
+    assert!(backlog.items.is_empty());
+    assert_eq!(backlog.next_item_id, 15);
+}

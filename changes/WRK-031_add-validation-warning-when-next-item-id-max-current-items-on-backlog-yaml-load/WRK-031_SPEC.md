@@ -56,7 +56,7 @@ load() ──► parse YAML ──► migrate if needed ──► warn_if_next_i
 
 > Extract `max_item_suffix()`, refactor `generate_next_id()` to use it, add `warn_if_next_id_behind()`, wire into `load()`, and write tests
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -75,34 +75,34 @@ load() ──► parse YAML ──► migrate if needed ──► warn_if_next_i
 
 **Tasks:**
 
-- [ ] Add `max_item_suffix(items: &[BacklogItem], prefix: &str) -> u32` pure function in `src/backlog.rs` — extracts the `strip_prefix` + `parse::<u32>` + `filter_map` + `max` + `unwrap_or(0)` chain from `generate_next_id()`
-- [ ] Refactor `generate_next_id()` to call `max_item_suffix()` instead of inlining the parsing chain — behavior unchanged, all 10+ existing tests must pass
-- [ ] Add `warn_if_next_id_behind(backlog: &BacklogFile, path: &Path, project_root: &Path)` helper — loads config via `load_config(project_root).ok()`, calls `max_item_suffix()`, compares, logs warning if `next_item_id < max_suffix`. If config load fails (returns `None`), return immediately with no warning and no error.
-- [ ] Wire `warn_if_next_id_behind(&backlog, path, project_root)` immediately before `return Ok(backlog)` at line 49 (migration path, inside `if schema_version <= 2` block) in `load()`
-- [ ] Wire `warn_if_next_id_behind(&backlog, path, project_root)` immediately before `Ok(backlog)` at line 65 (direct v3 path) in `load()`
-- [ ] Add unit tests for `max_item_suffix()` in a `#[cfg(test)]` module in `src/backlog.rs`:
+- [x] Add `max_item_suffix(items: &[BacklogItem], prefix: &str) -> u32` pure function in `src/backlog.rs` — extracts the `strip_prefix` + `parse::<u32>` + `filter_map` + `max` + `unwrap_or(0)` chain from `generate_next_id()`
+- [x] Refactor `generate_next_id()` to call `max_item_suffix()` instead of inlining the parsing chain — behavior unchanged, all 10+ existing tests must pass
+- [x] Add `warn_if_next_id_behind(backlog: &BacklogFile, path: &Path, project_root: &Path)` helper — loads config via `load_config(project_root).ok()`, calls `max_item_suffix()`, compares, logs warning if `next_item_id < max_suffix`. If config load fails (returns `None`), return immediately with no warning and no error.
+- [x] Wire `warn_if_next_id_behind(&backlog, path, project_root)` immediately before `return Ok(backlog)` at line 49 (migration path, inside `if schema_version <= 2` block) in `load()`
+- [x] Wire `warn_if_next_id_behind(&backlog, path, project_root)` immediately before `Ok(backlog)` at line 65 (direct v3 path) in `load()`
+- [x] Add unit tests for `max_item_suffix()` in a `#[cfg(test)]` module in `src/backlog.rs`:
   - Empty items returns 0
   - Items with matching prefix — returns correct max suffix
   - Items with non-matching prefix filtered out — returns 0
   - Items with non-numeric suffixes filtered out
   - Mixed valid/invalid items — returns max from valid items only
   - Non-default prefix (e.g., `"PROJ"`) works correctly
-- [ ] Add integration tests in `tests/backlog_test.rs`:
+- [x] Add integration tests in `tests/backlog_test.rs`:
   - Load with `next_item_id` behind max (e.g., `next_item_id=3`, items include `WRK-010`) — verify load succeeds
   - Load with `next_item_id == max_suffix` — verify load succeeds (boundary: no warning)
   - Load with `next_item_id > max_suffix` — verify load succeeds (normal case)
   - Load with empty items and `next_item_id=0` — verify load succeeds (no warning)
   - Load with empty items and nonzero `next_item_id` (archived items scenario) — verify load succeeds (no warning)
-- [ ] Verify all existing `generate_next_id()` tests still pass (regression — tests in `tests/backlog_test.rs` lines 182-245, 722-780)
+- [x] Verify all existing `generate_next_id()` tests still pass (regression — tests in `tests/backlog_test.rs` lines 182-245, 722-780)
 
 **Verification:**
 
-- [ ] `cargo test` passes — all existing tests plus new tests
-- [ ] `cargo build` succeeds with no warnings
-- [ ] New `max_item_suffix()` unit tests cover: empty items, matching prefix, non-matching prefix, non-numeric suffixes, mixed items, non-default prefix
-- [ ] New load-path integration tests cover: behind case, boundary (equal) case, normal case, empty items (zero and nonzero `next_item_id`)
-- [ ] All existing `generate_next_id()` tests pass unchanged — behavioral equivalence after refactor (tests at `tests/backlog_test.rs` lines 182-245, 722-780)
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo test` passes — all existing tests plus new tests
+- [x] `cargo build` succeeds with no warnings
+- [x] New `max_item_suffix()` unit tests cover: empty items, matching prefix, non-matching prefix, non-numeric suffixes, mixed items, non-default prefix
+- [x] New load-path integration tests cover: behind case, boundary (equal) case, normal case, empty items (zero and nonzero `next_item_id`)
+- [x] All existing `generate_next_id()` tests pass unchanged — behavioral equivalence after refactor (tests at `tests/backlog_test.rs` lines 182-245, 722-780)
+- [x] Code review passes (`/code-review` → fix issues → repeat until pass)
 
 **Commit:** `[WRK-031][P1] Feature: Add next_item_id validation warning on backlog load`
 
@@ -122,16 +122,17 @@ load() ──► parse YAML ──► migrate if needed ──► warn_if_next_i
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met
-- [ ] Tests pass
-- [ ] No regressions introduced
-- [ ] Code reviewed (if applicable)
+- [x] All phases complete
+- [x] All PRD success criteria met
+- [x] Tests pass
+- [x] No regressions introduced
+- [x] Code reviewed (if applicable)
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| 1 | Complete | `[WRK-031][P1] Feature: Add next_item_id validation warning on backlog load` | All 597 tests pass (89 backlog, 6 new unit, 5 new integration). Code review: no critical/high issues. |
 
 ## Followups Summary
 
