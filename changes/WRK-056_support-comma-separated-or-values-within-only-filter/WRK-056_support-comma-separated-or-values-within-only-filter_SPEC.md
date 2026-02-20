@@ -100,7 +100,7 @@ The change follows the same vertical-slice pattern as WRK-055, touching the same
 
 > Add comma splitting, OR matching, duplicate detection, validation message update, help text, new tests
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Med
 
@@ -114,33 +114,33 @@ The change follows the same vertical-slice pattern as WRK-055, touching the same
 
 **Tasks:**
 
-- [ ] Update `parse_filter()` to split `value_str` on `,` after the existing `value_str.is_empty()` check. For each token: trim whitespace, reject if empty with error `"Empty value in comma-separated list for field '{field}'. Each value must be non-empty."`, parse via `parse_single_value()`. Collect into `Vec<FilterValue>`.
-- [ ] Add within-list duplicate detection in `parse_filter()`: after parsing all tokens, iterate over the collected values inserting `&FilterValue` refs into a `HashSet`. If insertion returns false, error: `"Duplicate value '{raw_token}' in comma-separated list for field '{field}'"`. Use the raw token string (after trim) in the error message for user clarity, not the Debug representation of the parsed value. Implementation hint: collect into `Vec<(String, FilterValue)>` pairing each trimmed raw token with its parsed value, then iterate for duplicate checking while preserving access to the raw token for error messages. `FilterValue` already derives `Hash` + `Eq`, so `HashSet<&FilterValue>` works directly.
-- [ ] Update `validate_filter_criteria()` scalar-field duplicate error message (line 178) from `"Field '{}' specified multiple times. For OR logic within a field, use comma-separated values: --only {}=value1,value2"` to `"Field '{}' specified multiple times in separate --only flags. Combine values in a single flag: --only {}=value1,value2"`.
-- [ ] Update the `--only` help text in `src/main.rs` (line 60) to: `"Filter items by attribute. Comma-separated values = OR within field; repeated flags = AND across fields. Examples: --only impact=high,medium --only size=small (high or medium impact AND small size). Tag: --only tag=a,b (has either) vs --only tag=a --only tag=b (has both)."`
-- [ ] Add tests for multi-value parsing (happy path): `parse_filter("impact=high,medium")` returns `values: [Dimension(High), Dimension(Medium)]`; `parse_filter("status=ready,blocked")` returns correct Status values; `parse_filter("tag=a,b")` returns correct Tag values; `parse_filter("pipeline_type=feature,bugfix")` returns correct PipelineType values.
-- [ ] Add tests for empty token rejection: `"impact=high,,low"` (middle), `"impact=,high"` (leading), `"impact=high,"` (trailing), `"impact=,"` (comma only). Each should error with `"Empty value in comma-separated list"`.
-- [ ] Add tests for within-list duplicate rejection: `"impact=high,high"` rejected; `"impact=high,HIGH"` rejected (case-insensitive enum parsing → same variant); `"tag=a,a"` rejected (case-sensitive, same string); `"tag=a,A"` accepted (case-sensitive, different strings).
-- [ ] Add tests for multi-value OR matching: an item with `impact=High` matches `parse_filter("impact=high,medium")`; an item with `impact=None` does not match; multi-value OR composes with cross-field AND: `impact=high,medium` AND `size=small` filters correctly. Also add matching tests for `size=small,medium` (covers `FilterValue::Size` variant) and `pipeline_type=feature,bugfix` (covers free-text `FilterValue::PipelineType` variant).
-- [ ] Add tests for multi-value display: `parse_filter("impact=high,medium").to_string()` == `"impact=high,medium"`; `format_filter_criteria` with multi-value + single-value criteria produces `"impact=high,medium AND size=small"`.
-- [ ] Add tests for tag OR + AND composition: `tag=a,b` matches item with tag "a" or tag "b"; `[parse_filter("tag=a,b"), parse_filter("tag=c")]` filters items that have (a or b) AND c.
-- [ ] Add test for whitespace trimming (Should Have): `parse_filter("impact=high, medium")` (with space after comma) parses same as `"impact=high,medium"`.
-- [ ] Add multi-value roundtrip test: `parse_filter("impact=high,medium")` → `.to_string()` → `parse_filter()` → assert equal. Note: the PRD states roundtrip is "not guaranteed or required" (Out of Scope), but this test is intentionally added because the display format `field=v1,v2` happens to be valid input format and we want to preserve this property.
-- [ ] Add test for invalid value within comma list: `parse_filter("size=small,huge")` → error containing `"Invalid value 'huge' for field 'size'"`. This verifies PRD Must Have #5 in the multi-value context.
-- [ ] Add test for fail-fast ordering: `parse_filter("impact=high,huge,medium")` → error references `huge` (the first invalid token), not `medium`. Verifies PRD Must Have #4 (fail-fast, left-to-right).
-- [ ] Add test for cross-flag duplicate validation with multi-value criteria: `validate_filter_criteria(&[parse_filter("impact=high,medium").unwrap(), parse_filter("impact=low").unwrap()])` → error. Verifies PRD Must Have #7 (scalar field duplicate detection applies even when one criterion is multi-valued).
-- [ ] Add test for identical multi-value tag criteria across flags: `validate_filter_criteria(&[parse_filter("tag=a,b").unwrap(), parse_filter("tag=a,b").unwrap()])` → error (identical tag criteria rejected). Verifies tag identical-pair detection works with multi-value criteria.
-- [ ] Add test for tag with equals + commas interaction: `parse_filter("tag=key=val1,key=val2")` → `values: [Tag("key=val1"), Tag("key=val2")]`. Verifies comma splitting interacts correctly with the first-`=`-only split.
-- [ ] Verify existing `validate_duplicate_scalar_field_returns_err` test still passes. The existing assertions check for substrings `"Field 'impact' specified multiple times"` and `"--only impact=value1,value2"` — both appear in the updated message. Additionally, add a new assertion in a new test that checks for `"in separate --only flags"` to verify the message was actually updated (this substring distinguishes the new message from the old).
+- [x] Update `parse_filter()` to split `value_str` on `,` after the existing `value_str.is_empty()` check. For each token: trim whitespace, reject if empty with error `"Empty value in comma-separated list for field '{field}'. Each value must be non-empty."`, parse via `parse_single_value()`. Collect into `Vec<FilterValue>`.
+- [x] Add within-list duplicate detection in `parse_filter()`: after parsing all tokens, iterate over the collected values inserting `&FilterValue` refs into a `HashSet`. If insertion returns false, error: `"Duplicate value '{raw_token}' in comma-separated list for field '{field}'"`. Use the raw token string (after trim) in the error message for user clarity, not the Debug representation of the parsed value. Implementation hint: collect into `Vec<(String, FilterValue)>` pairing each trimmed raw token with its parsed value, then iterate for duplicate checking while preserving access to the raw token for error messages. `FilterValue` already derives `Hash` + `Eq`, so `HashSet<&FilterValue>` works directly.
+- [x] Update `validate_filter_criteria()` scalar-field duplicate error message (line 178) from `"Field '{}' specified multiple times. For OR logic within a field, use comma-separated values: --only {}=value1,value2"` to `"Field '{}' specified multiple times in separate --only flags. Combine values in a single flag: --only {}=value1,value2"`.
+- [x] Update the `--only` help text in `src/main.rs` (line 60) to: `"Filter items by attribute. Comma-separated values = OR within field; repeated flags = AND across fields. Examples: --only impact=high,medium --only size=small (high or medium impact AND small size). Tag: --only tag=a,b (has either) vs --only tag=a --only tag=b (has both)."`
+- [x] Add tests for multi-value parsing (happy path): `parse_filter("impact=high,medium")` returns `values: [Dimension(High), Dimension(Medium)]`; `parse_filter("status=ready,blocked")` returns correct Status values; `parse_filter("tag=a,b")` returns correct Tag values; `parse_filter("pipeline_type=feature,bugfix")` returns correct PipelineType values.
+- [x] Add tests for empty token rejection: `"impact=high,,low"` (middle), `"impact=,high"` (leading), `"impact=high,"` (trailing), `"impact=,"` (comma only). Each should error with `"Empty value in comma-separated list"`.
+- [x] Add tests for within-list duplicate rejection: `"impact=high,high"` rejected; `"impact=high,HIGH"` rejected (case-insensitive enum parsing → same variant); `"tag=a,a"` rejected (case-sensitive, same string); `"tag=a,A"` accepted (case-sensitive, different strings).
+- [x] Add tests for multi-value OR matching: an item with `impact=High` matches `parse_filter("impact=high,medium")`; an item with `impact=None` does not match; multi-value OR composes with cross-field AND: `impact=high,medium` AND `size=small` filters correctly. Also add matching tests for `size=small,medium` (covers `FilterValue::Size` variant) and `pipeline_type=feature,bugfix` (covers free-text `FilterValue::PipelineType` variant).
+- [x] Add tests for multi-value display: `parse_filter("impact=high,medium").to_string()` == `"impact=high,medium"`; `format_filter_criteria` with multi-value + single-value criteria produces `"impact=high,medium AND size=small"`.
+- [x] Add tests for tag OR + AND composition: `tag=a,b` matches item with tag "a" or tag "b"; `[parse_filter("tag=a,b"), parse_filter("tag=c")]` filters items that have (a or b) AND c.
+- [x] Add test for whitespace trimming (Should Have): `parse_filter("impact=high, medium")` (with space after comma) parses same as `"impact=high,medium"`.
+- [x] Add multi-value roundtrip test: `parse_filter("impact=high,medium")` → `.to_string()` → `parse_filter()` → assert equal. Note: the PRD states roundtrip is "not guaranteed or required" (Out of Scope), but this test is intentionally added because the display format `field=v1,v2` happens to be valid input format and we want to preserve this property.
+- [x] Add test for invalid value within comma list: `parse_filter("size=small,huge")` → error containing `"Invalid value 'huge' for field 'size'"`. This verifies PRD Must Have #5 in the multi-value context.
+- [x] Add test for fail-fast ordering: `parse_filter("impact=high,huge,medium")` → error references `huge` (the first invalid token), not `medium`. Verifies PRD Must Have #4 (fail-fast, left-to-right).
+- [x] Add test for cross-flag duplicate validation with multi-value criteria: `validate_filter_criteria(&[parse_filter("impact=high,medium").unwrap(), parse_filter("impact=low").unwrap()])` → error. Verifies PRD Must Have #7 (scalar field duplicate detection applies even when one criterion is multi-valued).
+- [x] Add test for identical multi-value tag criteria across flags: `validate_filter_criteria(&[parse_filter("tag=a,b").unwrap(), parse_filter("tag=a,b").unwrap()])` → error (identical tag criteria rejected). Verifies tag identical-pair detection works with multi-value criteria.
+- [x] Add test for tag with equals + commas interaction: `parse_filter("tag=key=val1,key=val2")` → `values: [Tag("key=val1"), Tag("key=val2")]`. Verifies comma splitting interacts correctly with the first-`=`-only split.
+- [x] Verify existing `validate_duplicate_scalar_field_returns_err` test still passes. The existing assertions check for substrings `"Field 'impact' specified multiple times"` and `"--only impact=value1,value2"` — both appear in the updated message. Additionally, add a new assertion in a new test that checks for `"in separate --only flags"` to verify the message was actually updated (this substring distinguishes the new message from the old).
 
 **Verification:**
 
-- [ ] `cargo build` succeeds with no errors or warnings
-- [ ] `cargo test` — all tests pass (existing + new)
-- [ ] Manual smoke test: `cargo run -- run --help` shows updated `--only` help text containing "Comma-separated values = OR within field" and "repeated flags = AND across fields"
-- [ ] All PRD Must Have criteria addressed (comma-separated OR, cross-field AND, validation, display, help text)
-- [ ] All PRD Should Have criteria addressed (whitespace trimming)
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo build` succeeds with no errors or warnings
+- [x] `cargo test` — all tests pass (existing + new) — 92 filter tests, 133 total
+- [x] Manual smoke test: `cargo run -- run --help` shows updated `--only` help text containing "Comma-separated values = OR within field" and "repeated flags = AND across fields"
+- [x] All PRD Must Have criteria addressed (comma-separated OR, cross-field AND, validation, display, help text)
+- [x] All PRD Should Have criteria addressed (whitespace trimming)
+- [x] Code review passes — Ready to Merge verdict, no critical/high issues
 
 **Commit:** `[WRK-056][P2] Feature: Comma-separated OR values within --only filter`
 
@@ -157,17 +157,18 @@ The change follows the same vertical-slice pattern as WRK-055, touching the same
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met
-- [ ] Tests pass
-- [ ] No regressions introduced
-- [ ] Code reviewed (if applicable)
+- [x] All phases complete
+- [x] All PRD success criteria met
+- [x] Tests pass — 92 filter tests, 133 total, all passing
+- [x] No regressions introduced — all existing tests pass unchanged
+- [x] Code reviewed — Ready to Merge verdict
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
-| Phase 1: Structural Refactor | complete | pending | All tasks done, all tests pass, code review passed |
+| Phase 1: Structural Refactor | complete | a449ead | All tasks done, all tests pass, code review passed |
+| Phase 2: Multi-Value OR Functionality | complete | pending | All tasks done, 30 new tests, code review passed |
 
 ## Followups Summary
 

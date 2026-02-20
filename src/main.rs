@@ -57,7 +57,7 @@ enum Commands {
         /// Target specific backlog items by ID (can be specified multiple times for sequential processing)
         #[arg(long, action = clap::ArgAction::Append)]
         target: Vec<String>,
-        /// Filter items by attribute (repeatable, AND logic; e.g., --only impact=high --only size=small)
+        /// Filter items by attribute. Comma-separated values = OR within field; repeated flags = AND across fields. Examples: --only impact=high,medium --only size=small (high or medium impact AND small size). Tag: --only tag=a,b (has either) vs --only tag=a --only tag=b (has both).
         #[arg(long, conflicts_with = "target", action = clap::ArgAction::Append)]
         only: Vec<String>,
         /// Maximum number of phase executions

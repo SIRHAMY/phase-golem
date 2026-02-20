@@ -409,10 +409,10 @@ items:
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T18:45:38.850782205+00:00
+  updated: 2026-02-20T18:52:37.368911394+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: f72eb99774febf78b6fefaad47a2b7e78af78be7
+  last_phase_commit: a449ead20bc6784a712db6792065685f9e7b1d29
 - id: WRK-057
   title: Add triage prompt schema support for producing structured descriptions via SetDescription
   status: ready

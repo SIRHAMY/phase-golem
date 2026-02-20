@@ -677,3 +677,372 @@ fn apply_filters_three_heterogeneous_criteria() {
     assert_eq!(filtered.items.len(), 1);
     assert_eq!(filtered.items[0].id, "WRK-001");
 }
+
+// --- Multi-value parsing (happy path) ---
+
+#[test]
+fn parse_filter_multi_value_impact() {
+    let f = parse_filter("impact=high,medium").unwrap();
+    assert_eq!(f.field, FilterField::Impact);
+    assert_eq!(
+        f.values,
+        vec![
+            FilterValue::Dimension(DimensionLevel::High),
+            FilterValue::Dimension(DimensionLevel::Medium),
+        ]
+    );
+}
+
+#[test]
+fn parse_filter_multi_value_status() {
+    let f = parse_filter("status=ready,blocked").unwrap();
+    assert_eq!(f.field, FilterField::Status);
+    assert_eq!(
+        f.values,
+        vec![
+            FilterValue::Status(ItemStatus::Ready),
+            FilterValue::Status(ItemStatus::Blocked),
+        ]
+    );
+}
+
+#[test]
+fn parse_filter_multi_value_tag() {
+    let f = parse_filter("tag=a,b").unwrap();
+    assert_eq!(f.field, FilterField::Tag);
+    assert_eq!(
+        f.values,
+        vec![
+            FilterValue::Tag("a".to_string()),
+            FilterValue::Tag("b".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn parse_filter_multi_value_pipeline_type() {
+    let f = parse_filter("pipeline_type=feature,bugfix").unwrap();
+    assert_eq!(f.field, FilterField::PipelineType);
+    assert_eq!(
+        f.values,
+        vec![
+            FilterValue::PipelineType("feature".to_string()),
+            FilterValue::PipelineType("bugfix".to_string()),
+        ]
+    );
+}
+
+// --- Empty token rejection ---
+
+#[test]
+fn parse_filter_empty_token_middle() {
+    let err = parse_filter("impact=high,,low").unwrap_err();
+    assert!(err.contains("Empty value in comma-separated list"));
+}
+
+#[test]
+fn parse_filter_empty_token_leading() {
+    let err = parse_filter("impact=,high").unwrap_err();
+    assert!(err.contains("Empty value in comma-separated list"));
+}
+
+#[test]
+fn parse_filter_empty_token_trailing() {
+    let err = parse_filter("impact=high,").unwrap_err();
+    assert!(err.contains("Empty value in comma-separated list"));
+}
+
+#[test]
+fn parse_filter_comma_only() {
+    let err = parse_filter("impact=,").unwrap_err();
+    assert!(err.contains("Empty value in comma-separated list"));
+}
+
+// --- Within-list duplicate rejection ---
+
+#[test]
+fn parse_filter_duplicate_value_rejected() {
+    let err = parse_filter("impact=high,high").unwrap_err();
+    assert!(err.contains("Duplicate value 'high' in comma-separated list for field 'impact'"));
+}
+
+#[test]
+fn parse_filter_duplicate_case_insensitive_enum_rejected() {
+    // "HIGH" and "high" parse to the same DimensionLevel::High
+    let err = parse_filter("impact=high,HIGH").unwrap_err();
+    assert!(err.contains("Duplicate value"));
+}
+
+#[test]
+fn parse_filter_tag_duplicate_case_sensitive_same_rejected() {
+    let err = parse_filter("tag=a,a").unwrap_err();
+    assert!(err.contains("Duplicate value 'a' in comma-separated list for field 'tag'"));
+}
+
+#[test]
+fn parse_filter_tag_different_case_accepted() {
+    // Tags are case-sensitive: "a" and "A" are different values
+    let f = parse_filter("tag=a,A").unwrap();
+    assert_eq!(
+        f.values,
+        vec![
+            FilterValue::Tag("a".to_string()),
+            FilterValue::Tag("A".to_string()),
+        ]
+    );
+}
+
+// --- Multi-value OR matching ---
+
+#[test]
+fn multi_value_or_matches_first_value() {
+    let f = parse_filter("impact=high,medium").unwrap();
+
+    let mut item = make_item("WRK-001", ItemStatus::Ready);
+    item.impact = Some(DimensionLevel::High);
+
+    let snapshot = make_backlog(vec![item]);
+    let filtered = apply_filters(&[f], &snapshot);
+    assert_eq!(filtered.items.len(), 1);
+}
+
+#[test]
+fn multi_value_or_matches_second_value() {
+    let f = parse_filter("impact=high,medium").unwrap();
+
+    let mut item = make_item("WRK-001", ItemStatus::Ready);
+    item.impact = Some(DimensionLevel::Medium);
+
+    let snapshot = make_backlog(vec![item]);
+    let filtered = apply_filters(&[f], &snapshot);
+    assert_eq!(filtered.items.len(), 1);
+}
+
+#[test]
+fn multi_value_or_no_match() {
+    let f = parse_filter("impact=high,medium").unwrap();
+
+    let item = make_item("WRK-001", ItemStatus::Ready);
+    // impact is None
+
+    let snapshot = make_backlog(vec![item]);
+    let filtered = apply_filters(&[f], &snapshot);
+    assert!(filtered.items.is_empty());
+}
+
+#[test]
+fn multi_value_or_composes_with_cross_field_and() {
+    let c1 = parse_filter("impact=high,medium").unwrap();
+    let c2 = parse_filter("size=small").unwrap();
+
+    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
+    item1.impact = Some(DimensionLevel::High);
+    item1.size = Some(SizeLevel::Small);
+
+    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
+    item2.impact = Some(DimensionLevel::Medium);
+    item2.size = Some(SizeLevel::Large);
+
+    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
+    item3.impact = Some(DimensionLevel::Low);
+    item3.size = Some(SizeLevel::Small);
+
+    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let filtered = apply_filters(&[c1, c2], &snapshot);
+
+    assert_eq!(filtered.items.len(), 1);
+    assert_eq!(filtered.items[0].id, "WRK-001");
+}
+
+#[test]
+fn multi_value_or_size_matching() {
+    let f = parse_filter("size=small,medium").unwrap();
+
+    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
+    item1.size = Some(SizeLevel::Small);
+
+    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
+    item2.size = Some(SizeLevel::Large);
+
+    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
+    item3.size = Some(SizeLevel::Medium);
+
+    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let filtered = apply_filters(&[f], &snapshot);
+
+    assert_eq!(filtered.items.len(), 2);
+    assert_eq!(filtered.items[0].id, "WRK-001");
+    assert_eq!(filtered.items[1].id, "WRK-003");
+}
+
+#[test]
+fn multi_value_or_pipeline_type_matching() {
+    let f = parse_filter("pipeline_type=feature,bugfix").unwrap();
+
+    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
+    item1.pipeline_type = Some("feature".to_string());
+
+    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
+    item2.pipeline_type = Some("release".to_string());
+
+    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
+    item3.pipeline_type = Some("bugfix".to_string());
+
+    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let filtered = apply_filters(&[f], &snapshot);
+
+    assert_eq!(filtered.items.len(), 2);
+    assert_eq!(filtered.items[0].id, "WRK-001");
+    assert_eq!(filtered.items[1].id, "WRK-003");
+}
+
+// --- Multi-value display ---
+
+#[test]
+fn multi_value_display() {
+    let f = parse_filter("impact=high,medium").unwrap();
+    assert_eq!(f.to_string(), "impact=high,medium");
+}
+
+#[test]
+fn format_filter_criteria_multi_value_and_single() {
+    let c1 = parse_filter("impact=high,medium").unwrap();
+    let c2 = parse_filter("size=small").unwrap();
+    assert_eq!(
+        format_filter_criteria(&[c1, c2]),
+        "impact=high,medium AND size=small"
+    );
+}
+
+// --- Tag OR + AND composition ---
+
+#[test]
+fn tag_or_matches_either() {
+    let f = parse_filter("tag=a,b").unwrap();
+
+    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
+    item1.tags = vec!["a".to_string()];
+
+    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
+    item2.tags = vec!["b".to_string()];
+
+    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
+    item3.tags = vec!["c".to_string()];
+
+    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let filtered = apply_filters(&[f], &snapshot);
+
+    assert_eq!(filtered.items.len(), 2);
+    assert_eq!(filtered.items[0].id, "WRK-001");
+    assert_eq!(filtered.items[1].id, "WRK-002");
+}
+
+#[test]
+fn tag_or_and_composition() {
+    // (a or b) AND c
+    let c1 = parse_filter("tag=a,b").unwrap();
+    let c2 = parse_filter("tag=c").unwrap();
+
+    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
+    item1.tags = vec!["a".to_string(), "c".to_string()];
+
+    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
+    item2.tags = vec!["b".to_string(), "c".to_string()];
+
+    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
+    item3.tags = vec!["a".to_string(), "b".to_string()];
+
+    let mut item4 = make_item("WRK-004", ItemStatus::Ready);
+    item4.tags = vec!["c".to_string()];
+
+    let snapshot = make_backlog(vec![item1, item2, item3, item4]);
+    let filtered = apply_filters(&[c1, c2], &snapshot);
+
+    assert_eq!(filtered.items.len(), 2);
+    assert_eq!(filtered.items[0].id, "WRK-001");
+    assert_eq!(filtered.items[1].id, "WRK-002");
+}
+
+// --- Whitespace trimming ---
+
+#[test]
+fn parse_filter_whitespace_after_comma_trimmed() {
+    let f = parse_filter("impact=high, medium").unwrap();
+    assert_eq!(
+        f.values,
+        vec![
+            FilterValue::Dimension(DimensionLevel::High),
+            FilterValue::Dimension(DimensionLevel::Medium),
+        ]
+    );
+}
+
+// --- Multi-value roundtrip ---
+
+#[test]
+fn multi_value_roundtrip() {
+    let original = parse_filter("impact=high,medium").unwrap();
+    let displayed = original.to_string();
+    let reparsed = parse_filter(&displayed).unwrap();
+    assert_eq!(original, reparsed);
+}
+
+// --- Invalid value within comma list ---
+
+#[test]
+fn parse_filter_invalid_value_in_comma_list() {
+    let err = parse_filter("size=small,huge").unwrap_err();
+    assert!(err.contains("Invalid value 'huge' for field 'size'"));
+}
+
+// --- Fail-fast ordering ---
+
+#[test]
+fn parse_filter_fail_fast_first_invalid_token() {
+    let err = parse_filter("impact=high,huge,medium").unwrap_err();
+    assert!(err.contains("huge"));
+}
+
+// --- Cross-flag duplicate validation with multi-value criteria ---
+
+#[test]
+fn validate_cross_flag_duplicate_with_multi_value() {
+    let c1 = parse_filter("impact=high,medium").unwrap();
+    let c2 = parse_filter("impact=low").unwrap();
+    let err = validate_filter_criteria(&[c1, c2]).unwrap_err();
+    assert!(err.contains("Field 'impact' specified multiple times"));
+}
+
+// --- Identical multi-value tag criteria across flags ---
+
+#[test]
+fn validate_identical_multi_value_tag_rejected() {
+    let c1 = parse_filter("tag=a,b").unwrap();
+    let c2 = parse_filter("tag=a,b").unwrap();
+    let err = validate_filter_criteria(&[c1, c2]).unwrap_err();
+    assert!(err.contains("Duplicate filter: tag=a,b specified multiple times"));
+}
+
+// --- Tag with equals + commas interaction ---
+
+#[test]
+fn parse_filter_tag_equals_and_commas() {
+    let f = parse_filter("tag=key=val1,key=val2").unwrap();
+    assert_eq!(
+        f.values,
+        vec![
+            FilterValue::Tag("key=val1".to_string()),
+            FilterValue::Tag("key=val2".to_string()),
+        ]
+    );
+}
+
+// --- Updated validation error message ---
+
+#[test]
+fn validate_duplicate_scalar_error_mentions_separate_flags() {
+    let c1 = parse_filter("impact=high").unwrap();
+    let c2 = parse_filter("impact=low").unwrap();
+    let err = validate_filter_criteria(&[c1, c2]).unwrap_err();
+    assert!(err.contains("in separate --only flags"));
+}

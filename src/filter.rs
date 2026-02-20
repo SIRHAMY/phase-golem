@@ -152,12 +152,34 @@ pub fn parse_filter(raw: &str) -> Result<FilterCriterion, String> {
         }
     };
 
-    let value = parse_single_value(&field, value_str)?;
+    let tokens: Vec<&str> = value_str.split(',').collect();
+    let mut parsed: Vec<(String, FilterValue)> = Vec::with_capacity(tokens.len());
 
-    Ok(FilterCriterion {
-        field,
-        values: vec![value],
-    })
+    for token in &tokens {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            return Err(format!(
+                "Empty value in comma-separated list for field '{}'. Each value must be non-empty.",
+                field
+            ));
+        }
+        let value = parse_single_value(&field, trimmed)?;
+        parsed.push((trimmed.to_string(), value));
+    }
+
+    let mut seen = HashSet::new();
+    for (raw_token, value) in &parsed {
+        if !seen.insert(value) {
+            return Err(format!(
+                "Duplicate value '{}' in comma-separated list for field '{}'",
+                raw_token, field
+            ));
+        }
+    }
+
+    let values: Vec<FilterValue> = parsed.into_iter().map(|(_, v)| v).collect();
+
+    Ok(FilterCriterion { field, values })
 }
 
 fn matches_single_value(field: &FilterField, value: &FilterValue, item: &BacklogItem) -> bool {
@@ -203,7 +225,7 @@ pub fn validate_filter_criteria(criteria: &[FilterCriterion]) -> Result<(), Stri
             }
         } else if !seen_scalar_fields.insert(&criterion.field) {
             return Err(format!(
-                "Field '{}' specified multiple times. For OR logic within a field, use comma-separated values: --only {}=value1,value2",
+                "Field '{}' specified multiple times in separate --only flags. Combine values in a single flag: --only {}=value1,value2",
                 criterion.field, criterion.field
             ));
         }
