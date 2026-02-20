@@ -409,10 +409,10 @@ items:
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T14:50:23.983731600+00:00
+  updated: 2026-02-20T14:58:09.010287552+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 374af3885185fad09c1a23e3ac06134c1f871198
+  last_phase_commit: 39c6a59c21309571ab859c1f7afa47831301723c
 - id: WRK-055
   title: Support multiple --only filters with AND logic
   status: ready
@@ -984,4 +984,13 @@ items:
   origin: WRK-017/build
   created: 2026-02-20T03:45:28.424463055+00:00
   updated: 2026-02-20T03:45:28.424463055+00:00
-next_item_id: 119
+- id: HAMY-120
+  title: Extract test helper/builder for scheduler integration tests
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-054/build
+  created: 2026-02-20T14:58:09.025909333+00:00
+  updated: 2026-02-20T14:58:09.025909333+00:00
+next_item_id: 120

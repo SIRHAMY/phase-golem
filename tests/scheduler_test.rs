@@ -2158,6 +2158,259 @@ async fn test_multi_target_skips_pre_blocked_targets() {
 }
 
 // ============================================================
+// Auto-advance integration tests
+// ============================================================
+
+#[tokio::test]
+async fn test_auto_advance_skips_blocked_target() {
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    let item1 = make_in_progress_item("WRK-001", "First", "build");
+    let item2 = make_in_progress_item("WRK-002", "Second", "build");
+    let backlog = common::make_backlog(vec![item1, item2]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    let runner = MockAgentRunner::new(vec![
+        Ok(blocked_result("WRK-001", "build")),
+        Ok(phase_complete_result("WRK-002", "build")),
+        Ok(phase_complete_result("WRK-002", "review")),
+    ]);
+
+    let mut config = default_config();
+    config.pipelines = simple_pipeline();
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let params = RunParams {
+        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
+        filter: None,
+        cap: 100,
+        root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
+        auto_advance: true,
+    };
+
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
+
+    assert_eq!(summary.items_completed.len(), 1);
+    assert!(summary.items_completed.contains(&"WRK-002".to_string()));
+    assert_eq!(summary.items_blocked.len(), 1);
+    assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
+    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
+}
+
+#[tokio::test]
+async fn test_auto_advance_all_targets_blocked() {
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    let item1 = make_in_progress_item("WRK-001", "First", "build");
+    let item2 = make_in_progress_item("WRK-002", "Second", "build");
+    let backlog = common::make_backlog(vec![item1, item2]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    let runner = MockAgentRunner::new(vec![
+        Ok(blocked_result("WRK-001", "build")),
+        Ok(blocked_result("WRK-002", "build")),
+    ]);
+
+    let mut config = default_config();
+    config.pipelines = simple_pipeline();
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let params = RunParams {
+        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
+        filter: None,
+        cap: 100,
+        root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
+        auto_advance: true,
+    };
+
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
+
+    assert!(summary.items_completed.is_empty());
+    assert_eq!(summary.items_blocked.len(), 2);
+    assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
+    assert!(summary.items_blocked.contains(&"WRK-002".to_string()));
+    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
+}
+
+#[tokio::test]
+async fn test_auto_advance_single_target_blocked() {
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    let item = make_in_progress_item("WRK-001", "Feature", "build");
+    let backlog = common::make_backlog(vec![item]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    let runner = MockAgentRunner::new(vec![
+        Ok(blocked_result("WRK-001", "build")),
+    ]);
+
+    let mut config = default_config();
+    config.pipelines = simple_pipeline();
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let params = RunParams {
+        targets: vec!["WRK-001".to_string()],
+        filter: None,
+        cap: 100,
+        root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
+        auto_advance: true,
+    };
+
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
+
+    assert!(summary.items_completed.is_empty());
+    assert_eq!(summary.items_blocked.len(), 1);
+    assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
+    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
+}
+
+#[tokio::test]
+async fn test_auto_advance_circuit_breaker_not_tripped() {
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    let item1 = make_in_progress_item("WRK-001", "First", "build");
+    let item2 = make_in_progress_item("WRK-002", "Second", "build");
+    let backlog = common::make_backlog(vec![item1, item2]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    // Each target: initial attempt fails, retry fails → retries exhausted → blocked
+    // consecutive_exhaustions increments by 1 per target
+    // Without reset: target1 (1) + target2 (2) = CIRCUIT_BREAKER_THRESHOLD → tripped
+    // With reset: target1 (1) → reset to 0 → target2 (1) → never reaches 2
+    let runner = MockAgentRunner::new(vec![
+        Ok(failed_result("WRK-001", "build")),
+        Ok(failed_result("WRK-001", "build")),
+        Ok(failed_result("WRK-002", "build")),
+        Ok(failed_result("WRK-002", "build")),
+    ]);
+
+    let mut config = default_config();
+    config.pipelines = simple_pipeline();
+    config.execution.max_retries = 1;
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let params = RunParams {
+        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
+        filter: None,
+        cap: 100,
+        root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
+        auto_advance: true,
+    };
+
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
+
+    // Should NOT be CircuitBreakerTripped — the reset between targets prevents it
+    // (relies on CIRCUIT_BREAKER_THRESHOLD == 2; adjust if that constant changes)
+    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
+    assert_eq!(summary.items_blocked.len(), 2);
+    assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
+    assert!(summary.items_blocked.contains(&"WRK-002".to_string()));
+    assert!(summary.items_completed.is_empty());
+}
+
+#[tokio::test]
+async fn test_auto_advance_backward_compat() {
+    // Without --auto-advance, first blocked target should halt the run
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    let item1 = make_in_progress_item("WRK-001", "First", "build");
+    let item2 = make_in_progress_item("WRK-002", "Second", "build");
+    let backlog = common::make_backlog(vec![item1, item2]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    let runner = MockAgentRunner::new(vec![
+        Ok(blocked_result("WRK-001", "build")),
+        // WRK-002 results not needed — scheduler halts before reaching it
+    ]);
+
+    let mut config = default_config();
+    config.pipelines = simple_pipeline();
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let params = RunParams {
+        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
+        filter: None,
+        cap: 100,
+        root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
+        auto_advance: false,
+    };
+
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
+
+    assert_eq!(summary.halt_reason, HaltReason::TargetBlocked);
+    assert_eq!(summary.items_blocked.len(), 1);
+    assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
+    // WRK-002 should not have been processed
+    assert!(!summary.items_completed.contains(&"WRK-002".to_string()));
+    assert!(!summary.items_blocked.contains(&"WRK-002".to_string()));
+}
+
+// ============================================================
 // Filter scheduling tests
 // ============================================================
 

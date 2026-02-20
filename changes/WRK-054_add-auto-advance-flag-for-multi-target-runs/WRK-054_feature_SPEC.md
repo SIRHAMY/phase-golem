@@ -111,7 +111,7 @@ The `--auto-advance` flag has no `conflicts_with` annotation with `--only`. When
 
 > Add integration tests for auto-advance behavior including skip, circuit breaker reset, backward compatibility, and deduplication
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -129,19 +129,19 @@ The `--auto-advance` flag has no `conflicts_with` annotation with `--only`. When
 
 **Tasks:**
 
-- [ ] Add `test_auto_advance_skips_blocked_target`: two targets, first blocks, second completes. Assert `HaltReason::TargetCompleted`, `items_completed` contains second target, `items_blocked` contains first target
-- [ ] Add `test_auto_advance_all_targets_blocked`: two targets, both block. Assert `HaltReason::TargetCompleted` (target list exhausted), `items_completed` is empty, `items_blocked` contains both targets
-- [ ] Add `test_auto_advance_single_target_blocked`: single target with auto-advance, target blocks. Assert `HaltReason::TargetCompleted` (not `TargetBlocked`), `items_blocked` contains the target, `items_completed` is empty
-- [ ] Add `test_auto_advance_circuit_breaker_not_tripped`: two targets where each target's mock returns failure results (not `blocked_result()`) that trigger retry exhaustion. `CIRCUIT_BREAKER_THRESHOLD` is 2, so configure `max_retries: 1` to produce 2 exhaustions per target (initial attempt + 1 retry). Assert halt reason is `TargetCompleted` (not `CircuitBreakerTripped`), both targets in `items_blocked`. This proves `consecutive_exhaustions` resets between auto-advanced targets.
-- [ ] Add `test_auto_advance_backward_compat`: two targets WITHOUT `--auto-advance` (`auto_advance: false`), first blocks. Assert `HaltReason::TargetBlocked`, second target never processed
-- [ ] Add `test_build_summary_deduplicates_items_blocked`: unit test that directly calls `build_summary()` with a `SchedulerState` containing duplicate entries in `items_blocked` (e.g., `["WRK-001", "WRK-002", "WRK-001"]`). Assert the resulting `RunSummary.items_blocked` contains each ID exactly once. This is a unit test because triggering duplicate pushes through the mock integration path is unreliable.
+- [x] Add `test_auto_advance_skips_blocked_target`: two targets, first blocks, second completes. Assert `HaltReason::TargetCompleted`, `items_completed` contains second target, `items_blocked` contains first target
+- [x] Add `test_auto_advance_all_targets_blocked`: two targets, both block. Assert `HaltReason::TargetCompleted` (target list exhausted), `items_completed` is empty, `items_blocked` contains both targets
+- [x] Add `test_auto_advance_single_target_blocked`: single target with auto-advance, target blocks. Assert `HaltReason::TargetCompleted` (not `TargetBlocked`), `items_blocked` contains the target, `items_completed` is empty
+- [x] Add `test_auto_advance_circuit_breaker_not_tripped`: two targets where each target's mock returns failure results (not `blocked_result()`) that trigger retry exhaustion. `CIRCUIT_BREAKER_THRESHOLD` is 2, so configure `max_retries: 1` to produce 2 exhaustions per target (initial attempt + 1 retry). Assert halt reason is `TargetCompleted` (not `CircuitBreakerTripped`), both targets in `items_blocked`. This proves `consecutive_exhaustions` resets between auto-advanced targets.
+- [x] Add `test_auto_advance_backward_compat`: two targets WITHOUT `--auto-advance` (`auto_advance: false`), first blocks. Assert `HaltReason::TargetBlocked`, second target never processed
+- [x] Add `test_build_summary_deduplicates_items_blocked`: unit test that directly calls `build_summary()` with a `SchedulerState` containing duplicate entries in `items_blocked` (e.g., `["WRK-001", "WRK-002", "WRK-001"]`). Assert the resulting `RunSummary.items_blocked` contains each ID exactly once. This is a unit test because triggering duplicate pushes through the mock integration path is unreliable.
 
 **Verification:**
 
-- [ ] All new tests pass: `cargo test`
-- [ ] All existing tests still pass (no regressions)
-- [ ] Verify all 6 test functions are present: `test_auto_advance_skips_blocked_target`, `test_auto_advance_all_targets_blocked`, `test_auto_advance_single_target_blocked`, `test_auto_advance_circuit_breaker_not_tripped`, `test_auto_advance_backward_compat`, `test_build_summary_deduplicates_items_blocked`
-- [ ] Code review passes (`/code-review` -> fix issues -> repeat until pass)
+- [x] All new tests pass: `cargo test`
+- [x] All existing tests still pass (no regressions)
+- [x] Verify all 6 test functions are present: `test_auto_advance_skips_blocked_target`, `test_auto_advance_all_targets_blocked`, `test_auto_advance_single_target_blocked`, `test_auto_advance_circuit_breaker_not_tripped`, `test_auto_advance_backward_compat`, `test_build_summary_deduplicates_items_blocked`
+- [x] Code review passes (`/code-review` -> fix issues -> repeat until pass)
 
 **Commit:** `[WRK-054][P2] Feature: Add tests for --auto-advance flag`
 
@@ -153,32 +153,35 @@ The dedup test uses a unit test on `build_summary()` directly because: (a) trigg
 
 **Followups:**
 
+- Test helper/builder extraction to reduce boilerplate across all multi-target integration tests (pre-existing concern, not introduced by this change)
+
 ---
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD Must Have criteria met:
-  - [ ] `--auto-advance` flag accepted on `run` subcommand alongside `--target`
-  - [ ] Blocked targets skipped with log and advance when flag active
-  - [ ] Blocked targets remain Blocked in backlog
-  - [ ] Run summary lists completed and blocked targets separately
-  - [ ] Default halt-on-block behavior unchanged without flag
-  - [ ] Flag accepted with single target (no error)
-  - [ ] Blocked target state committed to git before advancing (`batch_commit()` called)
-  - [ ] Circuit breaker counter reset when auto-advancing
-  - [ ] Exit 0 when at least one target completed; exit 1 when all blocked
-- [ ] PRD Should Have criteria:
-  - [ ] Skip log message includes target ID, position counter, and "Auto-advancing" text
-- [ ] Tests pass
-- [ ] No regressions introduced
-- [ ] Code reviewed (if applicable)
+- [x] All phases complete
+- [x] All PRD Must Have criteria met:
+  - [x] `--auto-advance` flag accepted on `run` subcommand alongside `--target`
+  - [x] Blocked targets skipped with log and advance when flag active
+  - [x] Blocked targets remain Blocked in backlog
+  - [x] Run summary lists completed and blocked targets separately
+  - [x] Default halt-on-block behavior unchanged without flag
+  - [x] Flag accepted with single target (no error)
+  - [x] Blocked target state committed to git before advancing (`batch_commit()` called)
+  - [x] Circuit breaker counter reset when auto-advancing
+  - [x] Exit 0 when at least one target completed; exit 1 when all blocked
+- [x] PRD Should Have criteria:
+  - [x] Skip log message includes target ID, position counter, and "Auto-advancing" text
+- [x] Tests pass
+- [x] No regressions introduced
+- [x] Code reviewed (if applicable)
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
 | 1 | complete | pending | All production code implemented, tests compile, code review passed |
+| 2 | complete | pending | All 6 tests added, code review passed with quick-win fixes applied |
 
 ## Followups Summary
 
@@ -195,6 +198,7 @@ The dedup test uses a unit test on `build_summary()` directly because: (a) trigg
 ### Low
 
 - [ ] Distinct summary messaging for all-blocked runs — PRD Should Have criterion for different messaging when `items_completed` is empty and `items_blocked` is non-empty. Currently the summary output is the same structure regardless; the exit code is the only differentiation.
+- [ ] Extract test helper/builder for scheduler integration tests — all ~12 multi-target tests repeat ~25 lines of identical scaffold. A builder function would reduce boilerplate and make test intent clearer. Pre-existing concern, not introduced by this change.
 
 ## Design Details
 

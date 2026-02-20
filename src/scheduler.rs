@@ -1808,3 +1808,32 @@ fn build_summary(mut state: SchedulerState, halt_reason: HaltReason) -> RunSumma
         halt_reason,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_summary_deduplicates_items_blocked() {
+        let state = SchedulerState {
+            phases_executed: 0,
+            cap: 100,
+            consecutive_exhaustions: 0,
+            items_completed: Vec::new(),
+            items_blocked: vec![
+                "WRK-003".to_string(),
+                "WRK-001".to_string(),
+                "WRK-002".to_string(),
+                "WRK-001".to_string(),
+            ],
+            follow_ups_created: 0,
+            items_merged: 0,
+            current_target_index: 0,
+        };
+
+        let summary = build_summary(state, HaltReason::TargetCompleted);
+
+        assert_eq!(summary.items_blocked.len(), 3);
+        assert_eq!(summary.items_blocked, vec!["WRK-001", "WRK-002", "WRK-003"]);
+    }
+}
