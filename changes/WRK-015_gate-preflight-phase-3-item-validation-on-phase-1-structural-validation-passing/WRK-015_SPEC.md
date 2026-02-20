@@ -1,7 +1,7 @@
 # SPEC: Gate preflight Phase 3 item validation on Phase 1 structural validation passing
 
 **ID:** WRK-015
-**Status:** Draft
+**Status:** Complete
 **Created:** 2026-02-19
 **PRD:** ./WRK-015_PRD.md
 **Execution Mode:** autonomous
@@ -48,7 +48,7 @@ Each phase should leave the codebase in a functional, stable state. Complete and
 
 > Add snapshot variable and guard clause to gate Phase 3 on Phase 1 passing, with test coverage
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -66,20 +66,20 @@ Each phase should leave the codebase in a functional, stable state. Complete and
 
 **Tasks:**
 
-- [ ] Add `let structural_ok = errors.is_empty();` after line 47 (`errors.extend(validate_structure(config));`) and before line 50 (`if errors.is_empty()` for Phase 2). Include an inline comment: `// Snapshot before Phase 2; gates Phase 3 on Phase 1 results only`
-- [ ] Wrap Phase 3 call (line 55: `errors.extend(validate_items(config, backlog));`) in `if structural_ok { ... }`
-- [ ] Update the `run_preflight` doc comment line for Phase 3 from `/// 3. Item validation — in-progress items reference valid pipelines/phases` to `/// 3. Item validation — in-progress items reference valid pipelines/phases (skipped when Phase 1 finds structural errors)`
-- [ ] Add test `preflight_phase3_skipped_when_phase1_fails`: create a config with a structurally broken pipeline (no main phases via `PipelineConfig { pre_phases: vec![], phases: vec![] }`) and an `InProgress` item referencing that pipeline with `pipeline_type = "broken"`. Assert: (1) at least one error contains `"no main phases"`, (2) no error contains `"unknown pipeline type"` or `"unknown phase"` (proving Phase 3 was skipped)
-- [ ] Add test `preflight_phase3_runs_when_phase1_passes_but_phase2_fails`: create a structurally valid config with a single phase referencing a nonexistent workflow file (triggers Phase 2 failure), and a valid `InProgress` item with matching `pipeline_type`, `phase`, and `phase_pool`. Use `tempfile::tempdir()` for the root. Assert: (1) at least one error contains `"Workflow file not found"` (Phase 2 ran), (2) no error contains `"unknown phase"` or `"unknown pipeline type"` (Phase 3 ran and found no issues for the valid item). This test also serves as a regression guard for correct snapshot placement — if the snapshot were placed after Phase 2, it would be `false` and Phase 3 would be incorrectly skipped
-- [ ] Add test `preflight_phase4_and_phase5_run_when_phase1_fails`: create a config with a structurally broken pipeline (no main phases) and a backlog with two items sharing the same ID (triggers Phase 4 duplicate error). Assert: (1) at least one error contains `"no main phases"` (Phase 1 ran), (2) at least one error contains `"Duplicate item ID"` (Phase 4 ran despite Phase 1 failure). This verifies Phases 4-5 remain ungated
+- [x] Add `let structural_ok = errors.is_empty();` after line 47 (`errors.extend(validate_structure(config));`) and before line 50 (`if errors.is_empty()` for Phase 2). Include an inline comment: `// Snapshot before Phase 2; gates Phase 3 on Phase 1 results only`
+- [x] Wrap Phase 3 call (line 55: `errors.extend(validate_items(config, backlog));`) in `if structural_ok { ... }`
+- [x] Update the `run_preflight` doc comment line for Phase 3 from `/// 3. Item validation — in-progress items reference valid pipelines/phases` to `/// 3. Item validation — in-progress items reference valid pipelines/phases (skipped when Phase 1 finds structural errors)`
+- [x] Add test `preflight_phase3_skipped_when_phase1_fails`: create a config with a structurally broken pipeline (no main phases) and an `InProgress` item referencing a nonexistent pipeline type. Assert: (1) at least one error contains `"no main phases"`, (2) no error contains `"unknown pipeline type"` or `"unknown phase"` (proving Phase 3 was skipped). Note: SPEC originally specified `pipeline_type = "broken"` (which exists in config), but code review revealed this made the assertion vacuously true; fixed to use `"nonexistent"` so the assertion is load-bearing.
+- [x] Add test `preflight_phase3_runs_when_phase1_passes_but_phase2_fails`: create a structurally valid config with a single phase referencing a nonexistent workflow file (triggers Phase 2 failure), and an `InProgress` item with an invalid phase reference. Assert: (1) at least one error contains `"Workflow file not found"` (Phase 2 ran), (2) at least one error contains `"unknown phase"` (Phase 3 ran and caught the invalid reference). Note: SPEC originally specified a valid item with negative assertions, but code review revealed this made the assertion vacuously true; fixed to use an invalid phase so the positive assertion proves Phase 3 executed.
+- [x] Add test `preflight_phase4_and_phase5_run_when_phase1_fails`: create a config with a structurally broken pipeline (no main phases) and a backlog with two items sharing the same ID (triggers Phase 4 duplicate error). Assert: (1) at least one error contains `"no main phases"` (Phase 1 ran), (2) at least one error contains `"Duplicate item ID"` (Phase 4 ran despite Phase 1 failure). This verifies Phases 4-5 remain ungated
 
 **Verification:**
 
-- [ ] `cargo test` — all existing tests pass without modification
-- [ ] `cargo test` — all three new tests pass
-- [ ] `cargo clippy` — no new warnings
-- [ ] Codebase builds without errors
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo test` — all existing tests pass without modification
+- [x] `cargo test` — all three new tests pass
+- [x] `cargo clippy` — no new warnings
+- [x] Codebase builds without errors
+- [x] Code review passes (`/code-review` → fix issues → repeat until pass)
 
 **Commit:** `[WRK-015][P1] Fix: Gate Phase 3 item validation on Phase 1 passing`
 
@@ -89,29 +89,34 @@ The snapshot variable must be placed between Phase 1's `errors.extend(validate_s
 
 **Followups:**
 
+- (Low) `structural_ok` doesn't follow the `is_`/`has_` boolean naming convention from CLAUDE.md, but surrounding code (`phase_in_pre`, `phase_in_main`) also doesn't — pre-existing pattern, not addressed here
+- (Low) Phase 2 gate uses live `errors.is_empty()` while Phase 3 uses the snapshot — asymmetric but correct; could unify Phase 2 to also use `structural_ok` in a future cleanup
+- (Low) Test name `preflight_phase4_and_phase5_run_when_phase1_fails` only asserts Phase 4; Phase 5 is not directly asserted (would need a dangling dependency to trigger)
+
 ---
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met:
-  - [ ] Phase 3 skipped when Phase 1 produces any error
-  - [ ] Phase 3 still runs when Phase 1 passes but Phase 2 fails
-  - [ ] Phases 4 and 5 continue to run unconditionally
-  - [ ] Test verifies Phase 3 suppressed when Phase 1 fails
-  - [ ] Test verifies Phase 3 runs when Phase 2 fails
-  - [ ] Test verifies Phases 4-5 run when Phase 1 fails
-  - [ ] Existing tests pass without modification
-  - [ ] `cargo clippy` produces no new warnings
-  - [ ] Snapshot variable used (Should Have)
-  - [ ] Doc comment updated (Nice to Have)
-- [ ] Tests pass
-- [ ] No regressions introduced
+- [x] All phases complete
+- [x] All PRD success criteria met:
+  - [x] Phase 3 skipped when Phase 1 produces any error
+  - [x] Phase 3 still runs when Phase 1 passes but Phase 2 fails
+  - [x] Phases 4 and 5 continue to run unconditionally
+  - [x] Test verifies Phase 3 suppressed when Phase 1 fails
+  - [x] Test verifies Phase 3 runs when Phase 2 fails
+  - [x] Test verifies Phases 4-5 run when Phase 1 fails
+  - [x] Existing tests pass without modification
+  - [x] `cargo clippy` produces no new warnings
+  - [x] Snapshot variable used (Should Have)
+  - [x] Doc comment updated (Nice to Have)
+- [x] Tests pass
+- [x] No regressions introduced
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| 1 | complete | pending | Guard clause + snapshot variable + 3 tests. Code review fixed vacuous test assertions. |
 
 ## Followups Summary
 
@@ -122,6 +127,10 @@ The snapshot variable must be placed between Phase 1's `errors.extend(validate_s
 ### Medium
 
 ### Low
+
+- Boolean naming: `structural_ok` doesn't use `is_`/`has_` prefix (pre-existing pattern in codebase)
+- Phase 2/3 gate asymmetry: could unify to both use `structural_ok`
+- Phase 5 not directly asserted in Phase 4+5 test
 
 ## Design Details
 

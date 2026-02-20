@@ -936,6 +936,125 @@ fn preflight_no_dependencies_passes() {
     assert!(result.is_ok());
 }
 
+// --- Phase 3 gating tests ---
+
+#[test]
+fn preflight_phase3_skipped_when_phase1_fails() {
+    // Config with a structurally broken pipeline (no main phases)
+    let mut config = default_config();
+    config.pipelines.insert(
+        "broken".to_string(),
+        PipelineConfig {
+            pre_phases: vec![],
+            phases: vec![],
+        },
+    );
+
+    // InProgress item referencing a pipeline that doesn't exist in the config —
+    // would trigger Phase 3 "unknown pipeline type" error if Phase 3 ran,
+    // but Phase 1 should gate it
+    let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
+    item.pipeline_type = Some("nonexistent".to_string());
+    item.phase = Some("build".to_string());
+    item.phase_pool = Some(PhasePool::Main);
+
+    let backlog = common::make_backlog(vec![item]);
+
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
+
+    let errors = result.unwrap_err();
+    // Phase 1 ran and found structural errors
+    assert!(errors
+        .iter()
+        .any(|e| e.condition.contains("no main phases")));
+    // Phase 3 was skipped — no item validation errors
+    assert!(!errors
+        .iter()
+        .any(|e| e.condition.contains("unknown pipeline type")
+            || e.condition.contains("unknown phase")));
+}
+
+#[test]
+fn preflight_phase3_runs_when_phase1_passes_but_phase2_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    // Structurally valid config with a workflow file that doesn't exist on disk
+    let mut config = PhaseGolemConfig::default();
+    config.pipelines.insert(
+        "feature".to_string(),
+        PipelineConfig {
+            pre_phases: vec![],
+            phases: vec![PhaseConfig {
+                workflows: vec!["workflows/nonexistent.md".to_string()],
+                ..PhaseConfig::new("build", false)
+            }],
+        },
+    );
+
+    // InProgress item with an invalid phase — Phase 3 will report "unknown phase"
+    // if it runs, proving the gate did not suppress it
+    let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
+    item.pipeline_type = Some("feature".to_string());
+    item.phase = Some("nonexistent-phase".to_string());
+    item.phase_pool = Some(PhasePool::Main);
+
+    let backlog = common::make_backlog(vec![item]);
+
+    let result = run_preflight(&config, &backlog, root, root);
+
+    let errors = result.unwrap_err();
+    // Phase 2 ran and found missing workflow file
+    assert!(errors
+        .iter()
+        .any(|e| e.condition.contains("Workflow file not found")));
+    // Phase 3 ran (because Phase 1 passed) and caught the invalid phase reference
+    assert!(errors
+        .iter()
+        .any(|e| e.condition.contains("unknown phase")));
+}
+
+#[test]
+fn preflight_phase4_and_phase5_run_when_phase1_fails() {
+    // Config with a structurally broken pipeline (no main phases)
+    let mut config = default_config();
+    config.pipelines.insert(
+        "broken".to_string(),
+        PipelineConfig {
+            pre_phases: vec![],
+            phases: vec![],
+        },
+    );
+
+    // Two items with the same ID to trigger Phase 4 duplicate detection
+    let item_a = make_feature_item("WRK-DUP", ItemStatus::New);
+    let item_b = make_feature_item("WRK-DUP", ItemStatus::New);
+
+    let backlog = common::make_backlog(vec![item_a, item_b]);
+
+    let result = run_preflight(
+        &config,
+        &backlog,
+        Path::new("/tmp/test"),
+        Path::new("/tmp/test"),
+    );
+
+    let errors = result.unwrap_err();
+    // Phase 1 ran and found structural errors
+    assert!(errors
+        .iter()
+        .any(|e| e.condition.contains("no main phases")));
+    // Phase 4 ran despite Phase 1 failure
+    assert!(errors
+        .iter()
+        .any(|e| e.condition.contains("Duplicate item ID")));
+}
+
 // --- config_base vs project_root tests ---
 
 #[test]

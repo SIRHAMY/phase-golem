@@ -51,17 +51,17 @@ items:
 - id: WRK-015
   title: Gate preflight Phase 3 item validation on Phase 1 structural validation passing
   status: in_progress
-  phase: spec
+  phase: build
   size: small
   complexity: low
   risk: low
   impact: low
   requires_human_review: false
   created: 2026-02-12T16:23:33.732040439+00:00
-  updated: 2026-02-20T03:11:59.501038821+00:00
+  updated: 2026-02-20T03:18:41.953898692+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 4bdddbaab940835611c2edea2436573b3e36fb95
+  last_phase_commit: e2c6e31e8a0af7a87ae710ecad5f3e7f20373a7d
 - id: WRK-017
   title: Wrap kill_all_children in spawn_blocking for async call sites
   status: ready
@@ -974,4 +974,13 @@ items:
   origin: HAMY-001/review
   created: 2026-02-19T03:25:21.909441188+00:00
   updated: 2026-02-19T03:25:21.909441188+00:00
-next_item_id: 116
+- id: HAMY-117
+  title: Unify Phase 2 gate to use structural_ok snapshot variable
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-015/build
+  created: 2026-02-20T03:18:41.968190903+00:00
+  updated: 2026-02-20T03:18:41.968190903+00:00
+next_item_id: 117

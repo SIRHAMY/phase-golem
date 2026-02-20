@@ -30,7 +30,7 @@ impl std::fmt::Display for PreflightError {
 /// Phases:
 /// 1. Structural validation — config correctness (fast, no I/O)
 /// 2. Workflow probe — verify referenced workflow files exist on disk
-/// 3. Item validation — in-progress items reference valid pipelines/phases
+/// 3. Item validation — in-progress items reference valid pipelines/phases (skipped when Phase 1 finds structural errors)
 /// 4. Duplicate ID validation — ensure no two items share the same ID
 /// 5. Dependency graph validation — detect dangling references and circular dependencies
 ///
@@ -46,13 +46,18 @@ pub fn run_preflight(
     // Phase 1: Structural validation (reuses config::validate but with richer errors)
     errors.extend(validate_structure(config));
 
+    // Snapshot before Phase 2; gates Phase 3 on Phase 1 results only
+    let structural_ok = errors.is_empty();
+
     // Phase 2: Workflow probe — verify workflow files exist on disk
     if errors.is_empty() {
         errors.extend(probe_workflows(config, config_base));
     }
 
     // Phase 3: Item validation
-    errors.extend(validate_items(config, backlog));
+    if structural_ok {
+        errors.extend(validate_items(config, backlog));
+    }
 
     // Phase 4: Duplicate ID validation
     errors.extend(validate_duplicate_ids(&backlog.items));
