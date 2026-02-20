@@ -99,29 +99,10 @@ items:
   pipeline_type: feature
   phase_pool: main
   last_phase_commit: 579d0b22a25c127d6db3e65acf7783e569ab8fbc
-- id: WRK-025
-  title: Clean up stale .phase-golem result files on startup and shutdown
-  status: in_progress
-  phase: review
-  size: small
-  complexity: low
-  risk: low
-  impact: low
-  requires_human_review: false
-  created: 2026-02-12T23:00:00.000000000+00:00
-  updated: 2026-02-20T22:06:19.536259633+00:00
-  pipeline_type: feature
-  description:
-    context: Phase execution writes result JSON files to .phase-golem/ (e.g. phase_result_WRK-001_build.json). These are cleaned up after successful reads in agent.rs.
-    problem: If an agent crashes before writing or after writing but before the result is read, stale result files persist on disk indefinitely. Over many runs these accumulate and waste disk space. Worse, a stale result file from a previous run could be mistakenly read as the result of a new execution.
-    solution: On orchestrator startup, delete all .phase-golem/phase_result_*.json files. Optionally also clean up on graceful shutdown. This is safe because result files are ephemeral — they only need to exist between agent write and executor read within a single run.
-    impact: Prevents disk space accumulation and eliminates risk of reading stale results from prior runs.
-    sizing_rationale: Small/low — a glob + delete at startup in main.rs. Low impact because the practical risk is minor (stale reads are unlikely but possible).
-  phase_pool: main
-  last_phase_commit: f9052918ccdcc4a1131928b588df49ddd678d4ec
 - id: WRK-031
   title: Add validation warning when next_item_id < max(current items) on BACKLOG.yaml load
-  status: ready
+  status: in_progress
+  phase: prd
   size: small
   complexity: low
   risk: low
@@ -129,8 +110,9 @@ items:
   requires_human_review: false
   origin: WRK-027/spec
   created: 2026-02-12T23:27:39.836709312+00:00
-  updated: 2026-02-13T01:05:24.211937380+00:00
+  updated: 2026-02-20T22:06:19.600505380+00:00
   pipeline_type: feature
+  phase_pool: main
 - id: WRK-033
   title: Add human-in-the-loop commands for non-autonomous item management
   status: blocked
@@ -488,14 +470,13 @@ items:
   requires_human_review: false
   origin: inbox
   created: 2026-02-13T16:38:30.850798755+00:00
-  updated: 2026-02-13T16:38:30.850798755+00:00
-- id: WRK-076
-  title: Auto re-triage stale pre-phase items after configurable idle period
-  status: new
-  requires_human_review: false
-  origin: inbox
-  created: 2026-02-13T16:39:23.529220748+00:00
-  updated: 2026-02-13T16:39:23.529220748+00:00
+  updated: 2026-02-20T22:08:10.790020491+00:00
+  description:
+    context: '[Merged from WRK-076] Title: Auto re-triage stale pre-phase items after configurable idle period. Origin: inbox'
+    problem: ''
+    solution: ''
+    impact: ''
+    sizing_rationale: ''
 - id: WRK-077
   title: Close WRK-037 as already implemented (duplicate ID validation exists)
   status: new
