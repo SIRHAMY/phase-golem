@@ -84,7 +84,7 @@ items:
   last_phase_commit: facc75fe7678f3511a8e8edb2ac110357e82eaae
 - id: WRK-021
   title: Add test coverage for shutdown signal kill_process_group path
-  status: in_progress
+  status: blocked
   phase: prd
   size: small
   complexity: low
@@ -92,20 +92,24 @@ items:
   impact: low
   requires_human_review: false
   origin: WRK-001/review
+  blocked_from_status: in_progress
+  blocked_reason: 'WRK-021 and WRK-018 share the exact same title and scope: ''Add test coverage for shutdown signal kill_process_group path''. WRK-018 has a complete PRD (with all open questions resolved), DESIGN, TECH_RESEARCH, and SPEC documents in its change folder. WRK-018 has progressed through build (follow-up HAMY-131 originated from WRK-018/build). No PRD is needed for WRK-021 because the work is already done under WRK-018.'
   created: 2026-02-12T20:12:47.653572849+00:00
-  updated: 2026-02-20T20:37:32.243269451+00:00
+  updated: 2026-02-20T20:39:11.586791112+00:00
   pipeline_type: feature
   phase_pool: main
+  last_phase_commit: 579d0b22a25c127d6db3e65acf7783e569ab8fbc
 - id: WRK-024
   title: Investigate using immutable data structures for backlog snapshots to avoid cloning
-  status: ready
+  status: in_progress
+  phase: prd
   size: small
   complexity: low
   risk: low
   impact: low
   requires_human_review: false
   created: 2026-02-12T23:00:00.000000000+00:00
-  updated: 2026-02-13T01:08:59.218976217+00:00
+  updated: 2026-02-20T20:39:11.605272507+00:00
   pipeline_type: feature
   description:
     context: The coordinator provides backlog snapshots to the scheduler via handle_get_snapshot(), which does a full .clone() of all backlog items. This happens 3-4 times per scheduler loop iteration.
@@ -113,6 +117,7 @@ items:
     solution: Investigate using Arc-wrapped immutable data structures (e.g. im-rs crate, or Arc<Vec<BacklogItem>> with copy-on-write semantics) so snapshots can be shared cheaply without deep cloning. Alternatively, consider whether the scheduler can borrow the data instead of owning it.
     impact: Reduces memory allocation churn proportional to backlog size, improving performance for large backlogs.
     sizing_rationale: Medium size and complexity because it touches the coordinator-scheduler boundary and may require rethinking ownership patterns. Low risk since it's an internal optimization with no behavioral change. Investigation may conclude it's not worth the added complexity.
+  phase_pool: main
   last_phase_commit: a8ccf091769f7578f3edffd893436e6d1d83aea1
 - id: WRK-025
   title: Clean up stale .phase-golem result files on startup and shutdown
@@ -460,11 +465,16 @@ items:
     sizing_rationale: ''
 - id: WRK-065
   title: Extract shared atomic_write_yaml helper to deduplicate temp-file pattern across save/migrate_v1_to_v2/migrate_v2_to_v3
-  status: new
+  status: ready
+  size: small
+  complexity: low
+  risk: low
+  impact: low
   requires_human_review: false
   origin: WRK-028/build
   created: 2026-02-13T07:12:22.373899894+00:00
-  updated: 2026-02-20T20:38:09.924732980+00:00
+  updated: 2026-02-20T20:38:09.973388360+00:00
+  pipeline_type: feature
   description:
     context: '[Merged from WRK-071] Title: Extract shared atomic_write_yaml helper. Origin: WRK-028/build'
     problem: ''
