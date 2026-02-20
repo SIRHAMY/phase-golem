@@ -138,11 +138,19 @@ load() ──► parse YAML ──► migrate if needed ──► warn_if_next_i
 
 ### Critical
 
+(none)
+
 ### High
+
+(none)
 
 ### Medium
 
+(none)
+
 ### Low
+
+(none)
 
 ## Design Details
 
