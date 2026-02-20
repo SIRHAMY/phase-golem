@@ -34,18 +34,20 @@ items:
   last_phase_commit: 8957cea715e8f9607e0b6112ab5ef80c00756b1c
 - id: WRK-012
   title: Replace timing-based shutdown test with event-based synchronization
-  status: in_progress
+  status: blocked
   phase: prd
   size: small
   complexity: low
   risk: low
   impact: low
   requires_human_review: false
+  blocked_from_status: in_progress
+  blocked_reason: 'Phase prd failed after 3 attempts. Last error: Agent failed (exit code Some(1)): Result file not found: ./.phase-golem/phase_result_WRK-012_prd.json'
   created: 2026-02-12T16:23:33.721480124+00:00
-  updated: 2026-02-20T02:24:00.527185989+00:00
+  updated: 2026-02-20T02:25:14.662036593+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: f48f39ba1a645ab269df3fbf3b717a3edf45e359
+  last_phase_commit: fe2d97f0b873bfdffe9874c5157a153d5067c0a4
 - id: WRK-014
   title: Inline trivial run_skills_sequentially passthrough function
   status: ready
@@ -365,7 +367,7 @@ items:
   last_phase_commit: c91480fb37f78633eb973a1bcd0de9f18251e3cc
 - id: WRK-050
   title: Improve phase transition terminal output
-  status: in_progress
+  status: blocked
   phase: prd
   size: small
   complexity: low
@@ -373,8 +375,10 @@ items:
   impact: medium
   requires_human_review: false
   origin: inbox
+  blocked_from_status: in_progress
+  blocked_reason: 'Phase prd failed after 3 attempts. Last error: Agent failed (exit code Some(1)): Result file not found: ./.phase-golem/phase_result_WRK-050_prd.json'
   created: 2026-02-13T03:14:18.783092403+00:00
-  updated: 2026-02-13T07:41:37.972337085+00:00
+  updated: 2026-02-20T02:25:16.236403059+00:00
   pipeline_type: feature
   description:
     context: 'Two improvements to orchestrator terminal output during phase transitions: (1) Print a one-liner with the item title when starting work on a phase, so it''s immediately clear what item is being processed. (2) Add a bold visual separator (e.g., a line of ''='' characters) between phases so it''s obvious in the terminal where one phase ends and the next begins.'
@@ -383,6 +387,7 @@ items:
     impact: ''
     sizing_rationale: ''
   phase_pool: main
+  last_phase_commit: fe2d97f0b873bfdffe9874c5157a153d5067c0a4
 - id: WRK-051
   title: Create BACKLOG_INBOX.yaml during phase-golem init
   status: ready
