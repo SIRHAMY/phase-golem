@@ -539,6 +539,7 @@ async fn complete_phase_destructive_commits_immediately() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     handle
@@ -596,6 +597,7 @@ async fn complete_phase_non_destructive_stages_only() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     handle
@@ -663,6 +665,7 @@ async fn batch_commit_commits_staged_phases() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let result3 = PhaseResult {
@@ -677,6 +680,7 @@ async fn batch_commit_commits_staged_phases() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     handle

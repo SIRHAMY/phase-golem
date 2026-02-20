@@ -256,6 +256,8 @@ pub struct PhaseResult {
     pub commit_summary: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub duplicates: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<StructuredDescription>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -270,6 +272,16 @@ pub struct StructuredDescription {
     pub impact: String,
     #[serde(default)]
     pub sizing_rationale: String,
+}
+
+impl StructuredDescription {
+    pub fn is_empty(&self) -> bool {
+        self.context.is_empty()
+            && self.problem.is_empty()
+            && self.solution.is_empty()
+            && self.impact.is_empty()
+            && self.sizing_rationale.is_empty()
+    }
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]

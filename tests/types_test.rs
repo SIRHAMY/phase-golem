@@ -249,6 +249,7 @@ fn json_round_trip_phase_result_full() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let json = serde_json::to_string_pretty(&result).unwrap();
@@ -270,6 +271,7 @@ fn json_round_trip_phase_result_minimal() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let json = serde_json::to_string(&result).unwrap();
@@ -291,6 +293,7 @@ fn json_round_trip_phase_result_blocked() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let json = serde_json::to_string(&result).unwrap();
@@ -312,6 +315,7 @@ fn json_round_trip_phase_result_subphase_complete() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let json = serde_json::to_string(&result).unwrap();
@@ -508,6 +512,7 @@ fn yaml_round_trip_phase_execution_result_variants() {
             pipeline_type: None,
             commit_summary: None,
             duplicates: Vec::new(),
+            description: None,
         }),
         PhaseExecutionResult::SubphaseComplete(PhaseResult {
             item_id: "WRK-001".to_string(),
@@ -521,6 +526,7 @@ fn yaml_round_trip_phase_execution_result_variants() {
             pipeline_type: None,
             commit_summary: None,
             duplicates: Vec::new(),
+            description: None,
         }),
         PhaseExecutionResult::Failed("Something went wrong".to_string()),
         PhaseExecutionResult::Blocked("Needs human review".to_string()),
@@ -638,6 +644,7 @@ fn json_round_trip_phase_result_with_new_fields() {
         pipeline_type: Some("feature".to_string()),
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let json = serde_json::to_string_pretty(&result).unwrap();
@@ -659,6 +666,7 @@ fn json_round_trip_phase_result_without_new_fields() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let json = serde_json::to_string(&result).unwrap();
@@ -668,6 +676,129 @@ fn json_round_trip_phase_result_without_new_fields() {
     // New optional fields should not appear when None
     assert!(!json.contains("based_on_commit"));
     assert!(!json.contains("pipeline_type"));
+    assert!(!json.contains("description"));
+}
+
+// --- StructuredDescription::is_empty() ---
+
+#[test]
+fn structured_description_is_empty_for_default() {
+    let desc = StructuredDescription::default();
+    assert!(desc.is_empty());
+}
+
+#[test]
+fn structured_description_is_empty_false_when_context_set() {
+    let desc = StructuredDescription {
+        context: "some context".to_string(),
+        ..Default::default()
+    };
+    assert!(!desc.is_empty());
+}
+
+#[test]
+fn structured_description_is_empty_false_when_problem_set() {
+    let desc = StructuredDescription {
+        problem: "some problem".to_string(),
+        ..Default::default()
+    };
+    assert!(!desc.is_empty());
+}
+
+#[test]
+fn structured_description_is_empty_false_when_solution_set() {
+    let desc = StructuredDescription {
+        solution: "some solution".to_string(),
+        ..Default::default()
+    };
+    assert!(!desc.is_empty());
+}
+
+#[test]
+fn structured_description_is_empty_false_when_impact_set() {
+    let desc = StructuredDescription {
+        impact: "some impact".to_string(),
+        ..Default::default()
+    };
+    assert!(!desc.is_empty());
+}
+
+#[test]
+fn structured_description_is_empty_false_when_sizing_rationale_set() {
+    let desc = StructuredDescription {
+        sizing_rationale: "some rationale".to_string(),
+        ..Default::default()
+    };
+    assert!(!desc.is_empty());
+}
+
+// --- PhaseResult description serialization ---
+
+#[test]
+fn phase_result_with_description_round_trip() {
+    let result = PhaseResult {
+        item_id: "WRK-001".to_string(),
+        phase: "triage".to_string(),
+        result: ResultCode::PhaseComplete,
+        summary: "Triaged".to_string(),
+        context: None,
+        updated_assessments: None,
+        follow_ups: vec![],
+        based_on_commit: None,
+        pipeline_type: None,
+        commit_summary: None,
+        duplicates: Vec::new(),
+        description: Some(StructuredDescription {
+            context: "Background info".to_string(),
+            problem: "The problem".to_string(),
+            solution: "The solution".to_string(),
+            impact: "Expected benefit".to_string(),
+            sizing_rationale: "Small because...".to_string(),
+        }),
+    };
+
+    let json = serde_json::to_string_pretty(&result).unwrap();
+    let deserialized: PhaseResult = serde_json::from_str(&json).unwrap();
+    assert_eq!(result, deserialized);
+}
+
+#[test]
+fn phase_result_json_without_description_deserializes_to_none() {
+    let json = r#"{
+        "item_id": "WRK-001",
+        "phase": "triage",
+        "result": "phase_complete",
+        "summary": "Triaged"
+    }"#;
+    let result: PhaseResult = serde_json::from_str(json).unwrap();
+    assert_eq!(result.description, None);
+}
+
+#[test]
+fn phase_result_json_with_null_description_deserializes_to_none() {
+    let json = r#"{
+        "item_id": "WRK-001",
+        "phase": "triage",
+        "result": "phase_complete",
+        "summary": "Triaged",
+        "description": null
+    }"#;
+    let result: PhaseResult = serde_json::from_str(json).unwrap();
+    assert_eq!(result.description, None);
+}
+
+#[test]
+fn phase_result_json_with_empty_description_object() {
+    let json = r#"{
+        "item_id": "WRK-001",
+        "phase": "triage",
+        "result": "phase_complete",
+        "summary": "Triaged",
+        "description": {}
+    }"#;
+    let result: PhaseResult = serde_json::from_str(json).unwrap();
+    assert_eq!(result.description, Some(StructuredDescription::default()));
+    assert!(result.description.as_ref().unwrap().is_empty());
 }
 
 // --- FollowUp flexible deserialization ---

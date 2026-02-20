@@ -111,6 +111,7 @@ fn phase_complete_result(item_id: &str, phase: &str) -> PhaseResult {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     }
 }
 
@@ -127,6 +128,7 @@ fn failed_result(item_id: &str, phase: &str) -> PhaseResult {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     }
 }
 
@@ -143,6 +145,7 @@ fn blocked_result(item_id: &str, phase: &str) -> PhaseResult {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     }
 }
 
@@ -159,6 +162,7 @@ fn subphase_complete_result(item_id: &str, phase: &str) -> PhaseResult {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     }
 }
 
@@ -180,6 +184,7 @@ fn triage_result_with_assessments(item_id: &str) -> PhaseResult {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     }
 }
 

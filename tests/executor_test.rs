@@ -52,6 +52,7 @@ fn make_phase_result(item_id: &str, phase: &str, result: ResultCode) -> PhaseRes
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     }
 }
 
@@ -650,6 +651,7 @@ async fn execute_phase_success_returns_success() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let mock = MockAgentRunner::new(vec![Ok(phase_result)]);
@@ -710,6 +712,7 @@ async fn execute_phase_failure_with_retry_returns_failed_after_exhaustion() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
     let fail_result2 = PhaseResult {
         item_id: "WRK-001".to_string(),
@@ -723,6 +726,7 @@ async fn execute_phase_failure_with_retry_returns_failed_after_exhaustion() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let mock = MockAgentRunner::new(vec![Ok(fail_result1), Ok(fail_result2)]);
@@ -779,6 +783,7 @@ async fn execute_phase_subphase_complete_returns_immediately() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let mock = MockAgentRunner::new(vec![Ok(subphase_result)]);
@@ -875,6 +880,7 @@ async fn execute_phase_blocked_result_returns_blocked() {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     };
 
     let mock = MockAgentRunner::new(vec![Ok(blocked_result)]);

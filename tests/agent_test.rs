@@ -23,6 +23,7 @@ fn valid_result_json() -> String {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     })
     .unwrap()
 }
@@ -40,6 +41,7 @@ fn make_result(result_code: ResultCode, summary: &str) -> PhaseResult {
         pipeline_type: None,
         commit_summary: None,
         duplicates: Vec::new(),
+        description: None,
     }
 }
 

@@ -401,7 +401,7 @@ items:
 - id: WRK-057
   title: Add triage prompt schema support for producing structured descriptions via SetDescription
   status: in_progress
-  phase: spec
+  phase: build
   size: small
   complexity: low
   risk: low
@@ -409,7 +409,7 @@ items:
   requires_human_review: false
   origin: WRK-028/prd
   created: 2026-02-13T05:36:21.766249174+00:00
-  updated: 2026-02-20T19:20:25.389049437+00:00
+  updated: 2026-02-20T19:27:49.914917709+00:00
   pipeline_type: feature
   description:
     context: |-
@@ -422,7 +422,7 @@ items:
     impact: ''
     sizing_rationale: ''
   phase_pool: main
-  last_phase_commit: 46bcb4d33d7ae1a9926b5841a77649b39e733f2e
+  last_phase_commit: 62fbcc2baa77c2c3d49346a4d02753dea0109033
 - id: WRK-058
   title: Extract previous_summaries threshold multiplier to named constant
   status: ready
