@@ -51,17 +51,17 @@ items:
 - id: WRK-015
   title: Gate preflight Phase 3 item validation on Phase 1 structural validation passing
   status: in_progress
-  phase: build
+  phase: review
   size: small
   complexity: low
   risk: low
   impact: low
   requires_human_review: false
   created: 2026-02-12T16:23:33.732040439+00:00
-  updated: 2026-02-20T03:18:41.953898692+00:00
+  updated: 2026-02-20T03:20:01.173535513+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: e2c6e31e8a0af7a87ae710ecad5f3e7f20373a7d
+  last_phase_commit: 6bbd5ebe75dea200bd6e10eb7dd44e1dc69609f8
 - id: WRK-017
   title: Wrap kill_all_children in spawn_blocking for async call sites
   status: ready

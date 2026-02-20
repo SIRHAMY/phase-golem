@@ -116,7 +116,7 @@ The snapshot variable must be placed between Phase 1's `errors.extend(validate_s
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
-| 1 | complete | pending | Guard clause + snapshot variable + 3 tests. Code review fixed vacuous test assertions. |
+| 1 | complete | 6bbd5eb | Guard clause + snapshot variable + 3 tests. Code review fixed vacuous test assertions. |
 
 ## Followups Summary
 
