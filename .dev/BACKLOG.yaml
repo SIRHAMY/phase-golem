@@ -102,7 +102,7 @@ items:
 - id: WRK-031
   title: Add validation warning when next_item_id < max(current items) on BACKLOG.yaml load
   status: in_progress
-  phase: prd
+  phase: tech-research
   size: small
   complexity: low
   risk: low
@@ -110,10 +110,10 @@ items:
   requires_human_review: false
   origin: WRK-027/spec
   created: 2026-02-12T23:27:39.836709312+00:00
-  updated: 2026-02-20T22:12:32.165517579+00:00
+  updated: 2026-02-20T22:16:54.347500755+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: 729e7849ead484291422f0020e7a67a5b422a543
+  last_phase_commit: f5377ad0c33d564594f4b0d6d7cc4a34eb5ed616
 - id: WRK-033
   title: Add human-in-the-loop commands for non-autonomous item management
   status: blocked
