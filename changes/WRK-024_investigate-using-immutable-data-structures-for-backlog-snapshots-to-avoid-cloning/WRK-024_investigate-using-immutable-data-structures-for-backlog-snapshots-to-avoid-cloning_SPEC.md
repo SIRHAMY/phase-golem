@@ -216,6 +216,8 @@ Lifetime safety: The `&snapshot` borrow in Type A handlers does not cross any pr
 
 ### Low
 
+- Minor documentation inaccuracy: SPEC Phase 2 verification states "Total `get_snapshot()` calls in `scheduler.rs` reduced from 12 to 8" but the actual pre-implementation count was 13 (not 12). The post-implementation count of 8 is correct. Net reduction is 5 calls, not 4.
+
 ## Design Details
 
 ### Architecture Details
