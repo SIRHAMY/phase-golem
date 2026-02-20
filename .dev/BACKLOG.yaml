@@ -418,7 +418,7 @@ items:
 - id: WRK-061
   title: Add inbox description rendering to triage prompt
   status: in_progress
-  phase: spec
+  phase: build
   size: small
   complexity: low
   risk: low
@@ -426,7 +426,7 @@ items:
   requires_human_review: false
   origin: WRK-028/spec
   created: 2026-02-13T06:34:25.816435218+00:00
-  updated: 2026-02-20T20:30:03.234656370+00:00
+  updated: 2026-02-20T20:34:14.680417552+00:00
   pipeline_type: feature
   description:
     context: |-
@@ -437,7 +437,7 @@ items:
     impact: ''
     sizing_rationale: ''
   phase_pool: main
-  last_phase_commit: 6bd79bf2d2ce006bd647a391c1ea4a76b6462742
+  last_phase_commit: 1109518c7bb54c5c34aee31394b5b83f832d53a5
 - id: WRK-063
   title: Display impl for StructuredDescription
   status: ready
@@ -1004,4 +1004,13 @@ items:
   origin: WRK-018/build
   created: 2026-02-20T20:06:49.995379575+00:00
   updated: 2026-02-20T20:06:49.995379575+00:00
-next_item_id: 131
+- id: HAMY-132
+  title: Integration test verifying ingested description flows through build_preamble() to triage prompt output
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-061/build
+  created: 2026-02-20T20:34:14.697283110+00:00
+  updated: 2026-02-20T20:34:14.697283110+00:00
+next_item_id: 132

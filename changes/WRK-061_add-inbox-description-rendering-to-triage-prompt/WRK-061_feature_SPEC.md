@@ -42,7 +42,7 @@ Add a `.filter().map()` chain in `ingest_inbox_items()` to convert `InboxItem.de
 
 > Add description field mapping in `ingest_inbox_items()` and update/add tests
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -60,8 +60,8 @@ Add a `.filter().map()` chain in `ingest_inbox_items()` to convert `InboxItem.de
 
 **Tasks:**
 
-- [ ] Add `StructuredDescription` to the types import in `src/backlog.rs` (the `use crate::types::{...}` block near the top of the file)
-- [ ] Add `description` field mapping to the `BacklogItem` struct literal in `ingest_inbox_items()`. Note: both `.filter()` and `.map()` call `.trim()` intentionally — they are independent operations and the cost on short strings is negligible.
+- [x] Add `StructuredDescription` to the types import in `src/backlog.rs` (the `use crate::types::{...}` block near the top of the file)
+- [x] Add `description` field mapping to the `BacklogItem` struct literal in `ingest_inbox_items()`. Note: both `.filter()` and `.map()` call `.trim()` intentionally — they are independent operations and the cost on short strings is negligible.
   ```rust
   description: inbox_item.description
       .as_ref()
@@ -71,8 +71,8 @@ Add a `.filter().map()` chain in `ingest_inbox_items()` to convert `InboxItem.de
           ..Default::default()
       }),
   ```
-- [ ] Add `StructuredDescription` to the types import in `tests/backlog_test.rs` (the `use phase_golem::types::{...}` block)
-- [ ] Update assertion in `ingest_inbox_items_creates_backlog_items_with_correct_fields` (`tests/backlog_test.rs`): replace `assert_eq!(item.description, None)` with:
+- [x] Add `StructuredDescription` to the types import in `tests/backlog_test.rs` (the `use phase_golem::types::{...}` block)
+- [x] Update assertion in `ingest_inbox_items_creates_backlog_items_with_correct_fields` (`tests/backlog_test.rs`): replace `assert_eq!(item.description, None)` with:
   ```rust
   let desc = item.description.as_ref().expect("description should be Some");
   assert_eq!(desc.context, "Details here");
@@ -81,7 +81,7 @@ Add a `.filter().map()` chain in `ingest_inbox_items()` to convert `InboxItem.de
   assert!(desc.impact.is_empty());
   assert!(desc.sizing_rationale.is_empty());
   ```
-- [ ] Add new test `ingest_inbox_items_maps_description_edge_cases` covering four cases in a single test function — each case creates an `InboxItem` with a different description value and verifies the ingested result:
+- [x] Add new test `ingest_inbox_items_maps_description_edge_cases` covering four cases in a single test function — each case creates an `InboxItem` with a different description value and verifies the ingested result:
   - (a) `description: None` → `item.description` is `None` (regression: items without descriptions still work)
   - (b) `description: Some("")` → `item.description` is `None`
   - (c) `description: Some("   ")` → `item.description` is `None`
@@ -89,11 +89,11 @@ Add a `.filter().map()` chain in `ingest_inbox_items()` to convert `InboxItem.de
 
 **Verification:**
 
-- [ ] `cargo build` succeeds without errors or warnings
-- [ ] `cargo test ingest_inbox_items` — all ingestion tests pass
-- [ ] `cargo test` — full test suite passes (no regressions)
-- [ ] Updated test confirms `description: Some("Details here")` is now preserved as `StructuredDescription { context: "Details here", .. }` (previously asserted `None`)
-- [ ] Edge-case test verifies `None`, `""`, and `"   "` all produce `None`, and normal text maps correctly
+- [x] `cargo build` succeeds without errors or warnings
+- [x] `cargo test ingest_inbox_items` — all ingestion tests pass
+- [x] `cargo test` — full test suite passes (no regressions)
+- [x] Updated test confirms `description: Some("Details here")` is now preserved as `StructuredDescription { context: "Details here", .. }` (previously asserted `None`)
+- [x] Edge-case test verifies `None`, `""`, and `"   "` all produce `None`, and normal text maps correctly
 
 **Commit:** `[WRK-061][P1] Feature: Map inbox description to BacklogItem during ingestion`
 
@@ -103,20 +103,25 @@ The existing test at `backlog_test.rs:1030` currently passes `description: Some(
 
 **Followups:**
 
+**Notes (deviations from SPEC):**
+- Removed `StructuredDescription` import from `tests/backlog_test.rs` — the SPEC called for adding it, but the type is accessed through field access on inferred types, so the explicit import is unused and causes a compiler warning.
+- Updated `tests/coordinator_test.rs:1442` (`ingest_inbox_with_valid_items`) — this test also asserted `description == None` for an inbox item with `description: From inbox`. Not in the SPEC but required for the test suite to pass.
+
 ---
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met
-- [ ] Tests pass
-- [ ] No regressions introduced
-- [ ] Code reviewed (if applicable)
+- [x] All phases complete
+- [x] All PRD success criteria met
+- [x] Tests pass
+- [x] No regressions introduced
+- [x] Code reviewed (if applicable)
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| 1 | complete | `[WRK-061][P1] Feature: Map inbox description to BacklogItem during ingestion` | Also updated coordinator_test.rs assertion that was affected by the behavior change |
 
 ## Followups Summary
 

@@ -8,7 +8,7 @@ use crate::config::load_config;
 use crate::log_warn;
 use crate::types::{
     BacklogFile, BacklogItem, DimensionLevel, FollowUp, InboxItem, ItemStatus, SizeLevel,
-    UpdatedAssessments,
+    StructuredDescription, UpdatedAssessments,
 };
 
 const EXPECTED_SCHEMA_VERSION: u32 = 3;
@@ -324,6 +324,13 @@ pub fn ingest_inbox_items(
             let item = BacklogItem {
                 id,
                 title: inbox_item.title.clone(),
+                description: inbox_item.description
+                    .as_ref()
+                    .filter(|d| !d.trim().is_empty())
+                    .map(|d| StructuredDescription {
+                        context: d.trim().to_string(),
+                        ..Default::default()
+                    }),
                 status: ItemStatus::New,
                 size: inbox_item.size.clone(),
                 risk: inbox_item.risk.clone(),

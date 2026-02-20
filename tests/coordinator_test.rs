@@ -1439,7 +1439,12 @@ async fn ingest_inbox_with_valid_items() {
     assert_eq!(item1.title, "New inbox item");
     assert_eq!(item1.status, ItemStatus::New);
     assert_eq!(item1.origin, Some("inbox".to_string()));
-    assert_eq!(item1.description, None);
+    let desc = item1.description.as_ref().expect("description should be Some");
+    assert_eq!(desc.context, "From inbox");
+    assert!(desc.problem.is_empty());
+    assert!(desc.solution.is_empty());
+    assert!(desc.impact.is_empty());
+    assert!(desc.sizing_rationale.is_empty());
     assert_eq!(item1.size, Some(SizeLevel::Small));
 
     let item2 = &snapshot.items[2];

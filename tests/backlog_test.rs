@@ -1048,7 +1048,12 @@ fn ingest_inbox_items_creates_backlog_items_with_correct_fields() {
     assert_eq!(item.title, "New inbox feature");
     assert_eq!(item.status, ItemStatus::New);
     assert_eq!(item.origin, Some("inbox".to_string()));
-    assert_eq!(item.description, None);
+    let desc = item.description.as_ref().expect("description should be Some");
+    assert_eq!(desc.context, "Details here");
+    assert!(desc.problem.is_empty());
+    assert!(desc.solution.is_empty());
+    assert!(desc.impact.is_empty());
+    assert!(desc.sizing_rationale.is_empty());
     assert_eq!(item.size, Some(SizeLevel::Medium));
     assert_eq!(item.risk, Some(DimensionLevel::Low));
     assert_eq!(item.impact, Some(DimensionLevel::High));
@@ -1158,6 +1163,70 @@ fn ingest_inbox_items_empty_slice_returns_empty_vec() {
     assert!(created.is_empty());
     assert_eq!(backlog.items.len(), original_items_len);
     assert_eq!(backlog.next_item_id, original_next_id);
+}
+
+#[test]
+fn ingest_inbox_items_maps_description_edge_cases() {
+    // (a) description: None → item.description is None
+    let mut backlog_a = common::empty_backlog();
+    let items_a = vec![InboxItem {
+        title: "No desc".to_string(),
+        description: None,
+        size: None,
+        risk: None,
+        impact: None,
+        pipeline_type: None,
+        dependencies: vec![],
+    }];
+    let created_a = backlog::ingest_inbox_items(&mut backlog_a, &items_a, "WRK");
+    assert!(created_a[0].description.is_none(), "None description should remain None");
+
+    // (b) description: Some("") → item.description is None
+    let mut backlog_b = common::empty_backlog();
+    let items_b = vec![InboxItem {
+        title: "Empty desc".to_string(),
+        description: Some("".to_string()),
+        size: None,
+        risk: None,
+        impact: None,
+        pipeline_type: None,
+        dependencies: vec![],
+    }];
+    let created_b = backlog::ingest_inbox_items(&mut backlog_b, &items_b, "WRK");
+    assert!(created_b[0].description.is_none(), "Empty string description should be None");
+
+    // (c) description: Some("   ") → item.description is None
+    let mut backlog_c = common::empty_backlog();
+    let items_c = vec![InboxItem {
+        title: "Whitespace desc".to_string(),
+        description: Some("   ".to_string()),
+        size: None,
+        risk: None,
+        impact: None,
+        pipeline_type: None,
+        dependencies: vec![],
+    }];
+    let created_c = backlog::ingest_inbox_items(&mut backlog_c, &items_c, "WRK");
+    assert!(created_c[0].description.is_none(), "Whitespace-only description should be None");
+
+    // (d) description: Some("context text") → maps correctly
+    let mut backlog_d = common::empty_backlog();
+    let items_d = vec![InboxItem {
+        title: "With desc".to_string(),
+        description: Some("context text".to_string()),
+        size: None,
+        risk: None,
+        impact: None,
+        pipeline_type: None,
+        dependencies: vec![],
+    }];
+    let created_d = backlog::ingest_inbox_items(&mut backlog_d, &items_d, "WRK");
+    let desc = created_d[0].description.as_ref().expect("description should be Some");
+    assert_eq!(desc.context, "context text");
+    assert!(desc.problem.is_empty());
+    assert!(desc.solution.is_empty());
+    assert!(desc.impact.is_empty());
+    assert!(desc.sizing_rationale.is_empty());
 }
 
 // =============================================================================
