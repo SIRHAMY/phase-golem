@@ -59,9 +59,10 @@ items:
   requires_human_review: false
   origin: WRK-001/build
   created: 2026-02-12T20:10:57.116194714+00:00
-  updated: 2026-02-20T03:20:01.226736160+00:00
+  updated: 2026-02-20T03:25:39.939670825+00:00
   pipeline_type: feature
   phase_pool: main
+  last_phase_commit: 0633fc0b1cc960a9ba6aaab045122e135e169274
 - id: WRK-018
   title: Add test coverage for shutdown signal kill_process_group path
   status: ready
@@ -414,13 +415,16 @@ items:
   pipeline_type: feature
 - id: WRK-054
   title: Add --auto-advance flag for multi-target runs
-  status: new
+  status: ready
   size: small
+  complexity: low
   risk: low
+  impact: medium
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-13T05:28:40.194514495+00:00
+  updated: 2026-02-20T03:21:07.050175516+00:00
+  pipeline_type: feature
 - id: WRK-055
   title: Support multiple --only filters with AND logic
   status: new
@@ -971,4 +975,13 @@ items:
   origin: WRK-015/build
   created: 2026-02-20T03:18:41.968190903+00:00
   updated: 2026-02-20T03:18:41.968190903+00:00
-next_item_id: 117
+- id: HAMY-118
+  title: Close WRK-020 as duplicate of WRK-017
+  status: new
+  size: small
+  risk: low
+  requires_human_review: false
+  origin: WRK-017/prd
+  created: 2026-02-20T03:25:39.954556299+00:00
+  updated: 2026-02-20T03:25:39.954556299+00:00
+next_item_id: 118
