@@ -51,7 +51,7 @@ items:
 - id: WRK-017
   title: Wrap kill_all_children in spawn_blocking for async call sites
   status: in_progress
-  phase: design
+  phase: spec
   size: small
   complexity: low
   risk: low
@@ -59,10 +59,10 @@ items:
   requires_human_review: false
   origin: WRK-001/build
   created: 2026-02-12T20:10:57.116194714+00:00
-  updated: 2026-02-20T03:34:44.104393072+00:00
+  updated: 2026-02-20T03:40:07.171225843+00:00
   pipeline_type: feature
   phase_pool: main
-  last_phase_commit: d17a1d8aa0753bbb22af256c63b7eabbd6f3d675
+  last_phase_commit: 3ef5e52bc6e8b0ae367a8880f718fdaf4eb91057
 - id: WRK-018
   title: Add test coverage for shutdown signal kill_process_group path
   status: ready
