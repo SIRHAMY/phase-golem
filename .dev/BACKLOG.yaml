@@ -398,24 +398,10 @@ items:
   created: 2026-02-13T04:19:23.747896981+00:00
   updated: 2026-02-20T02:52:57.592293884+00:00
   pipeline_type: feature
-- id: WRK-056
-  title: Support comma-separated OR values within --only filter
-  status: in_progress
-  phase: review
-  size: small
-  complexity: low
-  risk: low
-  impact: medium
-  requires_human_review: false
-  origin: WRK-030/review
-  created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T18:53:52.798810670+00:00
-  pipeline_type: feature
-  phase_pool: main
-  last_phase_commit: 838041c49eb82a3509fca712cddee9ba04e9321b
 - id: WRK-057
   title: Add triage prompt schema support for producing structured descriptions via SetDescription
-  status: ready
+  status: in_progress
+  phase: prd
   size: small
   complexity: low
   risk: low
@@ -423,7 +409,7 @@ items:
   requires_human_review: false
   origin: WRK-028/prd
   created: 2026-02-13T05:36:21.766249174+00:00
-  updated: 2026-02-20T15:59:31.963658577+00:00
+  updated: 2026-02-20T18:53:52.855628771+00:00
   pipeline_type: feature
   description:
     context: |-
@@ -435,6 +421,7 @@ items:
     solution: ''
     impact: ''
     sizing_rationale: ''
+  phase_pool: main
 - id: WRK-058
   title: Extract previous_summaries threshold multiplier to named constant
   status: new
