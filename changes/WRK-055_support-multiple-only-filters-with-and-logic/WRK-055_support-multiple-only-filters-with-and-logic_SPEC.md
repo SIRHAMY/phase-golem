@@ -50,7 +50,7 @@ The change is split into two phases: Phase 1 adds new functions and their tests 
 
 > Add Hash derives, new filter functions, and their unit tests — all additive, no breaking changes
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -59,7 +59,7 @@ The change is split into two phases: Phase 1 adds new functions and their tests 
 **Files:**
 
 - `src/types.rs` — modify — Add `Hash` to derives on `ItemStatus`, `SizeLevel`, `DimensionLevel`
-- `src/filter.rs` — modify — Add `Hash` derives to `FilterField`, `FilterValue`, `FilterCriterion`; add `validate_filter_criteria()`, `apply_filters()`, `format_filter_criteria()`; add `use std::collections::HashSet`
+- `src/filter.rs` — modify — Add `Hash` derives to `FilterField`, `FilterValue`, `FilterCriterion`; add `validate_filter_criteria()`, `apply_filters()`, `format_filter_criteria()`; add `use std::collections::HashSet`; add `Display` impl for `FilterField`
 - `tests/filter_test.rs` — modify — Add new test functions for `validate_filter_criteria()`, `apply_filters()` multi-criteria, and `format_filter_criteria()`
 
 **Patterns:**
@@ -68,23 +68,23 @@ The change is split into two phases: Phase 1 adds new functions and their tests 
 
 **Tasks:**
 
-- [ ] Add `Hash` to `#[derive(...)]` on `ItemStatus` (`src/types.rs`), `SizeLevel` (`src/types.rs`), `DimensionLevel` (`src/types.rs`)
-- [ ] Add `Hash` to `#[derive(...)]` on `FilterField`, `FilterValue`, `FilterCriterion` (`src/filter.rs`)
-- [ ] Add `use std::collections::HashSet;` to `src/filter.rs`
-- [ ] Implement `validate_filter_criteria(criteria: &[FilterCriterion]) -> Result<(), String>`:
+- [x] Add `Hash` to `#[derive(...)]` on `ItemStatus` (`src/types.rs`), `SizeLevel` (`src/types.rs`), `DimensionLevel` (`src/types.rs`)
+- [x] Add `Hash` to `#[derive(...)]` on `FilterField`, `FilterValue`, `FilterCriterion` (`src/filter.rs`)
+- [x] Add `use std::collections::HashSet;` to `src/filter.rs`
+- [x] Implement `validate_filter_criteria(criteria: &[FilterCriterion]) -> Result<(), String>`:
   - Use `HashSet<&FilterField>` for scalar field uniqueness (all fields except `Tag`)
   - Use `HashSet<&FilterCriterion>` for identical tag-value pair detection
   - No-op returning `Ok(())` on empty slice
   - Error message for scalar duplicates includes WRK-056 hint: `"Field '{field}' specified multiple times. For OR logic within a field, use comma-separated values: --only {field}=value1,value2"`
   - Error message for identical tag pairs uses `Display` format: `"Duplicate filter: tag=backend specified multiple times"` (i.e., `criterion.to_string()` produces the `tag=value` portion)
-- [ ] Implement `apply_filters(criteria: &[FilterCriterion], backlog: &BacklogFile) -> BacklogFile`:
+- [x] Implement `apply_filters(criteria: &[FilterCriterion], backlog: &BacklogFile) -> BacklogFile`:
   - Filter items where `criteria.iter().all(|c| matches_item(c, item))`
   - Same structural shape as existing `apply_filter()` but composing multiple criteria
-- [ ] Implement `format_filter_criteria(criteria: &[FilterCriterion]) -> String`:
+- [x] Implement `format_filter_criteria(criteria: &[FilterCriterion]) -> String`:
   - Join criteria `Display` strings with ` AND ` separator
   - Single criterion: no separator (just `criterion.to_string()`)
   - Panics or empty string on empty slice is acceptable since callers guard with `is_empty()`, but prefer returning empty string for robustness
-- [ ] Write tests for `validate_filter_criteria()`:
+- [x] Write tests for `validate_filter_criteria()`:
   - Empty slice returns `Ok(())`
   - Single criterion returns `Ok(())`
   - Two different scalar fields returns `Ok(())` (e.g., `impact=high` + `size=small`)
@@ -94,14 +94,14 @@ The change is split into two phases: Phase 1 adds new functions and their tests 
   - Identical tag values returns `Err` (e.g., `tag=backend` + `tag=backend`)
   - Mixed scalar and tag criteria returns `Ok(())`
   - Non-adjacent duplicate scalar fields detected (e.g., `impact=high` + `tag=backend` + `impact=low` returns `Err`)
-- [ ] Write tests for `apply_filters()` with multiple criteria:
+- [x] Write tests for `apply_filters()` with multiple criteria:
   - Two criteria AND: only items matching both pass
   - Item matching one criterion but not other is excluded
   - Items with `None` for a filtered optional field are excluded by AND
   - Multi-tag AND: items must have all specified tags
   - Empty criteria slice returns all items (vacuous truth)
   - Single criterion behaves identically to current `apply_filter()`
-- [ ] Write tests for `format_filter_criteria()`:
+- [x] Write tests for `format_filter_criteria()`:
   - Empty slice: `""` (empty string)
   - Single criterion: `"impact=high"`
   - Two criteria: `"impact=high AND size=small"`
@@ -109,11 +109,11 @@ The change is split into two phases: Phase 1 adds new functions and their tests 
 
 **Verification:**
 
-- [ ] `cargo build` succeeds (no compile errors)
-- [ ] `cargo test` passes (all existing tests still pass, new tests pass)
-- [ ] New functions are `pub` and importable (confirmed by test file compiling with `use phase_golem::filter::{validate_filter_criteria, apply_filters, format_filter_criteria}`)
-- [ ] Existing `apply_filter()` still works (not yet removed)
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo build` succeeds (no compile errors)
+- [x] `cargo test` passes (all existing tests still pass, new tests pass — 62 filter tests, 174 total)
+- [x] New functions are `pub` and importable (confirmed by test file compiling with `use phase_golem::filter::{validate_filter_criteria, apply_filters, format_filter_criteria}`)
+- [x] Existing `apply_filter()` still works (not yet removed)
+- [x] Code review passes (9 agents, fixed duplicated field-name mapping, added heterogeneous criteria test)
 
 **Commit:** `[WRK-055][P1] Feature: Add multi-filter validation, application, and formatting functions`
 
@@ -121,6 +121,8 @@ The change is split into two phases: Phase 1 adds new functions and their tests 
 
 - `Hash` derives are safe on all target types: `FilterField` is a fieldless enum, `FilterValue` contains `ItemStatus`/`SizeLevel`/`DimensionLevel` (fieldless enums) and `String` (all implement `Hash`), `FilterCriterion` is a struct of `FilterField` + `FilterValue`.
 - `apply_filter()` coexists with `apply_filters()` during this phase — removal happens in Phase 2.
+- Code review improvement: Added `Display` impl for `FilterField` to eliminate duplicated field-name-to-string mapping between `FilterCriterion::Display` and `validate_filter_criteria`.
+- Code review improvement: Added `apply_filters_three_heterogeneous_criteria` test for realistic multi-field-type AND composition.
 
 **Followups:**
 
@@ -130,7 +132,7 @@ The change is split into two phases: Phase 1 adds new functions and their tests 
 
 > Change CLI to Vec, migrate RunParams.filter, rewrite scheduler filter block, remove apply_filter(), update all tests
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Med
 
@@ -146,43 +148,43 @@ The change is split into two phases: Phase 1 adds new functions and their tests 
 
 **Tasks:**
 
-- [ ] Change CLI arg definition (`src/main.rs:60-62`): `only: Option<String>` → `only: Vec<String>` with `action = clap::ArgAction::Append`. Keep `conflicts_with = "target"` and update help text to indicate repeatable flag.
-- [ ] Update `handle_run()` signature (`src/main.rs:333`): `only: Option<String>` → `only: Vec<String>`
-- [ ] Update mutual-exclusion guard (`src/main.rs:363`): `only.is_some()` → `!only.is_empty()`
-- [ ] Rewrite filter parsing block (`src/main.rs:418-422`): Replace `match only { Some(ref raw) => ... }` with a loop: iterate `only` values, call `parse_filter()` on each with `?` (fail-fast), collect into `Vec<FilterCriterion>`, then call `validate_filter_criteria(&parsed_filters)?`
-- [ ] Update startup display (`src/main.rs:456-464`): Change `if let Some(ref criterion) = parsed_filter` to `if !parsed_filters.is_empty()`, use `apply_filters(&parsed_filters, &backlog)` for match count, use `format_filter_criteria(&parsed_filters)` for display string
-- [ ] Update `filter_display` construction (`src/main.rs:632`): `if !parsed_filters.is_empty() { Some(format_filter_criteria(&parsed_filters)) } else { None }`
-- [ ] Update RunParams construction (`src/main.rs:634-636`): `filter: parsed_filters`
-- [ ] Halt-reason display (`src/main.rs:733-748`): Verify no changes needed — `filter_display` remains `Option<String>`, `if let Some(ref filter_str)` guards still work
-- [ ] Change `RunParams.filter` type (`src/scheduler.rs:52`): `Option<crate::filter::FilterCriterion>` → `Vec<crate::filter::FilterCriterion>`
-- [ ] Rewrite scheduler filter application block (`src/scheduler.rs:678-748`):
+- [x] Change CLI arg definition (`src/main.rs:60-62`): `only: Option<String>` → `only: Vec<String>` with `action = clap::ArgAction::Append`. Keep `conflicts_with = "target"` and update help text to indicate repeatable flag.
+- [x] Update `handle_run()` signature (`src/main.rs:333`): `only: Option<String>` → `only: Vec<String>`
+- [x] Update mutual-exclusion guard (`src/main.rs:363`): `only.is_some()` → `!only.is_empty()`
+- [x] Rewrite filter parsing block (`src/main.rs:418-422`): Replace `match only { Some(ref raw) => ... }` with a loop: iterate `only` values, call `parse_filter()` on each with `?` (fail-fast), collect into `Vec<FilterCriterion>`, then call `validate_filter_criteria(&parsed_filters)?`
+- [x] Update startup display (`src/main.rs:456-464`): Change `if let Some(ref criterion) = parsed_filter` to `if !parsed_filters.is_empty()`, use `apply_filters(&parsed_filters, &backlog)` for match count, use `format_filter_criteria(&parsed_filters)` for display string
+- [x] Update `filter_display` construction (`src/main.rs:632`): `if !parsed_filters.is_empty() { Some(format_filter_criteria(&parsed_filters)) } else { None }`
+- [x] Update RunParams construction (`src/main.rs:634-636`): `filter: parsed_filters`
+- [x] Halt-reason display (`src/main.rs:733-748`): Verify no changes needed — `filter_display` remains `Option<String>`, `if let Some(ref filter_str)` guards still work
+- [x] Change `RunParams.filter` type (`src/scheduler.rs:52`): `Option<crate::filter::FilterCriterion>` → `Vec<crate::filter::FilterCriterion>`
+- [x] Rewrite scheduler filter application block (`src/scheduler.rs:678-748`):
   - Change guard: `if let Some(ref criterion) = params.filter` → `if !params.filter.is_empty()`
   - Change filter call: `filter::apply_filter(criterion, &snapshot)` → `filter::apply_filters(&params.filter, &snapshot)`
   - **Critical line** — Change NoMatchingItems cross-check (`any_match_in_snapshot`, ~line 686-689): Replace `snapshot.items.iter().any(|item| filter::matches_item(criterion, item))` with `snapshot.items.iter().any(|item| params.filter.iter().all(|c| filter::matches_item(c, item)))`. Note the `.any()` wraps `.all()` — this checks whether *any* item in the unfiltered snapshot matches *all* criteria. Getting `.any()` vs `.all()` wrong here would misclassify `NoMatchingItems` vs `FilterExhausted`.
   - Change log messages: use `filter::format_filter_criteria(&params.filter)`. For the NoMatchingItems message, use `"No items match combined filter criteria: {}"` when `params.filter.len() > 1`, or keep existing `"No items match filter criteria: {}"` when `params.filter.len() == 1` (preserves backward-compatible single-criterion output per PRD).
   - Change else branch: `else { None }` remains unchanged
-- [ ] Remove `apply_filter()` from `src/filter.rs` (lines 135-150)
-- [ ] Update `tests/filter_test.rs`:
+- [x] Remove `apply_filter()` from `src/filter.rs` (lines 135-150)
+- [x] Update `tests/filter_test.rs`:
   - Change import: `apply_filter` → `apply_filters` (also add `validate_filter_criteria, format_filter_criteria` if not already imported from Phase 1)
   - Migrate all `apply_filter(&f, &snapshot)` calls to `apply_filters(&[f], &snapshot)` — 16 call sites across 16 existing tests: `parse_and_match_status_in_progress`, `tag_filter_empty_tags_never_match`, `tag_filter_case_sensitive`, `tag_filter_exact_match`, `none_impact_never_matches`, `none_size_never_matches`, `none_risk_never_matches`, `none_complexity_never_matches`, `none_pipeline_type_never_matches`, `apply_filter_returns_matching_subset`, `apply_filter_empty_snapshot_returns_empty`, `apply_filter_preserves_schema_version`, `pipeline_type_case_sensitive_matching`, `pipeline_type_exact_match`, `status_filter_matches_correctly`, `apply_filter_preserves_next_item_id`. Use bulk find-and-replace: `apply_filter(&` → `apply_filters(&[` with corresponding closing `]`.
-- [ ] Add new imports in `src/main.rs` for `filter::validate_filter_criteria`, `filter::apply_filters`, `filter::format_filter_criteria` (or use qualified `filter::` paths). Similarly ensure `src/scheduler.rs` can access `filter::apply_filters` and `filter::format_filter_criteria`.
-- [ ] Update `tests/scheduler_test.rs`:
+- [x] Add new imports in `src/main.rs` for `filter::validate_filter_criteria`, `filter::apply_filters`, `filter::format_filter_criteria` (or use qualified `filter::` paths). Similarly ensure `src/scheduler.rs` can access `filter::apply_filters` and `filter::format_filter_criteria`.
+- [x] Update `tests/scheduler_test.rs`:
   - `run_params()` helper (line 197): `filter: None` → `filter: vec![]`
   - 16 inline `filter: None` occurrences → `filter: vec![]`
   - 5 inline `filter: Some(filter::parse_filter(...).unwrap())` occurrences → `filter: vec![filter::parse_filter(...).unwrap()]`
-- [ ] Add multi-criteria scheduler integration tests in `tests/scheduler_test.rs`:
+- [x] Add multi-criteria scheduler integration tests in `tests/scheduler_test.rs`:
   - Test with `filter: vec![criterion_a, criterion_b]` where items match individual criteria but not the AND intersection → verify `NoMatchingItems` halt
   - Test with `filter: vec![criterion_a, criterion_b]` where matching items complete → verify `FilterExhausted` halt
 
 **Verification:**
 
-- [ ] `cargo build` succeeds
-- [ ] `cargo test` passes (all existing tests pass with migrated call sites, no regressions)
-- [ ] `apply_filter` is no longer exported from `filter.rs` (removed)
-- [ ] Single `--only` backward compatibility: all 5 existing scheduler filter tests pass with `vec![criterion]` syntax; `format_filter_criteria` with one criterion produces no ` AND ` separator
-- [ ] Verify `--only` and `--target` remain mutually exclusive: `conflicts_with = "target"` annotation present in CLI definition, runtime guard updated to `!only.is_empty()`
-- [ ] Multi-criteria scheduler integration tests pass (new tests from this phase)
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] `cargo build` succeeds
+- [x] `cargo test` passes (all existing tests pass with migrated call sites, no regressions — 462 passed, 0 failed)
+- [x] `apply_filter` is no longer exported from `filter.rs` (removed)
+- [x] Single `--only` backward compatibility: all 5 existing scheduler filter tests pass with `vec![criterion]` syntax; `format_filter_criteria` with one criterion produces no ` AND ` separator
+- [x] Verify `--only` and `--target` remain mutually exclusive: `conflicts_with = "target"` annotation present in CLI definition, runtime guard updated to `!only.is_empty()`
+- [x] Multi-criteria scheduler integration tests pass (new tests from this phase)
+- [x] Code review passes (9-agent review: Ready to Merge, 0 critical/high, 3 suggestions fixed)
 
 **Commit:** `[WRK-055][P2] Feature: Migrate CLI, scheduler, and tests to multi-filter Vec<FilterCriterion>`
 
@@ -194,6 +196,7 @@ The change is split into two phases: Phase 1 adds new functions and their tests 
 - The `apply_filter()` removal is compile-breaking for `tests/filter_test.rs` — removal and test migration must happen together.
 - The halt-reason display block in `main.rs` (lines 733-748) needs no structural changes because `filter_display` retains its `Option<String>` type.
 - The `filtered_snapshot` variable in the scheduler retains its `Option<BacklogFile>` type — only the construction condition changes.
+- Code review improvements applied: removed redundant `!parsed_filters.is_empty()` guard around `validate_filter_criteria` (it handles empty slices correctly), hoisted `format_filter_criteria` call to top of filter block (avoid 3 redundant calls), simplified singular/plural log message branch (removed "combined" word distinction).
 
 **Followups:**
 
@@ -203,28 +206,30 @@ The change is split into two phases: Phase 1 adds new functions and their tests 
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met:
-  - [ ] `--only` accepts multiple values via repeated flag
-  - [ ] Multiple criteria combined with AND logic
-  - [ ] Items with `None` for filtered optional field are excluded
-  - [ ] Each criterion validated at startup (fail-fast)
-  - [ ] Duplicate scalar fields rejected with error (with WRK-056 hint)
-  - [ ] `tag` field exempt from duplicate-field rejection; identical tag-value pairs rejected
-  - [ ] Terminal output shows criteria joined by ` AND `
-  - [ ] Single `--only` backward compatible
-  - [ ] `--only` and `--target` mutually exclusive
-  - [ ] Zero matches on initial snapshot → `NoMatchingItems` halt
-  - [ ] All matching items done/blocked → `FilterExhausted` halt
-  - [ ] No `--only` → empty Vec, unfiltered run
-- [ ] Tests pass
-- [ ] No regressions introduced
-- [ ] Code reviewed
+- [x] All phases complete
+- [x] All PRD success criteria met:
+  - [x] `--only` accepts multiple values via repeated flag
+  - [x] Multiple criteria combined with AND logic
+  - [x] Items with `None` for filtered optional field are excluded
+  - [x] Each criterion validated at startup (fail-fast)
+  - [x] Duplicate scalar fields rejected with error (with WRK-056 hint)
+  - [x] `tag` field exempt from duplicate-field rejection; identical tag-value pairs rejected
+  - [x] Terminal output shows criteria joined by ` AND `
+  - [x] Single `--only` backward compatible
+  - [x] `--only` and `--target` mutually exclusive
+  - [x] Zero matches on initial snapshot → `NoMatchingItems` halt
+  - [x] All matching items done/blocked → `FilterExhausted` halt
+  - [x] No `--only` → empty Vec, unfiltered run
+- [x] Tests pass (462 passed, 0 failed)
+- [x] No regressions introduced
+- [x] Code reviewed (9-agent review, Ready to Merge)
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| 1 | complete | `[WRK-055][P1] Feature: Add multi-filter validation, application, and formatting functions` | 3 new functions, Display for FilterField, 22 new tests (62 total filter tests), all 174 tests pass |
+| 2 | complete | `[WRK-055][P2] Feature: Migrate CLI, scheduler, and tests to multi-filter Vec<FilterCriterion>` | CLI Vec+Append, RunParams.filter Vec, scheduler rewrite, apply_filter removed, 16 test migrations, 2 new multi-criteria scheduler tests, code review fixes (removed redundant guard, hoisted format call, simplified log branch). 462 tests pass, 0 fail. |
 
 ## Followups Summary
 

@@ -194,7 +194,7 @@ fn make_backlog(items: Vec<BacklogItem>) -> BacklogFile {
 fn run_params(root: &Path, target: Option<&str>, cap: u32) -> RunParams {
     RunParams {
         targets: target.map(|s| vec![s.to_string()]).unwrap_or_default(),
-        filter: None,
+        filter: vec![],
         cap,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -1868,7 +1868,7 @@ async fn test_multi_target_processes_in_order() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -1915,7 +1915,7 @@ async fn test_multi_target_halts_on_block() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -1958,7 +1958,7 @@ async fn test_multi_target_all_done_at_startup() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2003,7 +2003,7 @@ async fn test_multi_target_skips_done_targets() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2048,7 +2048,7 @@ async fn test_multi_target_single_element_backward_compat() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2094,7 +2094,7 @@ async fn test_multi_target_target_archived_during_run() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2141,7 +2141,7 @@ async fn test_multi_target_skips_pre_blocked_targets() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2191,7 +2191,7 @@ async fn test_auto_advance_skips_blocked_target() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2239,7 +2239,7 @@ async fn test_auto_advance_all_targets_blocked() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2285,7 +2285,7 @@ async fn test_auto_advance_single_target_blocked() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2339,7 +2339,7 @@ async fn test_auto_advance_circuit_breaker_not_tripped() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2390,7 +2390,7 @@ async fn test_auto_advance_backward_compat() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2445,7 +2445,7 @@ async fn test_filter_restricts_scheduler_to_matching_items() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
-        filter: Some(filter::parse_filter("impact=high").unwrap()),
+        filter: vec![filter::parse_filter("impact=high").unwrap()],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2489,7 +2489,7 @@ async fn test_filter_no_matching_items_halts() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
-        filter: Some(filter::parse_filter("impact=high").unwrap()),
+        filter: vec![filter::parse_filter("impact=high").unwrap()],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2531,7 +2531,7 @@ async fn test_filter_all_exhausted_halts() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
-        filter: Some(filter::parse_filter("impact=high").unwrap()),
+        filter: vec![filter::parse_filter("impact=high").unwrap()],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2581,7 +2581,7 @@ async fn test_integration_single_target_backward_compat() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2642,7 +2642,7 @@ async fn test_integration_multi_target_sequential() {
             "WRK-002".to_string(),
             "WRK-003".to_string(),
         ],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2696,7 +2696,7 @@ async fn test_integration_multi_target_with_block() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: None,
+        filter: vec![],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2751,7 +2751,7 @@ async fn test_integration_filter_impact_high() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
-        filter: Some(filter::parse_filter("impact=high").unwrap()),
+        filter: vec![filter::parse_filter("impact=high").unwrap()],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -2800,7 +2800,7 @@ async fn test_integration_filter_no_matches() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
-        filter: Some(filter::parse_filter("impact=high").unwrap()),
+        filter: vec![filter::parse_filter("impact=high").unwrap()],
         cap: 100,
         root: root.to_path_buf(),
         config_base: root.to_path_buf(),
@@ -3076,4 +3076,101 @@ async fn retry_then_success_summary_persists() {
 
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
     assert!(summary.items_blocked.is_empty());
+}
+
+#[tokio::test]
+async fn test_multi_filter_no_matching_items_halts() {
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    // Item matches impact=high but not size=small → AND intersection is empty
+    let mut item = make_in_progress_item("WRK-001", "High impact large", "build");
+    item.impact = Some(DimensionLevel::High);
+    item.size = Some(SizeLevel::Large);
+    let backlog = common::make_backlog(vec![item]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    let runner = MockAgentRunner::new(vec![]);
+
+    let mut config = default_config();
+    config.pipelines = simple_pipeline();
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let params = RunParams {
+        targets: vec![],
+        filter: vec![
+            filter::parse_filter("impact=high").unwrap(),
+            filter::parse_filter("size=small").unwrap(),
+        ],
+        cap: 100,
+        root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
+        auto_advance: false,
+    };
+
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
+
+    assert_eq!(summary.halt_reason, HaltReason::NoMatchingItems);
+    assert_eq!(summary.phases_executed, 0);
+}
+
+#[tokio::test]
+async fn test_multi_filter_exhausted_halts() {
+    let dir = common::setup_test_env();
+    let root = dir.path();
+
+    // Item matches both impact=high AND size=small
+    let mut item = make_in_progress_item("WRK-001", "High impact small", "build");
+    item.impact = Some(DimensionLevel::High);
+    item.size = Some(SizeLevel::Small);
+    let backlog = common::make_backlog(vec![item]);
+    backlog::save(&backlog_path(root), &backlog).unwrap();
+
+    let runner = MockAgentRunner::new(vec![
+        Ok(phase_complete_result("WRK-001", "build")),
+        Ok(phase_complete_result("WRK-001", "review")),
+    ]);
+
+    let mut config = default_config();
+    config.pipelines = simple_pipeline();
+
+    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
+        backlog,
+        backlog_path(root),
+        root.join("BACKLOG_INBOX.yaml"),
+        root.to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let params = RunParams {
+        targets: vec![],
+        filter: vec![
+            filter::parse_filter("impact=high").unwrap(),
+            filter::parse_filter("size=small").unwrap(),
+        ],
+        cap: 100,
+        root: root.to_path_buf(),
+        config_base: root.to_path_buf(),
+        auto_advance: false,
+    };
+
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
+
+    assert!(summary.items_completed.contains(&"WRK-001".to_string()));
+    assert_eq!(summary.halt_reason, HaltReason::FilterExhausted);
 }

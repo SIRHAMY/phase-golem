@@ -49,7 +49,7 @@ pub enum HaltReason {
 /// Parameters for running the scheduler.
 pub struct RunParams {
     pub targets: Vec<String>,
-    pub filter: Option<crate::filter::FilterCriterion>,
+    pub filter: Vec<crate::filter::FilterCriterion>,
     pub cap: u32,
     pub root: PathBuf,
     /// Base directory for resolving config-relative paths (workflow files).
@@ -676,8 +676,9 @@ pub async fn run_scheduler(
         }
 
         // Filter application — restrict snapshot for filter mode
-        let filtered_snapshot = if let Some(ref criterion) = params.filter {
-            let filtered = filter::apply_filter(criterion, &snapshot);
+        let filtered_snapshot = if !params.filter.is_empty() {
+            let filtered = filter::apply_filters(&params.filter, &snapshot);
+            let criteria_display = filter::format_filter_criteria(&params.filter);
             // Check halt conditions based on filter results
             if filtered.items.is_empty() {
                 // Determine if no items match at all, or all matching are Done/Blocked/archived.
@@ -686,11 +687,14 @@ pub async fn run_scheduler(
                 let any_match_in_snapshot = snapshot
                     .items
                     .iter()
-                    .any(|item| filter::matches_item(criterion, item));
+                    .any(|item| params.filter.iter().all(|c| filter::matches_item(c, item)));
                 let has_prior_progress =
                     !state.items_completed.is_empty() || !state.items_blocked.is_empty();
                 if !any_match_in_snapshot && !has_prior_progress {
-                    log_info!("[filter] No items match filter criteria: {}", criterion);
+                    log_info!(
+                        "[filter] No items match filter criteria: {}",
+                        criteria_display
+                    );
                     drain_join_set(
                         &mut join_set,
                         &mut running,
@@ -705,7 +709,7 @@ pub async fn run_scheduler(
                 } else {
                     log_info!(
                         "[filter] All items matching {} are done or blocked.",
-                        criterion
+                        criteria_display
                     );
                     drain_join_set(
                         &mut join_set,
@@ -728,7 +732,7 @@ pub async fn run_scheduler(
             if all_done_or_blocked {
                 log_info!(
                     "[filter] All items matching {} are done or blocked.",
-                    criterion
+                    criteria_display
                 );
                 drain_join_set(
                     &mut join_set,

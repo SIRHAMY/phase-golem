@@ -2,7 +2,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 // --- Enums ---
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemStatus {
     #[default]
@@ -59,7 +59,7 @@ pub enum BlockType {
     Decision,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum SizeLevel {
     Small,
@@ -89,7 +89,7 @@ pub fn parse_size_level(s: &str) -> Result<SizeLevel, String> {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum DimensionLevel {
     Low,

@@ -1,9 +1,11 @@
+use std::collections::HashSet;
+
 use crate::types::{
     parse_dimension_level, parse_item_status, parse_size_level, BacklogFile, BacklogItem,
     DimensionLevel, ItemStatus, SizeLevel,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FilterField {
     Status,
     Impact,
@@ -14,7 +16,7 @@ pub enum FilterField {
     PipelineType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FilterValue {
     Status(ItemStatus),
     Dimension(DimensionLevel),
@@ -23,15 +25,15 @@ pub enum FilterValue {
     PipelineType(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FilterCriterion {
     pub field: FilterField,
     pub value: FilterValue,
 }
 
-impl std::fmt::Display for FilterCriterion {
+impl std::fmt::Display for FilterField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let field_name = match self.field {
+        let name = match self {
             FilterField::Status => "status",
             FilterField::Impact => "impact",
             FilterField::Size => "size",
@@ -40,6 +42,12 @@ impl std::fmt::Display for FilterCriterion {
             FilterField::Tag => "tag",
             FilterField::PipelineType => "pipeline_type",
         };
+        write!(f, "{}", name)
+    }
+}
+
+impl std::fmt::Display for FilterCriterion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value_str = match &self.value {
             FilterValue::Status(s) => match s {
                 ItemStatus::New => "new".to_string(),
@@ -54,7 +62,7 @@ impl std::fmt::Display for FilterCriterion {
             FilterValue::Tag(t) => t.clone(),
             FilterValue::PipelineType(p) => p.clone(),
         };
-        write!(f, "{}={}", field_name, value_str)
+        write!(f, "{}={}", self.field, value_str)
     }
 }
 
@@ -132,23 +140,6 @@ pub fn parse_filter(raw: &str) -> Result<FilterCriterion, String> {
     Ok(FilterCriterion { field, value })
 }
 
-pub fn apply_filter(criterion: &FilterCriterion, backlog: &BacklogFile) -> BacklogFile {
-    let items = backlog
-        .items
-        .iter()
-        .filter(|item| matches_item(criterion, item))
-        .cloned()
-        .collect();
-
-    BacklogFile {
-        items,
-        schema_version: backlog.schema_version,
-        // next_item_id is carried forward for structural completeness only.
-        // Filtered results are never persisted; the coordinator owns ID generation.
-        next_item_id: backlog.next_item_id,
-    }
-}
-
 pub fn matches_item(criterion: &FilterCriterion, item: &BacklogItem) -> bool {
     match (&criterion.field, &criterion.value) {
         (FilterField::Status, FilterValue::Status(target)) => item.status == *target,
@@ -168,4 +159,50 @@ pub fn matches_item(criterion: &FilterCriterion, item: &BacklogItem) -> bool {
         // but return false for safety.
         _ => false,
     }
+}
+
+pub fn validate_filter_criteria(criteria: &[FilterCriterion]) -> Result<(), String> {
+    let mut seen_scalar_fields = HashSet::new();
+    let mut seen_tag_criteria = HashSet::new();
+
+    for criterion in criteria {
+        if criterion.field == FilterField::Tag {
+            if !seen_tag_criteria.insert(criterion) {
+                return Err(format!(
+                    "Duplicate filter: {} specified multiple times",
+                    criterion
+                ));
+            }
+        } else if !seen_scalar_fields.insert(&criterion.field) {
+            return Err(format!(
+                "Field '{}' specified multiple times. For OR logic within a field, use comma-separated values: --only {}=value1,value2",
+                criterion.field, criterion.field
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+pub fn apply_filters(criteria: &[FilterCriterion], backlog: &BacklogFile) -> BacklogFile {
+    let items = backlog
+        .items
+        .iter()
+        .filter(|item| criteria.iter().all(|c| matches_item(c, item)))
+        .cloned()
+        .collect();
+
+    BacklogFile {
+        items,
+        schema_version: backlog.schema_version,
+        next_item_id: backlog.next_item_id,
+    }
+}
+
+pub fn format_filter_criteria(criteria: &[FilterCriterion]) -> String {
+    criteria
+        .iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(" AND ")
 }

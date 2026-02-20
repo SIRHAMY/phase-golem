@@ -57,9 +57,9 @@ enum Commands {
         /// Target specific backlog items by ID (can be specified multiple times for sequential processing)
         #[arg(long, action = clap::ArgAction::Append)]
         target: Vec<String>,
-        /// Filter items by attribute (e.g., impact=high, status=ready)
-        #[arg(long, conflicts_with = "target")]
-        only: Option<String>,
+        /// Filter items by attribute (repeatable, AND logic; e.g., --only impact=high --only size=small)
+        #[arg(long, conflicts_with = "target", action = clap::ArgAction::Append)]
+        only: Vec<String>,
         /// Maximum number of phase executions
         #[arg(long, default_value = "100")]
         cap: u32,
@@ -330,7 +330,7 @@ async fn handle_run(
     config_path: Option<&Path>,
     config_base: &Path,
     target: Vec<String>,
-    only: Option<String>,
+    only: Vec<String>,
     cap: u32,
     auto_advance: bool,
 ) -> Result<(), String> {
@@ -360,7 +360,7 @@ async fn handle_run(
     let mut backlog = backlog::load(&backlog_file_path, root)?;
 
     // Mutual exclusivity safety net (clap conflicts_with should handle this)
-    if !target.is_empty() && only.is_some() {
+    if !target.is_empty() && !only.is_empty() {
         return Err("Cannot combine --target and --only flags. Use one or the other.".to_string());
     }
 
@@ -416,10 +416,11 @@ async fn handle_run(
     }
 
     // Filter validation
-    let parsed_filter = match only {
-        Some(ref raw) => Some(filter::parse_filter(raw)?),
-        None => None,
-    };
+    let parsed_filters: Vec<filter::FilterCriterion> = only
+        .iter()
+        .map(|raw| filter::parse_filter(raw))
+        .collect::<Result<Vec<_>, _>>()?;
+    filter::validate_filter_criteria(&parsed_filters)?;
 
     // Config summary
     log_info!("");
@@ -453,11 +454,11 @@ async fn handle_run(
             .collect();
         log_info!("[config] Targets: {}", target_display.join(", "));
     }
-    if let Some(ref criterion) = parsed_filter {
-        let matching = filter::apply_filter(criterion, &backlog);
+    if !parsed_filters.is_empty() {
+        let matching = filter::apply_filters(&parsed_filters, &backlog);
         log_info!(
             "[config] Filter: {} — {} items match (from {} total)",
-            criterion,
+            filter::format_filter_criteria(&parsed_filters),
             matching.items.len(),
             backlog.items.len()
         );
@@ -629,11 +630,15 @@ async fn handle_run(
         }
     });
 
-    let filter_display = parsed_filter.as_ref().map(|c| c.to_string());
+    let filter_display = if !parsed_filters.is_empty() {
+        Some(filter::format_filter_criteria(&parsed_filters))
+    } else {
+        None
+    };
 
     let params = scheduler::RunParams {
         targets: target,
-        filter: parsed_filter,
+        filter: parsed_filters,
         cap,
         root: root.to_path_buf(),
         config_base: config_base.to_path_buf(),
