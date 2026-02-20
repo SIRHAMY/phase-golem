@@ -409,18 +409,22 @@ items:
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-20T03:47:15.980190776+00:00
+  updated: 2026-02-20T03:56:49.544644750+00:00
   pipeline_type: feature
   phase_pool: main
+  last_phase_commit: cc5a7ea810561a7c52136697cc9ab8a70b9f37aa
 - id: WRK-055
   title: Support multiple --only filters with AND logic
-  status: new
-  size: medium
+  status: ready
+  size: small
+  complexity: low
   risk: low
+  impact: medium
   requires_human_review: false
   origin: WRK-030/review
   created: 2026-02-13T05:28:40.194514495+00:00
-  updated: 2026-02-13T05:28:40.194514495+00:00
+  updated: 2026-02-20T03:49:10.077751771+00:00
+  pipeline_type: feature
 - id: WRK-056
   title: Support comma-separated OR values within --only filter
   status: new
