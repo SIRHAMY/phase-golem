@@ -409,7 +409,7 @@ items:
   requires_human_review: false
   origin: WRK-028/prd
   created: 2026-02-13T05:36:21.766249174+00:00
-  updated: 2026-02-20T18:53:52.855628771+00:00
+  updated: 2026-02-20T19:03:11.239852107+00:00
   pipeline_type: feature
   description:
     context: |-
@@ -422,15 +422,19 @@ items:
     impact: ''
     sizing_rationale: ''
   phase_pool: main
+  last_phase_commit: 777be21097ffe0b1cdec26e90fdd16744f3eaae1
 - id: WRK-058
   title: Extract previous_summaries threshold multiplier to named constant
-  status: new
+  status: ready
   size: small
+  complexity: low
   risk: low
+  impact: low
   requires_human_review: false
   origin: WRK-022/build
   created: 2026-02-13T05:51:28.371898148+00:00
-  updated: 2026-02-13T05:51:28.371898148+00:00
+  updated: 2026-02-20T18:54:16.071968537+00:00
+  pipeline_type: feature
 - id: WRK-059
   title: Expose previous_summaries size in RunSummary for direct test verification
   status: new
