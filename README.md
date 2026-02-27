@@ -2,10 +2,13 @@
 
 A Rust CLI that autonomously manages a backlog of changes and executes configured workflow phases using AI agents without human intervention.
 
+Uses [task-golem](https://github.com/SIRHAMY/task-golem) as its storage backend for work item tracking.
+
 ## Prerequisites
 
 - [Rust toolchain](https://rustup.rs/) (stable)
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) (`claude`) installed and authenticated
+- [task-golem](https://github.com/SIRHAMY/task-golem) (`tg`) installed — phase-golem stores all work items in task-golem's JSONL store
 
 ## Installation
 
@@ -24,13 +27,16 @@ cp target/release/phase-golem ~/.local/bin/
 ## Quick Start
 
 ```bash
-# 1. Initialize in your project root
+# 1. Initialize task-golem in your project root
+tg init
+
+# 2. Initialize phase-golem
 phase-golem init --prefix WRK
 
-# 2. Add work items
-phase-golem add "Build user authentication" --size medium --risk low
+# 3. Add work items via task-golem
+tg add "Build user authentication"
 
-# 3. Run the pipeline
+# 4. Run the pipeline
 phase-golem run
 ```
 
@@ -40,13 +46,14 @@ That's it. Phase Golem triages new items, promotes them through phases, spawns C
 
 | Command | What it does |
 |---------|-------------|
-| `init --prefix <PREFIX>` | Create `BACKLOG.yaml`, `phase-golem.toml`, and working directories |
-| `add "<title>" [--size S] [--risk R]` | Add a new item to the backlog |
+| `init --prefix <PREFIX>` | Create `phase-golem.toml` and working directories (requires `tg init` first) |
 | `run [--target ID] [--cap N]` | Execute phases until halted (optionally target one item or cap phase count) |
-| `status` | Show the backlog sorted by priority |
+| `status` | Show items sorted by priority |
 | `triage` | Assess all `New` items (size, complexity, risk, impact) and route them |
 | `advance <ID> [--to phase]` | Push an `InProgress` item to its next phase (or skip to a specific one) |
-| `unblock <ID> --notes "..."` | Restore a `Blocked` item to its previous status |
+| `unblock <ID>` | Restore a `Blocked` item to its previous status |
+
+Items are added via task-golem: `tg add "title"`. See the [tg CLI safety guide](docs/tg-cli-safety.md) for which `tg` commands are safe to use alongside phase-golem.
 
 ## How It Works
 
@@ -68,7 +75,7 @@ Any phase can block an item if it needs a human decision. Use `unblock` to resum
 
 When you call `phase-golem run`, this happens in a loop:
 
-1. **Snapshot** the current backlog state
+1. **Snapshot** the current item state (read-through from task-golem's JSONL store)
 2. **Schedule** next actions via a pure function (`select_actions`) that picks work based on:
    - **Advance-furthest-first**: Continue items closest to completion
    - **Then scope**: Run pre-phases on `Scoping` items
@@ -86,43 +93,7 @@ The loop stops when:
 - SIGTERM/SIGINT received
 - Target item finished (`--target`)
 
-**Important**: The backlog is loaded into memory once at startup and is the source of truth for the entire run. Manual edits to `BACKLOG.yaml` while phase-golem is running will not be picked up and may be overwritten when it saves state (e.g., after ingesting follow-ups or completing a phase). Stop phase-golem before editing the backlog file. To add items while it is running, use the inbox file (see below).
-
-### Adding Items While Running (`BACKLOG_INBOX.yaml`)
-
-To add new work items without stopping a running instance, create a `BACKLOG_INBOX.yaml` file in the project root. Phase Golem checks for this file at the top of each scheduler loop iteration and ingests any items it finds.
-
-**Format:**
-
-```yaml
-items:
-  - title: "Fix login timeout bug"
-    description: "Users report 30s timeout on login page"
-    size: small
-    risk: low
-    impact: high
-  - title: "Add CSV export to reports"
-```
-
-**Fields:**
-
-| Field | Required | Type | Description |
-|-------|----------|------|-------------|
-| `title` | Yes | string | Short description of the work item |
-| `description` | No | string | Longer context, acceptance criteria, etc. |
-| `size` | No | `small`, `medium`, `large` | Estimated size (triage fills this in if omitted) |
-| `risk` | No | `low`, `medium`, `high` | Risk level (triage fills this in if omitted) |
-| `impact` | No | `low`, `medium`, `high` | Impact level (triage fills this in if omitted) |
-| `pipeline_type` | No | string | Pipeline to use (defaults to `feature`) |
-| `dependencies` | No | list of strings | Item IDs this depends on |
-
-**Behavior:**
-
-- Only `title` is required. Omitted fields are filled in by triage.
-- Items are assigned IDs automatically from the backlog's `next_item_id` counter.
-- All inbox items start as `status: New` and go through the normal triage process.
-- The inbox file is **deleted** after successful ingestion. Create a new file for the next batch.
-- If the YAML is malformed, the file is left intact (your input is not lost) and phase-golem logs a warning.
+**Adding items while running**: Use `tg add "title"` in another terminal. Phase-golem reads from the task-golem store on every scheduler loop iteration (read-through, no in-memory cache), so new items are picked up automatically.
 
 ### Key Concepts
 
@@ -143,12 +114,11 @@ After `init`, your project gets:
 ```
 project-root/
 ├── phase-golem.toml     # Pipeline definitions, guardrails, execution config
-├── BACKLOG.yaml         # Work items and their state (schema v3)
-├── BACKLOG_INBOX.yaml   # (optional) Drop-in file for adding items while running
+├── .task-golem/         # task-golem storage (JSONL items, archive, lock)
 ├── changes/             # Per-item directories with PRDs, specs, designs
-│   └── WRK-001_auth/
-│       ├── WRK-001_auth_PRD.md
-│       ├── WRK-001_auth_SPEC.md
+│   └── HAMY-a1b2c_auth/
+│       ├── HAMY-a1b2c_auth_PRD.md
+│       ├── HAMY-a1b2c_auth_SPEC.md
 │       └── ...
 ├── docs/                # Project documentation (not created by init)
 │   └── tg-cli-safety.md # tg CLI safety guide for phase-golem stores
@@ -169,8 +139,7 @@ All configuration lives in `phase-golem.toml` at the project root. See [`phase-g
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `prefix` | string | `"WRK"` | Item ID prefix (e.g. `WRK-001`, `WRK-002`) |
-| `backlog_path` | string | `"BACKLOG.yaml"` | Path to the backlog file, relative to project root |
+| `prefix` | string | `"WRK"` | Item ID prefix for new items generated by phase-golem (e.g. follow-ups) |
 
 ### `[guardrails]`
 
@@ -274,7 +243,7 @@ is_destructive = false
 
 - **Scheduler** (`scheduler.rs`): Pure `select_actions()` function. No I/O, fully deterministic, easy to test. Handles advance-furthest-first priority, WIP limits, exclusive locking for destructive phases, and circuit breaker logic.
 - **Executor** (`executor.rs`): Runs phases with retry, staleness checks, and guardrail enforcement. Resolves what state transition to apply after each phase completes.
-- **Coordinator** (`coordinator.rs`): Tokio channel-based actor that serializes all backlog mutations and git operations. Handles commits (immediate for destructive, batched for non-destructive), worklog archiving, and follow-up ingestion.
+- **Coordinator** (`coordinator.rs`): Tokio channel-based actor that serializes all item mutations via task-golem's `Store` and git operations. Handles commits (immediate for destructive, batched for non-destructive), worklog archiving, and follow-up ingestion.
 - **Agent Runner** (`agent.rs`): Spawns `claude` CLI as a subprocess, manages timeouts and signal handling (SIGTERM graceful shutdown with 5s grace period).
 - **Preflight** (`preflight.rs`): Validates config structure, probes that referenced skills exist, and checks that InProgress items reference valid pipelines before any work begins.
 
