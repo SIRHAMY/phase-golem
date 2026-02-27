@@ -119,12 +119,19 @@ Content for the command tables, extension field reference, and dual-status mappi
 
 ### Critical
 
+*(none)*
+
 ### High
+
+*(none)*
 
 ### Medium
 
+*(none)*
+
 ### Low
 
+- [ ] Consider splitting `tg archive` into two entries (no-flag recovery mode vs. `--before` prune mode) similar to `doctor`/`doctor --fix`, if the command set grows — current single entry documents both modes but the Dangerous classification applies mainly to `--before` (Phase 1 code review)
 - [ ] Consider adding a CI check or pre-commit hook that warns when `src/pg_item.rs` extension field count diverges from `docs/tg-cli-safety.md` — prevents silent staleness
 
 ## Design Details
