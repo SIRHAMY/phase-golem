@@ -1,71 +1,78 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use task_golem::model::item::Item;
+use task_golem::store::Store;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::git::StatusEntry;
-use crate::types::{BacklogFile, BacklogItem, FollowUp, ItemStatus, ItemUpdate, PhaseResult};
+use crate::pg_error::PgError;
+use crate::pg_item::{self, PgItem};
+use crate::types::{FollowUp, ItemStatus, ItemUpdate, PhaseResult, StructuredDescription};
 use crate::{log_error, log_warn};
+
+// --- Aliases for task-golem git module (distinguished from phase-golem's own git) ---
+use task_golem::git as tg_git;
+use task_golem::model::id::generate_id_with_prefix;
 
 // --- Command enum ---
 
 pub enum CoordinatorCommand {
     GetSnapshot {
-        reply: oneshot::Sender<BacklogFile>,
+        reply: oneshot::Sender<Result<Vec<PgItem>, PgError>>,
     },
     UpdateItem {
         id: String,
         update: ItemUpdate,
-        reply: oneshot::Sender<Result<(), String>>,
+        reply: oneshot::Sender<Result<(), PgError>>,
     },
     CompletePhase {
         item_id: String,
         result: Box<PhaseResult>,
         is_destructive: bool,
-        reply: oneshot::Sender<Result<(), String>>,
+        reply: oneshot::Sender<Result<(), PgError>>,
     },
     BatchCommit {
-        reply: oneshot::Sender<Result<(), String>>,
+        reply: oneshot::Sender<Result<(), PgError>>,
     },
     GetHeadSha {
-        reply: oneshot::Sender<Result<String, String>>,
+        reply: oneshot::Sender<Result<String, PgError>>,
     },
     IsAncestor {
         sha: String,
-        reply: oneshot::Sender<Result<bool, String>>,
+        reply: oneshot::Sender<Result<bool, PgError>>,
     },
     RecordPhaseStart {
         item_id: String,
         commit_sha: String,
-        reply: oneshot::Sender<Result<(), String>>,
+        reply: oneshot::Sender<Result<(), PgError>>,
     },
     WriteWorklog {
-        item: Box<BacklogItem>,
+        id: String,
+        title: String,
         phase: String,
         outcome: String,
         summary: String,
-        reply: oneshot::Sender<Result<(), String>>,
+        reply: oneshot::Sender<Result<(), PgError>>,
     },
     ArchiveItem {
         item_id: String,
-        reply: oneshot::Sender<Result<(), String>>,
+        reply: oneshot::Sender<Result<(), PgError>>,
     },
     IngestFollowUps {
         follow_ups: Vec<FollowUp>,
         origin: String,
-        reply: oneshot::Sender<Result<Vec<String>, String>>,
+        reply: oneshot::Sender<Result<Vec<String>, PgError>>,
     },
     UnblockItem {
         item_id: String,
         context: Option<String>,
-        reply: oneshot::Sender<Result<(), String>>,
-    },
-    IngestInbox {
-        reply: oneshot::Sender<Result<Vec<String>, String>>,
+        reply: oneshot::Sender<Result<(), PgError>>,
     },
     MergeItem {
         source_id: String,
         target_id: String,
-        reply: oneshot::Sender<Result<(), String>>,
+        reply: oneshot::Sender<Result<(), PgError>>,
     },
 }
 
@@ -81,22 +88,22 @@ impl CoordinatorHandle {
         &self,
         command: CoordinatorCommand,
         rx: oneshot::Receiver<T>,
-    ) -> Result<T, String> {
+    ) -> Result<T, PgError> {
         self.sender
             .send(command)
             .await
-            .map_err(|_| "coordinator shut down".to_string())?;
+            .map_err(|_| PgError::InternalPanic("coordinator shut down".to_string()))?;
         rx.await
-            .map_err(|_| "coordinator dropped reply".to_string())
+            .map_err(|_| PgError::InternalPanic("coordinator dropped reply".to_string()))
     }
 
-    pub async fn get_snapshot(&self) -> Result<BacklogFile, String> {
+    pub async fn get_snapshot(&self) -> Result<Vec<PgItem>, PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(CoordinatorCommand::GetSnapshot { reply }, rx)
-            .await
+            .await?
     }
 
-    pub async fn update_item(&self, id: &str, update: ItemUpdate) -> Result<(), String> {
+    pub async fn update_item(&self, id: &str, update: ItemUpdate) -> Result<(), PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::UpdateItem {
@@ -114,7 +121,7 @@ impl CoordinatorHandle {
         item_id: &str,
         result: PhaseResult,
         is_destructive: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::CompletePhase {
@@ -128,19 +135,19 @@ impl CoordinatorHandle {
         .await?
     }
 
-    pub async fn batch_commit(&self) -> Result<(), String> {
+    pub async fn batch_commit(&self) -> Result<(), PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(CoordinatorCommand::BatchCommit { reply }, rx)
             .await?
     }
 
-    pub async fn get_head_sha(&self) -> Result<String, String> {
+    pub async fn get_head_sha(&self) -> Result<String, PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(CoordinatorCommand::GetHeadSha { reply }, rx)
             .await?
     }
 
-    pub async fn is_ancestor(&self, sha: &str) -> Result<bool, String> {
+    pub async fn is_ancestor(&self, sha: &str) -> Result<bool, PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::IsAncestor {
@@ -152,7 +159,7 @@ impl CoordinatorHandle {
         .await?
     }
 
-    pub async fn record_phase_start(&self, item_id: &str, commit_sha: &str) -> Result<(), String> {
+    pub async fn record_phase_start(&self, item_id: &str, commit_sha: &str) -> Result<(), PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::RecordPhaseStart {
@@ -167,15 +174,17 @@ impl CoordinatorHandle {
 
     pub async fn write_worklog(
         &self,
-        item: BacklogItem,
+        id: &str,
+        title: &str,
         phase: &str,
         outcome: &str,
         summary: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::WriteWorklog {
-                item: Box::new(item),
+                id: id.to_string(),
+                title: title.to_string(),
                 phase: phase.to_string(),
                 outcome: outcome.to_string(),
                 summary: summary.to_string(),
@@ -186,7 +195,7 @@ impl CoordinatorHandle {
         .await?
     }
 
-    pub async fn archive_item(&self, item_id: &str) -> Result<(), String> {
+    pub async fn archive_item(&self, item_id: &str) -> Result<(), PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::ArchiveItem {
@@ -202,7 +211,7 @@ impl CoordinatorHandle {
         &self,
         follow_ups: Vec<FollowUp>,
         origin: &str,
-    ) -> Result<Vec<String>, String> {
+    ) -> Result<Vec<String>, PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::IngestFollowUps {
@@ -215,7 +224,7 @@ impl CoordinatorHandle {
         .await?
     }
 
-    pub async fn unblock_item(&self, item_id: &str, context: Option<String>) -> Result<(), String> {
+    pub async fn unblock_item(&self, item_id: &str, context: Option<String>) -> Result<(), PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::UnblockItem {
@@ -228,13 +237,7 @@ impl CoordinatorHandle {
         .await?
     }
 
-    pub async fn ingest_inbox(&self) -> Result<Vec<String>, String> {
-        let (reply, rx) = oneshot::channel();
-        self.send_command(CoordinatorCommand::IngestInbox { reply }, rx)
-            .await?
-    }
-
-    pub async fn merge_item(&self, source_id: &str, target_id: &str) -> Result<(), String> {
+    pub async fn merge_item(&self, source_id: &str, target_id: &str) -> Result<(), PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::MergeItem {
@@ -308,9 +311,84 @@ fn build_batch_commit_message(phases: &[(String, String, Option<String>)]) -> St
     }
 }
 
-fn restore_from_blocked(item: &mut BacklogItem) -> Result<(), String> {
-    let restore_to = item.blocked_from_status.clone().unwrap_or(ItemStatus::New);
-    crate::backlog::transition_status(item, restore_to)
+/// Build merge context text from a source Item for appending to the target's description.
+fn build_merge_context(source: &Item) -> String {
+    let mut merge_parts = vec![format!(
+        "[Merged from {}] Title: {}",
+        source.id, source.title
+    )];
+
+    let pg_source = PgItem(source.clone());
+    if let Some(desc) = pg_source.structured_description() {
+        if !desc.context.is_empty() {
+            merge_parts.push(format!("Context: {}", desc.context));
+        }
+        if !desc.problem.is_empty() {
+            merge_parts.push(format!("Problem: {}", desc.problem));
+        }
+    } else if let Some(ref native_desc) = source.description {
+        if !native_desc.is_empty() {
+            merge_parts.push(format!("Context: {}", native_desc));
+        }
+    }
+
+    if let Some(origin) = pg_source.origin() {
+        merge_parts.push(format!("Origin: {}", origin));
+    }
+
+    merge_parts.join(". ")
+}
+
+// --- Retry helper ---
+
+/// Maximum total attempts for store operations (1 initial + 2 retries).
+const MAX_STORE_ATTEMPTS: u32 = 3;
+/// Backoff duration between retry attempts.
+const RETRY_BACKOFF: Duration = Duration::from_secs(1);
+
+/// Execute a store operation with retry for LockTimeout errors.
+///
+/// The closure receives a cloned `Store` and returns `Result<T, PgError>`.
+/// Retry wraps the entire `spawn_blocking` call (blocking thread freed between retries).
+/// Non-retryable errors return immediately.
+async fn with_store_retry<F, T>(store: &Store, f: F) -> Result<T, PgError>
+where
+    F: Fn(Store) -> Result<T, PgError> + Send + 'static + Clone,
+    T: Send + std::fmt::Debug + 'static,
+{
+    let mut last_error: Option<PgError> = None;
+
+    for attempt in 0..MAX_STORE_ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(RETRY_BACKOFF).await;
+        }
+
+        let store_clone = store.clone();
+        let f_clone = f.clone();
+
+        let join_result = tokio::task::spawn_blocking(move || f_clone(store_clone)).await;
+
+        let result = match join_result {
+            Ok(r) => r,
+            Err(e) => return Err(PgError::InternalPanic(format!("{e:?}"))),
+        };
+
+        match result {
+            Ok(val) => return Ok(val),
+            Err(ref e) if e.is_retryable() => {
+                log_warn!(
+                    "Store operation failed (attempt {}/{}): {}",
+                    attempt + 1,
+                    MAX_STORE_ATTEMPTS,
+                    e
+                );
+                last_error = Some(result.unwrap_err());
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| PgError::InternalPanic("retry exhausted with no error".to_string())))
 }
 
 // --- Actor implementation ---
@@ -318,9 +396,7 @@ fn restore_from_blocked(item: &mut BacklogItem) -> Result<(), String> {
 const CHANNEL_CAPACITY: usize = 32;
 
 struct CoordinatorState {
-    backlog: BacklogFile,
-    backlog_path: PathBuf,
-    inbox_path: PathBuf,
+    store: Store,
     project_root: PathBuf,
     prefix: String,
     /// Tracks non-destructive phase completions pending batch commit.
@@ -329,233 +405,438 @@ struct CoordinatorState {
 }
 
 impl CoordinatorState {
-    fn find_item_mut(&mut self, id: &str) -> Result<&mut BacklogItem, String> {
-        self.backlog
-            .items
-            .iter_mut()
-            .find(|i| i.id == id)
-            .ok_or_else(|| format!("Item {} not found in backlog", id))
-    }
-
-    fn save_backlog(&self) -> Result<(), String> {
-        crate::backlog::save(&self.backlog_path, &self.backlog)
-    }
-
     fn worklog_dir(&self) -> PathBuf {
         self.project_root.join("_worklog")
     }
 }
 
-fn handle_get_snapshot(state: &CoordinatorState) -> BacklogFile {
-    state.backlog.clone()
+// --- Handler implementations ---
+
+async fn handle_get_snapshot(state: &CoordinatorState) -> Result<Vec<PgItem>, PgError> {
+    let store = state.store.clone();
+    let items = tokio::task::spawn_blocking(move || store.load_active())
+        .await
+        .map_err(|e| PgError::InternalPanic(format!("{e:?}")))?
+        .map_err(PgError::from)?;
+
+    Ok(items.into_iter().map(PgItem).collect())
 }
 
-fn handle_update_item(
-    state: &mut CoordinatorState,
-    id: &str,
+async fn handle_update_item(
+    state: &CoordinatorState,
+    id: String,
     update: ItemUpdate,
-) -> Result<(), String> {
-    let item = state.find_item_mut(id)?;
-
-    match update {
-        ItemUpdate::TransitionStatus(new_status) => {
-            crate::backlog::transition_status(item, new_status)?;
-        }
-        ItemUpdate::SetPhase(phase) => {
-            item.phase = Some(phase);
-            item.updated = chrono::Utc::now().to_rfc3339();
-        }
-        ItemUpdate::SetPhasePool(pool) => {
-            item.phase_pool = Some(pool);
-            item.updated = chrono::Utc::now().to_rfc3339();
-        }
-        ItemUpdate::ClearPhase => {
-            item.phase = None;
-            item.phase_pool = None;
-            item.updated = chrono::Utc::now().to_rfc3339();
-        }
-        ItemUpdate::SetBlocked(reason) => {
-            crate::backlog::transition_status(item, ItemStatus::Blocked)?;
-            item.blocked_reason = Some(reason);
-        }
-        ItemUpdate::Unblock => {
-            if item.status != ItemStatus::Blocked {
-                return Err(format!("Item {} is not blocked", id));
-            }
-            restore_from_blocked(item)?;
-        }
-        ItemUpdate::UpdateAssessments(assessments) => {
-            crate::backlog::update_assessments(item, &assessments);
-        }
-        ItemUpdate::SetPipelineType(pipeline_type) => {
-            item.pipeline_type = Some(pipeline_type);
-            item.updated = chrono::Utc::now().to_rfc3339();
-        }
-        ItemUpdate::SetLastPhaseCommit(sha) => {
-            item.last_phase_commit = Some(sha);
-            item.updated = chrono::Utc::now().to_rfc3339();
-        }
-        ItemUpdate::SetDescription(description) => {
-            item.description = Some(description);
-            item.updated = chrono::Utc::now().to_rfc3339();
-        }
-    }
-
-    state.save_backlog()
+) -> Result<(), PgError> {
+    with_store_retry(&state.store, move |store| {
+        store
+            .with_lock(|s| {
+                let mut items = s.load_active()?;
+                let idx = items
+                    .iter()
+                    .position(|i| i.id == id)
+                    .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(id.clone()))?;
+                pg_item::apply_update(&mut items[idx], update.clone());
+                s.save_active(&items)
+            })
+            .map_err(PgError::from)
+    })
+    .await
 }
 
-fn handle_record_phase_start(
-    state: &mut CoordinatorState,
-    item_id: &str,
-    commit_sha: &str,
-) -> Result<(), String> {
-    let item = state.find_item_mut(item_id)?;
-    item.last_phase_commit = Some(commit_sha.to_string());
-    item.updated = chrono::Utc::now().to_rfc3339();
-    state.save_backlog()
+async fn handle_record_phase_start(
+    state: &CoordinatorState,
+    item_id: String,
+    commit_sha: String,
+) -> Result<(), PgError> {
+    with_store_retry(&state.store, move |store| {
+        store
+            .with_lock(|s| {
+                let mut items = s.load_active()?;
+                let idx = items
+                    .iter()
+                    .position(|i| i.id == item_id)
+                    .ok_or_else(|| {
+                        task_golem::errors::TgError::ItemNotFound(item_id.clone())
+                    })?;
+                pg_item::set_last_phase_commit(&mut items[idx], Some(&commit_sha));
+                s.save_active(&items)
+            })
+            .map_err(PgError::from)
+    })
+    .await
 }
 
 fn handle_write_worklog(
     state: &CoordinatorState,
-    item: &BacklogItem,
+    id: &str,
+    title: &str,
     phase: &str,
     outcome: &str,
     summary: &str,
-) -> Result<(), String> {
-    crate::worklog::write_entry(&state.worklog_dir(), item, phase, outcome, summary)
+) -> Result<(), PgError> {
+    crate::worklog::write_entry(&state.worklog_dir(), id, title, phase, outcome, summary)
+        .map_err(PgError::Git)
 }
 
-fn handle_archive_single_item(state: &mut CoordinatorState, item_id: &str) -> Result<(), String> {
+async fn handle_archive_item(
+    state: &CoordinatorState,
+    item_id: String,
+) -> Result<(), PgError> {
     let worklog_dir = state.worklog_dir();
+
+    // Store operation: find item, archive it, remove from active, save
+    let archived_item = with_store_retry(&state.store, move |store| {
+        store
+            .with_lock(|s| {
+                let mut items = s.load_active()?;
+                let idx = items
+                    .iter()
+                    .position(|i| i.id == item_id)
+                    .ok_or_else(|| {
+                        task_golem::errors::TgError::ItemNotFound(item_id.clone())
+                    })?;
+
+                let item = items.remove(idx);
+                s.append_to_archive(&item)?;
+                s.save_active(&items)?;
+                Ok(item)
+            })
+            .map_err(PgError::from)
+    })
+    .await?;
+
+    // Write worklog entry outside the lock
     let worklog_month = chrono::Utc::now().format("%Y-%m").to_string();
     let worklog_path = worklog_dir.join(format!("{}.md", worklog_month));
 
-    crate::backlog::archive_item(
-        &mut state.backlog,
-        item_id,
-        &state.backlog_path,
-        &worklog_path,
-    )
+    write_archive_worklog_entry(&worklog_path, &archived_item)
+        .map_err(|e| PgError::Git(format!("Worklog write failed: {}", e)))?;
+
+    Ok(())
 }
 
-fn handle_ingest_follow_ups(
-    state: &mut CoordinatorState,
-    follow_ups: &[FollowUp],
-    origin: &str,
-) -> Result<Vec<String>, String> {
-    let new_items =
-        crate::backlog::ingest_follow_ups(&mut state.backlog, follow_ups, origin, &state.prefix);
-    let new_ids: Vec<String> = new_items.iter().map(|i| i.id.clone()).collect();
-    state.save_backlog()?;
-    Ok(new_ids)
+/// Write an archive worklog entry for a completed/archived item.
+fn write_archive_worklog_entry(worklog_path: &Path, item: &Item) -> Result<(), String> {
+    use std::fs::{self, OpenOptions};
+    use std::io::Write;
+
+    let worklog_dir = worklog_path
+        .parent()
+        .ok_or_else(|| "Cannot determine worklog directory".to_string())?;
+
+    fs::create_dir_all(worklog_dir).map_err(|e| {
+        format!(
+            "Failed to create worklog directory {}: {}",
+            worklog_dir.display(),
+            e
+        )
+    })?;
+
+    let pg = PgItem(item.clone());
+    let datetime = chrono::Utc::now().to_rfc3339();
+    let phase = pg.phase().unwrap_or_else(|| "unknown".to_string());
+
+    let entry = format!(
+        "## {} — {} ({})\n\n- **Phase:** {}\n- **Outcome:** Archived\n- **Summary:** Item archived\n\n---\n\n",
+        datetime, item.id, item.title, phase,
+    );
+
+    let mut file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(worklog_path)
+        .map_err(|e| {
+            format!(
+                "Failed to open worklog at {}: {}",
+                worklog_path.display(),
+                e
+            )
+        })?;
+
+    file.write_all(entry.as_bytes()).map_err(|e| {
+        format!(
+            "Failed to write worklog at {}: {}",
+            worklog_path.display(),
+            e
+        )
+    })?;
+
+    Ok(())
 }
 
-fn handle_unblock_item(
-    state: &mut CoordinatorState,
-    item_id: &str,
-    context: Option<String>,
-) -> Result<(), String> {
-    let item = state.find_item_mut(item_id)?;
-
-    if item.status != ItemStatus::Blocked {
-        return Err(format!(
-            "Item {} is not blocked (status: {:?})",
-            item_id, item.status
-        ));
-    }
-
-    restore_from_blocked(item)?;
-
-    if let Some(ctx) = context {
-        item.unblock_context = Some(ctx);
-    }
-
-    // Reset last_phase_commit for staleness-blocked items
-    item.last_phase_commit = None;
-
-    state.save_backlog()
-}
-
-fn handle_merge_item(
-    state: &mut CoordinatorState,
-    source_id: &str,
-    target_id: &str,
-) -> Result<(), String> {
-    crate::backlog::merge_item(&mut state.backlog, source_id, target_id)?;
-    state.save_backlog()
-}
-
-fn handle_ingest_inbox(state: &mut CoordinatorState) -> Result<Vec<String>, String> {
-    let items = match crate::backlog::load_inbox(&state.inbox_path) {
-        Err(msg) => {
-            log_warn!(
-                "Failed to parse BACKLOG_INBOX.yaml: {}. File left in place for manual correction.",
-                msg
-            );
-            return Ok(vec![]);
-        }
-        Ok(None) => return Ok(vec![]),
-        Ok(Some(items)) => items,
-    };
-
-    if items.is_empty() {
-        let _ = crate::backlog::clear_inbox(&state.inbox_path);
+async fn handle_ingest_follow_ups(
+    state: &CoordinatorState,
+    follow_ups: Vec<FollowUp>,
+    origin: String,
+    prefix: String,
+) -> Result<Vec<String>, PgError> {
+    if follow_ups.is_empty() {
         return Ok(vec![]);
     }
 
-    // Record pre-ingestion state for rollback
-    let pre_items_len = state.backlog.items.len();
-    let pre_next_item_id = state.backlog.next_item_id;
+    with_store_retry(&state.store, move |store| {
+        store
+            .with_lock(|s| {
+                let mut items = s.load_active()?;
+                let known_ids = s.all_known_ids()?;
 
-    let created = crate::backlog::ingest_inbox_items(&mut state.backlog, &items, &state.prefix);
-    let new_ids: Vec<String> = created.iter().map(|i| i.id.clone()).collect();
+                let mut new_ids = Vec::new();
+                let mut current_known = known_ids;
 
-    // Save backlog — rollback on failure
-    if let Err(e) = state.save_backlog() {
-        log_error!("Failed to save backlog after inbox ingestion: {}", e);
-        state.backlog.items.truncate(pre_items_len);
-        state.backlog.next_item_id = pre_next_item_id;
-        return Err(e);
+                for fu in &follow_ups {
+                    let id = generate_id_with_prefix(&current_known, &prefix)
+                        .map_err(|e| match e {
+                            task_golem::errors::TgError::IdCollisionExhausted(n) => {
+                                task_golem::errors::TgError::IdCollisionExhausted(n)
+                            }
+                            other => other,
+                        })?;
+
+                    current_known.insert(id.clone());
+
+                    let mut pg = pg_item::new_from_parts(
+                        id.clone(),
+                        fu.title.clone(),
+                        ItemStatus::New,
+                        vec![],
+                        vec![],
+                    );
+
+                    // Set origin
+                    pg_item::set_origin(&mut pg.0, Some(&origin));
+
+                    // Set suggested assessments if provided
+                    if let Some(ref size) = fu.suggested_size {
+                        pg_item::set_size(&mut pg.0, Some(size));
+                    }
+                    if let Some(ref risk) = fu.suggested_risk {
+                        pg_item::set_risk(&mut pg.0, Some(risk));
+                    }
+
+                    // Set context as structured description if provided
+                    if let Some(ref context) = fu.context {
+                        let desc = StructuredDescription {
+                            context: context.clone(),
+                            problem: String::new(),
+                            solution: String::new(),
+                            impact: String::new(),
+                            sizing_rationale: String::new(),
+                        };
+                        pg_item::set_structured_description(&mut pg.0, Some(&desc));
+                    }
+
+                    new_ids.push(id);
+                    items.push(pg.0);
+                }
+
+                s.save_active(&items)?;
+                Ok(new_ids)
+            })
+            .map_err(PgError::from)
+    })
+    .await
+}
+
+async fn handle_unblock_item(
+    state: &CoordinatorState,
+    item_id: String,
+    context: Option<String>,
+) -> Result<(), PgError> {
+    with_store_retry(&state.store, move |store| {
+        store
+            .with_lock(|s| {
+                let mut items = s.load_active()?;
+                let idx = items
+                    .iter()
+                    .position(|i| i.id == item_id)
+                    .ok_or_else(|| {
+                        task_golem::errors::TgError::ItemNotFound(item_id.clone())
+                    })?;
+
+                let pg = PgItem(items[idx].clone());
+                if pg.pg_status() != ItemStatus::Blocked {
+                    return Err(task_golem::errors::TgError::InvalidTransition {
+                        from: items[idx].status,
+                        to: task_golem::model::status::Status::Todo,
+                    });
+                }
+
+                // Read the blocked_from_status before clearing
+                let restore_to = pg.pg_blocked_from_status().unwrap_or(ItemStatus::New);
+
+                // Clear all blocked fields (extension and native)
+                pg_item::set_blocked_from_status(&mut items[idx], None);
+                items[idx].blocked_reason = None;
+                items[idx].blocked_from_status = None;
+                pg_item::set_blocked_type(&mut items[idx], None);
+                pg_item::set_unblock_context(&mut items[idx], None);
+
+                // Set unblock context if provided
+                if let Some(ref ctx) = context {
+                    pg_item::set_unblock_context(&mut items[idx], Some(ctx));
+                }
+
+                // Restore to the saved status
+                pg_item::set_pg_status(&mut items[idx], restore_to);
+
+                // Reset last_phase_commit for staleness-blocked items
+                pg_item::set_last_phase_commit(&mut items[idx], None);
+
+                s.save_active(&items)
+            })
+            .map_err(PgError::from)
+    })
+    .await
+}
+
+async fn handle_merge_item(
+    state: &CoordinatorState,
+    source_id: String,
+    target_id: String,
+) -> Result<(), PgError> {
+    if source_id == target_id {
+        return Err(PgError::CycleDetected(format!(
+            "Cannot merge item {} into itself",
+            source_id
+        )));
     }
 
-    // Clear inbox — warn on failure but still return success
-    if let Err(e) = crate::backlog::clear_inbox(&state.inbox_path) {
-        log_warn!(
-            "Failed to delete inbox file after ingestion: {}. Items already saved.",
-            e
-        );
-    }
+    with_store_retry(&state.store, move |store| {
+        store
+            .with_lock(|s| {
+                let mut items = s.load_active()?;
 
-    Ok(new_ids)
+                let source_idx = items
+                    .iter()
+                    .position(|i| i.id == source_id)
+                    .ok_or_else(|| {
+                        task_golem::errors::TgError::ItemNotFound(format!(
+                            "Source item {} not found",
+                            source_id
+                        ))
+                    })?;
+
+                let _target_idx = items
+                    .iter()
+                    .position(|i| i.id == target_id)
+                    .ok_or_else(|| {
+                        task_golem::errors::TgError::ItemNotFound(format!(
+                            "Target item {} not found",
+                            target_id
+                        ))
+                    })?;
+
+                // Remove source first
+                let source = items.remove(source_idx);
+
+                // Build merge context from source
+                let merge_text = build_merge_context(&source);
+
+                // Find target (index may have shifted after remove)
+                let target = items
+                    .iter_mut()
+                    .find(|i| i.id == target_id)
+                    .expect("target exists — validated above");
+
+                // Append merge context to target description
+                let pg_target = PgItem(target.clone());
+                let mut desc = pg_target
+                    .structured_description()
+                    .unwrap_or_default();
+
+                if desc.context.is_empty() {
+                    desc.context = merge_text;
+                } else {
+                    desc.context = format!("{}\n{}", desc.context, merge_text);
+                }
+                pg_item::set_structured_description(target, Some(&desc));
+
+                // Union-merge dependencies (dedup, no self-refs)
+                let source_deps = source.dependencies.clone();
+                for dep in &source_deps {
+                    if dep != &target_id
+                        && dep != &source_id
+                        && !target.dependencies.contains(dep)
+                    {
+                        target.dependencies.push(dep.clone());
+                    }
+                }
+
+                target.updated_at = chrono::Utc::now();
+
+                // Strip source ID from all remaining items' dependency lists
+                for item in &mut items {
+                    item.dependencies.retain(|dep| dep != &source_id);
+                }
+
+                // Archive the source
+                s.append_to_archive(&source)?;
+
+                s.save_active(&items)
+            })
+            .map_err(PgError::from)
+    })
+    .await
 }
 
 // --- Actor loop ---
 
 async fn run_coordinator(
     mut rx: mpsc::Receiver<CoordinatorCommand>,
-    backlog: BacklogFile,
-    backlog_path: PathBuf,
-    inbox_path: PathBuf,
+    store: Store,
     project_root: PathBuf,
     prefix: String,
 ) {
+    // Startup probe: verify the store is accessible
+    match store.load_active() {
+        Ok(_) => {
+            // Check for uncommitted changes as a warning
+            let project_root_for_check = project_root.clone();
+            if let Ok(output) = std::process::Command::new("git")
+                .args(["status", "--porcelain", ".task-golem/tasks.jsonl"])
+                .current_dir(&project_root_for_check)
+                .output()
+            {
+                let status_text = String::from_utf8_lossy(&output.stdout);
+                if !status_text.trim().is_empty() {
+                    log_warn!(
+                        "tasks.jsonl has uncommitted changes — run `git add .task-golem/ && git commit -m 'recovery'` or `git checkout .task-golem/tasks.jsonl` to resolve."
+                    );
+                }
+            }
+        }
+        Err(ref e) if matches!(e, task_golem::errors::TgError::NotInitialized(_)) => {
+            log_error!("Store not initialized: {}. Run `tg init` first.", e);
+            // The coordinator will still start but GetSnapshot etc. will fail
+        }
+        Err(ref e) if matches!(e, task_golem::errors::TgError::StorageCorruption(_) | task_golem::errors::TgError::SchemaVersionUnsupported { .. }) => {
+            log_error!("Storage corruption detected on startup: {}. Recovery: `git checkout .task-golem/tasks.jsonl`", e);
+            // Coordinator starts but operations will fail
+        }
+        Err(e) => {
+            log_error!("Unexpected error during startup probe: {}", e);
+        }
+    }
+
     let mut state = CoordinatorState {
-        backlog,
-        backlog_path,
-        inbox_path,
+        store,
         project_root,
         prefix,
         pending_batch_phases: Vec::new(),
     };
 
     while let Some(cmd) = rx.recv().await {
+        let is_fatal_result: Option<bool>;
+
         match cmd {
             CoordinatorCommand::GetSnapshot { reply } => {
-                let snapshot = handle_get_snapshot(&state);
-                let _ = reply.send(snapshot);
+                let result = handle_get_snapshot(&state).await;
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
+                let _ = reply.send(result);
             }
             CoordinatorCommand::UpdateItem { id, update, reply } => {
-                let result = handle_update_item(&mut state, &id, update);
+                let result = handle_update_item(&state, id, update).await;
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
             CoordinatorCommand::CompletePhase {
@@ -570,86 +851,202 @@ async fn run_coordinator(
                 let phase_for_push = phase_result.phase.clone();
                 let commit_summary_for_push = phase_result.commit_summary.clone();
 
-                let result = tokio::task::spawn_blocking(move || {
-                    let status = crate::git::get_status(Some(&project_root))?;
-                    let dirty_paths: Vec<PathBuf> = status
-                        .iter()
-                        .map(|entry| project_root.join(&entry.path))
-                        .collect();
+                // Step 1: Stage artifact files via phase-golem's git module
+                let staging_result: Result<(), PgError> = {
+                    let project_root_clone = project_root.clone();
+                    match tokio::task::spawn_blocking(move || {
+                        let status = crate::git::get_status(Some(&project_root_clone))
+                            .map_err(PgError::Git)?;
+                        let dirty_paths: Vec<PathBuf> = status
+                            .iter()
+                            .map(|entry| project_root_clone.join(&entry.path))
+                            .collect();
 
-                    if !dirty_paths.is_empty() {
-                        let path_refs: Vec<&Path> =
-                            dirty_paths.iter().map(|p| p.as_path()).collect();
-                        crate::git::stage_paths(&path_refs, Some(&project_root))?;
-                    }
-
-                    if is_destructive {
-                        let message = build_phase_commit_message(
-                            &item_id,
-                            &phase_result.phase,
-                            phase_result.commit_summary.as_deref(),
-                        );
-                        let post_status = crate::git::get_status(Some(&project_root))?;
-                        if has_staged_changes(&post_status) {
-                            crate::git::commit(&message, Some(&project_root))?;
+                        if !dirty_paths.is_empty() {
+                            let path_refs: Vec<&Path> =
+                                dirty_paths.iter().map(|p| p.as_path()).collect();
+                            crate::git::stage_paths(&path_refs, Some(&project_root_clone))
+                                .map_err(PgError::Git)?;
                         }
+
+                        Ok(())
+                    })
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(e) => Err(PgError::InternalPanic(format!("{e:?}"))),
+                    }
+                };
+
+                if let Err(e) = staging_result {
+                    // Staging failed — abort without JSONL update
+                    is_fatal_result = Some(e.is_fatal());
+                    let _ = reply.send(Err(e));
+                    // Check fatal below
+                    if is_fatal_result == Some(true) {
+                        break;
+                    }
+                    continue;
+                }
+
+                // Step 2: Update item state in store via with_lock
+                let store_result = {
+                    with_store_retry(&state.store, move |store| {
+                        store
+                            .with_lock(|s| {
+                                let items = s.load_active()?;
+                                // Item update is handled by the caller after CompletePhase
+                                // CompletePhase itself just stages + commits; item state updates
+                                // happen via separate UpdateItem calls in the executor
+                                s.save_active(&items)
+                            })
+                            .map_err(PgError::from)
+                    })
+                    .await
+                };
+
+                if let Err(e) = store_result {
+                    is_fatal_result = Some(e.is_fatal());
+                    let _ = reply.send(Err(e));
+                    if is_fatal_result == Some(true) {
+                        break;
+                    }
+                    continue;
+                }
+
+                // Step 3: stage task-golem files + commit (for destructive) or accumulate batch
+                if is_destructive {
+                    let project_root_clone = project_root.clone();
+                    let commit_result: Result<(), PgError> =
+                        match tokio::task::spawn_blocking(move || {
+                            tg_git::stage_self(&project_root_clone)
+                                .map_err(|e| PgError::Git(format!("stage_self failed: {}", e)))?;
+
+                            let message = build_phase_commit_message(
+                                &item_id,
+                                &phase_result.phase,
+                                phase_result.commit_summary.as_deref(),
+                            );
+
+                            let post_status =
+                                crate::git::get_status(Some(&project_root_clone))
+                                    .map_err(PgError::Git)?;
+
+                            if has_staged_changes(&post_status) {
+                                tg_git::commit(&message, &project_root_clone).map_err(|e| {
+                                    PgError::Git(format!("commit failed: {}", e))
+                                })?;
+                            }
+
+                            Ok(())
+                        })
+                        .await
+                        {
+                            Ok(r) => r,
+                            Err(e) => Err(PgError::InternalPanic(format!("{e:?}"))),
+                        };
+
+                    if let Err(ref e) = commit_result {
+                        // JSONL state is authoritative — git commit is best-effort
+                        log_warn!("CompletePhase commit failed (JSONL state preserved): {}", e);
                     }
 
-                    Ok(())
-                })
-                .await
-                .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {}", e)));
+                    is_fatal_result = None;
+                    // Return success even if commit failed — JSONL is authoritative
+                    let _ = reply.send(Ok(()));
+                } else {
+                    // Non-destructive: stage task-golem files and accumulate
+                    let project_root_clone = project_root.clone();
+                    let stage_result: Result<(), PgError> =
+                        match tokio::task::spawn_blocking(move || {
+                            tg_git::stage_self(&project_root_clone)
+                                .map_err(|e| PgError::Git(format!("stage_self failed: {}", e)))?;
+                            Ok(())
+                        })
+                        .await
+                        {
+                            Ok(r) => r,
+                            Err(e) => Err(PgError::InternalPanic(format!("{e:?}"))),
+                        };
 
-                if !is_destructive && result.is_ok() {
+                    if let Err(ref e) = stage_result {
+                        log_warn!("CompletePhase staging failed: {}", e);
+                    }
+
                     state.pending_batch_phases.push((
                         item_id_for_push,
                         phase_for_push,
                         commit_summary_for_push,
                     ));
-                }
 
-                let _ = reply.send(result);
+                    is_fatal_result = None;
+                    let _ = reply.send(Ok(()));
+                }
             }
             CoordinatorCommand::BatchCommit { reply } => {
                 if state.pending_batch_phases.is_empty() {
+                    is_fatal_result = None;
                     let _ = reply.send(Ok(()));
                 } else {
                     let project_root = state.project_root.clone();
                     let pending_batch_phases = state.pending_batch_phases.clone();
 
-                    let result = tokio::task::spawn_blocking(move || {
-                        let status = crate::git::get_status(Some(&project_root))?;
+                    let result: Result<(), PgError> = match tokio::task::spawn_blocking(move || {
+                        tg_git::stage_self(&project_root)
+                            .map_err(|e| PgError::Git(format!("stage_self failed: {}", e)))?;
+
+                        let status = crate::git::get_status(Some(&project_root))
+                            .map_err(PgError::Git)?;
+
                         if has_staged_changes(&status) {
                             let message = build_batch_commit_message(&pending_batch_phases);
-                            crate::git::commit(&message, Some(&project_root))?;
+                            tg_git::commit(&message, &project_root)
+                                .map_err(|e| PgError::Git(format!("commit failed: {}", e)))?;
                         }
+
                         Ok(())
                     })
                     .await
-                    .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {}", e)));
+                    {
+                        Ok(r) => r,
+                        Err(e) => Err(PgError::InternalPanic(format!("{e:?}"))),
+                    };
 
                     if result.is_ok() {
                         state.pending_batch_phases.clear();
                     }
 
+                    is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                     let _ = reply.send(result);
                 }
             }
             CoordinatorCommand::GetHeadSha { reply } => {
                 let project_root = state.project_root.clone();
-                let result =
-                    tokio::task::spawn_blocking(move || crate::git::get_head_sha(&project_root))
-                        .await
-                        .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {}", e)));
+                let result: Result<String, PgError> =
+                    match tokio::task::spawn_blocking(move || {
+                        crate::git::get_head_sha(&project_root).map_err(PgError::Git)
+                    })
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(e) => Err(PgError::InternalPanic(format!("{e:?}"))),
+                    };
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
             CoordinatorCommand::IsAncestor { sha, reply } => {
                 let project_root = state.project_root.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    crate::git::is_ancestor(&sha, &project_root)
-                })
-                .await
-                .unwrap_or_else(|e| Err(format!("spawn_blocking panicked: {}", e)));
+                let result: Result<bool, PgError> =
+                    match tokio::task::spawn_blocking(move || {
+                        crate::git::is_ancestor(&sha, &project_root)
+                            .map_err(PgError::Git)
+                    })
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(e) => Err(PgError::InternalPanic(format!("{e:?}"))),
+                    };
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
             CoordinatorCommand::RecordPhaseStart {
@@ -657,21 +1054,25 @@ async fn run_coordinator(
                 commit_sha,
                 reply,
             } => {
-                let result = handle_record_phase_start(&mut state, &item_id, &commit_sha);
+                let result = handle_record_phase_start(&state, item_id, commit_sha).await;
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
             CoordinatorCommand::WriteWorklog {
-                item,
+                id,
+                title,
                 phase,
                 outcome,
                 summary,
                 reply,
             } => {
-                let result = handle_write_worklog(&state, &item, &phase, &outcome, &summary);
+                let result = handle_write_worklog(&state, &id, &title, &phase, &outcome, &summary);
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
             CoordinatorCommand::ArchiveItem { item_id, reply } => {
-                let result = handle_archive_single_item(&mut state, &item_id);
+                let result = handle_archive_item(&state, item_id).await;
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
             CoordinatorCommand::IngestFollowUps {
@@ -679,7 +1080,14 @@ async fn run_coordinator(
                 origin,
                 reply,
             } => {
-                let result = handle_ingest_follow_ups(&mut state, &follow_ups, &origin);
+                let result = handle_ingest_follow_ups(
+                    &state,
+                    follow_ups,
+                    origin,
+                    state.prefix.clone(),
+                )
+                .await;
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
             CoordinatorCommand::UnblockItem {
@@ -687,11 +1095,8 @@ async fn run_coordinator(
                 context,
                 reply,
             } => {
-                let result = handle_unblock_item(&mut state, &item_id, context);
-                let _ = reply.send(result);
-            }
-            CoordinatorCommand::IngestInbox { reply } => {
-                let result = handle_ingest_inbox(&mut state);
+                let result = handle_unblock_item(&state, item_id, context).await;
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
             CoordinatorCommand::MergeItem {
@@ -699,35 +1104,32 @@ async fn run_coordinator(
                 target_id,
                 reply,
             } => {
-                let result = handle_merge_item(&mut state, &source_id, &target_id);
+                let result = handle_merge_item(&state, source_id, target_id).await;
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
         }
+
+        // Fatal error propagation: break out of the handler loop
+        if is_fatal_result == Some(true) {
+            log_error!("Fatal coordinator error — shutting down handler loop");
+            break;
+        }
     }
 
-    // Shutdown: save final backlog state when all senders drop
-    let _ = state.save_backlog();
+    // Shutdown: no in-memory state to save (all state is in task-golem store)
 }
 
 // --- Spawn ---
 
 pub fn spawn_coordinator(
-    backlog: BacklogFile,
-    backlog_path: PathBuf,
-    inbox_path: PathBuf,
+    store: Store,
     project_root: PathBuf,
     prefix: String,
 ) -> (CoordinatorHandle, tokio::task::JoinHandle<()>) {
     let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
 
-    let task_handle = tokio::spawn(run_coordinator(
-        rx,
-        backlog,
-        backlog_path,
-        inbox_path,
-        project_root,
-        prefix,
-    ));
+    let task_handle = tokio::spawn(run_coordinator(rx, store, project_root, prefix));
 
     (CoordinatorHandle { sender: tx }, task_handle)
 }
@@ -828,19 +1230,16 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_coordinator_returns_joinhandle() {
-        let backlog = BacklogFile {
-            schema_version: 3,
-            items: Vec::new(),
-            next_item_id: 0,
-        };
         let dir = tempfile::tempdir().expect("create tempdir");
-        let backlog_path = dir.path().join("BACKLOG.yaml");
-        let inbox_path = dir.path().join("BACKLOG_INBOX.yaml");
+        let tg_dir = dir.path().join(".task-golem");
+        std::fs::create_dir_all(&tg_dir).expect("create .task-golem");
+        let store = Store::new(tg_dir);
+        store.save_active(&[]).expect("init store");
+        std::fs::write(dir.path().join(".task-golem/archive.jsonl"), "{\"schema_version\":1}\n")
+            .expect("init archive");
 
         let (handle, task_handle) = spawn_coordinator(
-            backlog,
-            backlog_path,
-            inbox_path,
+            store,
             dir.path().to_path_buf(),
             "WRK".to_string(),
         );

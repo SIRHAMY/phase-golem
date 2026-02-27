@@ -2,28 +2,20 @@ use std::fs;
 
 use tempfile::TempDir;
 
-use phase_golem::types::{BacklogItem, ItemStatus};
-
-fn make_test_item() -> BacklogItem {
-    BacklogItem {
-        id: "WRK-001".to_string(),
-        title: "Test item".to_string(),
-        status: ItemStatus::Done,
-        phase: Some("review".to_string()),
-        created: "2026-01-01T00:00:00+00:00".to_string(),
-        updated: "2026-01-01T00:00:00+00:00".to_string(),
-        ..Default::default()
-    }
-}
-
 #[test]
 fn write_entry_creates_file() {
     let dir = TempDir::new().expect("Failed to create temp dir");
     let worklog_dir = dir.path().join("_worklog");
 
-    let item = make_test_item();
-    phase_golem::worklog::write_entry(&worklog_dir, &item, "Review", "Complete", "All tests pass")
-        .expect("Failed to write entry");
+    phase_golem::worklog::write_entry(
+        &worklog_dir,
+        "WRK-001",
+        "Test item",
+        "Review",
+        "Complete",
+        "All tests pass",
+    )
+    .expect("Failed to write entry");
 
     // Check that the worklog directory was created
     assert!(worklog_dir.exists(), "Worklog directory should exist");
@@ -58,10 +50,10 @@ fn write_entry_contains_expected_fields() {
     let dir = TempDir::new().expect("Failed to create temp dir");
     let worklog_dir = dir.path().join("_worklog");
 
-    let item = make_test_item();
     phase_golem::worklog::write_entry(
         &worklog_dir,
-        &item,
+        "WRK-001",
+        "Test item",
         "Build",
         "Complete",
         "Compiled successfully",
@@ -93,18 +85,27 @@ fn write_entry_appends_chronologically() {
     let dir = TempDir::new().expect("Failed to create temp dir");
     let worklog_dir = dir.path().join("_worklog");
 
-    let item1 = make_test_item();
-    let mut item2 = make_test_item();
-    item2.id = "WRK-002".to_string();
-    item2.title = "Second item".to_string();
-
     // Write first entry
-    phase_golem::worklog::write_entry(&worklog_dir, &item1, "Build", "Complete", "First entry")
-        .expect("Failed to write first entry");
+    phase_golem::worklog::write_entry(
+        &worklog_dir,
+        "WRK-001",
+        "Test item",
+        "Build",
+        "Complete",
+        "First entry",
+    )
+    .expect("Failed to write first entry");
 
     // Write second entry
-    phase_golem::worklog::write_entry(&worklog_dir, &item2, "Review", "Complete", "Second entry")
-        .expect("Failed to write second entry");
+    phase_golem::worklog::write_entry(
+        &worklog_dir,
+        "WRK-002",
+        "Second item",
+        "Review",
+        "Complete",
+        "Second entry",
+    )
+    .expect("Failed to write second entry");
 
     // Read the file
     let entries: Vec<_> = fs::read_dir(&worklog_dir)
@@ -131,10 +132,10 @@ fn write_entry_creates_parent_dirs() {
     let dir = TempDir::new().expect("Failed to create temp dir");
     let worklog_dir = dir.path().join("deep").join("nested").join("_worklog");
 
-    let item = make_test_item();
     phase_golem::worklog::write_entry(
         &worklog_dir,
-        &item,
+        "WRK-001",
+        "Test item",
         "Design",
         "Complete",
         "Deep nesting test",

@@ -11,6 +11,7 @@ use crate::config::{ExecutionConfig, PhaseGolemConfig, PipelineConfig};
 use crate::coordinator::CoordinatorHandle;
 use crate::executor;
 use crate::filter;
+use crate::pg_item;
 use crate::prompt;
 use crate::types::{
     BacklogFile, BacklogItem, DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult,
@@ -588,23 +589,9 @@ pub async fn run_scheduler(
             return Ok(build_summary(state, HaltReason::CircuitBreakerTripped));
         }
 
-        // Ingest inbox items before snapshot so new items are persisted first
-        match coordinator.ingest_inbox().await {
-            Ok(new_ids) if !new_ids.is_empty() => {
-                log_info!(
-                    "Ingested {} items from inbox: {}",
-                    new_ids.len(),
-                    new_ids.join(", ")
-                );
-            }
-            Err(e) => {
-                log_warn!("Inbox ingestion failed: {}", e);
-            }
-            _ => {}
-        }
-
-        // Get current snapshot
-        let snapshot = coordinator.get_snapshot().await?;
+        // Get current snapshot (PgItem vec -> BacklogFile for legacy consumers)
+        let pg_snapshot = coordinator.get_snapshot().await?;
+        let snapshot = pg_item::to_backlog_file(&pg_snapshot);
 
         // Check target completion/block (multi-target with cursor advancement)
         if !params.targets.is_empty() {
@@ -870,7 +857,7 @@ pub async fn run_scheduler(
 
                     join_set.spawn(async move {
                         // Get a fresh snapshot of the item for execution
-                        let snap = match coord.get_snapshot().await {
+                        let pg_snap = match coord.get_snapshot().await {
                             Ok(s) => s,
                             Err(e) => {
                                 return (
@@ -882,8 +869,8 @@ pub async fn run_scheduler(
                                 )
                             }
                         };
-                        let item = match snap.items.iter().find(|i| i.id == item_id) {
-                            Some(i) => i.clone(),
+                        let item: BacklogItem = match pg_snap.iter().find(|i| i.id() == item_id) {
+                            Some(i) => i.clone().into(),
                             None => {
                                 return (
                                     item_id,
@@ -1071,7 +1058,7 @@ async fn handle_task_completion(
     //   then re-fetches after mutations (process_merges/apply_triage_result).
     // - phase_success mutates first (assessments, follow-ups), then fetches its
     //   own snapshot at the mutation boundary — it does not use the pre-fetched one.
-    let snapshot = coordinator.get_snapshot().await?;
+    let snapshot = pg_item::to_backlog_file(&coordinator.get_snapshot().await?);
 
     match exec_result {
         PhaseExecutionResult::Success(phase_result) => {
@@ -1130,7 +1117,7 @@ async fn handle_task_completion(
             if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
                 let phase = item.phase.as_deref().unwrap_or("unknown");
                 let _ = coordinator
-                    .write_worklog(item.clone(), phase, "Cancelled", "Shutdown requested")
+                    .write_worklog(&item.id, &item.title, phase, "Cancelled", "Shutdown requested")
                     .await;
             }
             Ok(())
@@ -1179,7 +1166,7 @@ async fn handle_phase_success(
     }
 
     // Get current item state for transition resolution
-    let snapshot = coordinator.get_snapshot().await?;
+    let snapshot = pg_item::to_backlog_file(&coordinator.get_snapshot().await?);
     let item = snapshot
         .items
         .iter()
@@ -1202,7 +1189,7 @@ async fn handle_phase_success(
 
     // Write worklog entry
     let _ = coordinator
-        .write_worklog(item.clone(), &phase, "Complete", &summary)
+        .write_worklog(&item.id, &item.title, &phase, "Complete", &summary)
         .await;
 
     // Complete phase (stage + commit for destructive, stage for non-destructive)
@@ -1273,7 +1260,7 @@ async fn handle_subphase_complete(
     // Write worklog entry
     if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
         let _ = coordinator
-            .write_worklog(item.clone(), &phase, "Subphase Complete", &summary)
+            .write_worklog(&item.id, &item.title, &phase, "Subphase Complete", &summary)
             .await;
     }
 
@@ -1320,7 +1307,7 @@ async fn handle_phase_failed(
     if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
         let phase = item.phase.as_deref().unwrap_or("unknown");
         let _ = coordinator
-            .write_worklog(item.clone(), phase, "Failed", reason)
+            .write_worklog(&item.id, &item.title, phase, "Failed", reason)
             .await;
     }
 
@@ -1349,7 +1336,7 @@ async fn handle_phase_blocked(
     if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
         let phase = item.phase.as_deref().unwrap_or("unknown");
         let _ = coordinator
-            .write_worklog(item.clone(), phase, "Blocked", reason)
+            .write_worklog(&item.id, &item.title, phase, "Blocked", reason)
             .await;
     }
 
@@ -1387,7 +1374,7 @@ async fn process_merges(
 
     for dup_id in duplicates {
         // Validate the duplicate exists and isn't Done
-        let snap = coordinator.get_snapshot().await?;
+        let snap = pg_item::to_backlog_file(&coordinator.get_snapshot().await?);
         let dup_item = match snap.items.iter().find(|i| i.id == *dup_id) {
             Some(item) if item.status == ItemStatus::Done => {
                 log_info!(
@@ -1428,7 +1415,8 @@ async fn process_merges(
         if let Some(item) = merged_away_item {
             let _ = coordinator
                 .write_worklog(
-                    item,
+                    &item.id,
+                    &item.title,
                     "triage",
                     "Merged",
                     &format!("Merged into {}", target_id),
@@ -1496,7 +1484,7 @@ async fn handle_triage_success(
             ResultCode::SubphaseComplete => "Subphase Complete",
         };
         let _ = coordinator
-            .write_worklog(item.clone(), "triage", outcome, &phase_result.summary)
+            .write_worklog(&item.id, &item.title, "triage", outcome, &phase_result.summary)
             .await;
     }
 
@@ -1524,8 +1512,8 @@ async fn handle_triage_success(
     apply_triage_result(coordinator, item_id, phase_result, config).await?;
 
     // Check if item got blocked by triage
-    let snapshot = coordinator.get_snapshot().await?;
-    if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
+    let triage_snap = pg_item::to_backlog_file(&coordinator.get_snapshot().await?);
+    if let Some(item) = triage_snap.items.iter().find(|i| i.id == item_id) {
         if item.status == ItemStatus::Blocked {
             state.items_blocked.push(item_id.to_string());
         }
@@ -1608,7 +1596,7 @@ async fn spawn_triage(
     let root = root.to_path_buf();
 
     join_set.spawn(async move {
-        let snap = match coord.get_snapshot().await {
+        let pg_snap = match coord.get_snapshot().await {
             Ok(s) => s,
             Err(e) => {
                 return (
@@ -1617,8 +1605,9 @@ async fn spawn_triage(
                 )
             }
         };
-        let item = match snap.items.iter().find(|i| i.id == item_id) {
-            Some(i) => i.clone(),
+        let snap = pg_item::to_backlog_file(&pg_snap);
+        let item: BacklogItem = match pg_snap.iter().find(|i| i.id() == item_id) {
+            Some(i) => i.clone().into(),
             None => {
                 return (
                     item_id,
@@ -1699,8 +1688,8 @@ pub async fn apply_triage_result(
     match result.result {
         ResultCode::PhaseComplete => {
             // Get current item state to check routing
-            let snapshot = coordinator.get_snapshot().await?;
-            let item = snapshot
+            let route_snap = pg_item::to_backlog_file(&coordinator.get_snapshot().await?);
+            let item = route_snap
                 .items
                 .iter()
                 .find(|i| i.id == item_id)

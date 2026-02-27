@@ -2,8 +2,6 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
-use crate::types::BacklogItem;
-
 /// Write a worklog entry for a phase execution.
 ///
 /// Appends an entry to `_worklog/YYYY-MM.md`.
@@ -21,7 +19,8 @@ use crate::types::BacklogItem;
 /// ```
 pub fn write_entry(
     worklog_dir: &Path,
-    item: &BacklogItem,
+    id: &str,
+    title: &str,
     phase: &str,
     outcome: &str,
     result_summary: &str,
@@ -41,7 +40,7 @@ pub fn write_entry(
     let datetime = now.to_rfc3339();
     let entry = format!(
         "## {} — {} ({})\n\n- **Phase:** {}\n- **Outcome:** {}\n- **Summary:** {}\n\n---\n\n",
-        datetime, item.id, item.title, phase, outcome, result_summary,
+        datetime, id, title, phase, outcome, result_summary,
     );
 
     let mut file = OpenOptions::new()

@@ -9,12 +9,15 @@ use tokio_util::sync::CancellationToken;
 use phase_golem::agent::{
     install_signal_handlers, is_shutdown_requested, kill_all_children, AgentRunner, CliAgentRunner,
 };
+use task_golem::store::Store;
+
 use phase_golem::backlog;
 use phase_golem::config;
 use phase_golem::coordinator;
 use phase_golem::filter;
 use phase_golem::lock;
 use phase_golem::log::parse_log_level;
+use phase_golem::pg_item;
 use phase_golem::preflight;
 use phase_golem::prompt;
 use phase_golem::scheduler;
@@ -669,10 +672,11 @@ async fn handle_run(
 
     let runner = Arc::new(runner);
     log_info!("");
+    // Phase 3 transitional: create Store for coordinator (will be cleaned up in Phase 5)
+    let tg_store_dir = root.join(".task-golem");
+    let store = Store::new(tg_store_dir);
     let (coord_handle, coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_file_path.clone(),
-        inbox_path,
+        store,
         root.to_path_buf(),
         config.project.prefix.clone(),
     );
@@ -842,7 +846,7 @@ async fn handle_triage(
     // Load config and backlog
     let config = config::load_config_from(config_path, root)?;
     let backlog_file_path = resolve_backlog_path(config_base, &config);
-    let backlog = backlog::load(&backlog_file_path, root)?;
+    let _backlog = backlog::load(&backlog_file_path, root)?;
 
     // Construct runner from config and verify CLI
     let runner = CliAgentRunner::new(config.agent.cli.clone(), config.agent.model.clone());
@@ -856,17 +860,18 @@ async fn handle_triage(
         backlog::load_inbox(&inbox_path).map_err(|e| format!("Inbox validation failed: {}", e))?;
     }
 
-    // Spawn coordinator
+    // Phase 3 transitional: create Store for coordinator (will be cleaned up in Phase 5)
+    let tg_store_dir = root.join(".task-golem");
+    let triage_store = Store::new(tg_store_dir);
     let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_file_path,
-        inbox_path,
+        triage_store,
         root.to_path_buf(),
         config.project.prefix.clone(),
     );
 
     // Find New items to triage
-    let snapshot = coordinator_handle.get_snapshot().await?;
+    let pg_snapshot = coordinator_handle.get_snapshot().await?;
+    let snapshot = pg_item::to_backlog_file(&pg_snapshot);
     let new_item_ids: Vec<String> = snapshot
         .items
         .iter()
@@ -886,7 +891,8 @@ async fn handle_triage(
         log_info!("[{}][TRIAGE] Starting triage", item_id);
 
         let result_path = phase_golem::executor::result_file_path(root, item_id, "triage");
-        let current_snapshot = coordinator_handle.get_snapshot().await?;
+        let current_pg_snapshot = coordinator_handle.get_snapshot().await?;
+        let current_snapshot = pg_item::to_backlog_file(&current_pg_snapshot);
         let item = current_snapshot
             .items
             .iter()
