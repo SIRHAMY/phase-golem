@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 
+use crate::pg_item::PgItem;
 use crate::types::{
-    parse_dimension_level, parse_item_status, parse_size_level, BacklogFile, BacklogItem,
-    DimensionLevel, ItemStatus, SizeLevel,
+    parse_dimension_level, parse_item_status, parse_size_level, DimensionLevel, ItemStatus,
+    SizeLevel,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -182,20 +183,22 @@ pub fn parse_filter(raw: &str) -> Result<FilterCriterion, String> {
     Ok(FilterCriterion { field, values })
 }
 
-fn matches_single_value(field: &FilterField, value: &FilterValue, item: &BacklogItem) -> bool {
+fn matches_single_value(field: &FilterField, value: &FilterValue, item: &PgItem) -> bool {
     match (field, value) {
-        (FilterField::Status, FilterValue::Status(target)) => item.status == *target,
+        (FilterField::Status, FilterValue::Status(target)) => item.pg_status() == *target,
         (FilterField::Impact, FilterValue::Dimension(target)) => {
-            item.impact.as_ref() == Some(target)
+            item.impact().as_ref() == Some(target)
         }
-        (FilterField::Size, FilterValue::Size(target)) => item.size.as_ref() == Some(target),
-        (FilterField::Risk, FilterValue::Dimension(target)) => item.risk.as_ref() == Some(target),
+        (FilterField::Size, FilterValue::Size(target)) => item.size().as_ref() == Some(target),
+        (FilterField::Risk, FilterValue::Dimension(target)) => {
+            item.risk().as_ref() == Some(target)
+        }
         (FilterField::Complexity, FilterValue::Dimension(target)) => {
-            item.complexity.as_ref() == Some(target)
+            item.complexity().as_ref() == Some(target)
         }
-        (FilterField::Tag, FilterValue::Tag(target)) => item.tags.contains(target),
+        (FilterField::Tag, FilterValue::Tag(target)) => item.tags().contains(target),
         (FilterField::PipelineType, FilterValue::PipelineType(target)) => {
-            item.pipeline_type.as_deref() == Some(target.as_str())
+            item.pipeline_type().as_deref() == Some(target.as_str())
         }
         // Mismatched field/value combinations should never occur with parse_filter,
         // but return false for safety.
@@ -204,7 +207,7 @@ fn matches_single_value(field: &FilterField, value: &FilterValue, item: &Backlog
 }
 
 /// OR logic: item matches if ANY value in the criterion matches.
-pub fn matches_item(criterion: &FilterCriterion, item: &BacklogItem) -> bool {
+pub fn matches_item(criterion: &FilterCriterion, item: &PgItem) -> bool {
     criterion
         .values
         .iter()
@@ -234,19 +237,12 @@ pub fn validate_filter_criteria(criteria: &[FilterCriterion]) -> Result<(), Stri
     Ok(())
 }
 
-pub fn apply_filters(criteria: &[FilterCriterion], backlog: &BacklogFile) -> BacklogFile {
-    let items = backlog
-        .items
+pub fn apply_filters(criteria: &[FilterCriterion], items: &[PgItem]) -> Vec<PgItem> {
+    items
         .iter()
         .filter(|item| criteria.iter().all(|c| matches_item(c, item)))
         .cloned()
-        .collect();
-
-    BacklogFile {
-        items,
-        schema_version: backlog.schema_version,
-        next_item_id: backlog.next_item_id,
-    }
+        .collect()
 }
 
 pub fn format_filter_criteria(criteria: &[FilterCriterion]) -> String {

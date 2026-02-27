@@ -1,5 +1,9 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
+// Re-export legacy types from backlog.rs for binary-level backward compatibility.
+// These are defined in backlog.rs and deleted in Phase 5 along with backlog.rs itself.
+pub use crate::backlog::{BacklogFile, BacklogItem, InboxItem};
+
 // --- Enums ---
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
@@ -181,61 +185,6 @@ pub enum SchedulerAction {
 
 // --- Structs ---
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
-pub struct BacklogItem {
-    pub id: String,
-    pub title: String,
-    pub status: ItemStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub phase: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<SizeLevel>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub complexity: Option<DimensionLevel>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub risk: Option<DimensionLevel>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub impact: Option<DimensionLevel>,
-    #[serde(default)]
-    pub requires_human_review: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blocked_from_status: Option<ItemStatus>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blocked_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blocked_type: Option<BlockType>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unblock_context: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dependencies: Vec<String>,
-    pub created: String,
-    pub updated: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<StructuredDescription>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub phase_pool: Option<PhasePool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_phase_commit: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
-pub struct BacklogFile {
-    pub schema_version: u32,
-    #[serde(default)]
-    pub items: Vec<BacklogItem>,
-    /// Highest numeric suffix ever assigned for ID generation.
-    /// Used as a floor in generate_next_id() to prevent ID reuse after archival.
-    /// Formula: next_id = max(current_items_max, next_item_id) + 1
-    #[serde(default)]
-    pub next_item_id: u32,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct PhaseResult {
     pub item_id: String,
@@ -338,25 +287,6 @@ impl<'de> Deserialize<'de> for FollowUp {
             }),
         }
     }
-}
-
-/// Simplified input schema for human-written inbox items.
-/// Deserialized from BACKLOG_INBOX.yaml.
-#[derive(Debug, Clone, Deserialize)]
-pub struct InboxItem {
-    pub title: String,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub size: Option<SizeLevel>,
-    #[serde(default)]
-    pub risk: Option<DimensionLevel>,
-    #[serde(default)]
-    pub impact: Option<DimensionLevel>,
-    #[serde(default)]
-    pub pipeline_type: Option<String>,
-    #[serde(default)]
-    pub dependencies: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

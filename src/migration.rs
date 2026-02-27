@@ -5,8 +5,9 @@ use std::path::Path;
 use serde::Deserialize;
 use tempfile::NamedTempFile;
 
+use crate::backlog::{BacklogFile, BacklogItem};
 use crate::config::PipelineConfig;
-use crate::types::{BacklogFile, BacklogItem, ItemStatus, PhasePool, StructuredDescription};
+use crate::types::{ItemStatus, PhasePool, StructuredDescription};
 use crate::{log_debug, log_info, log_warn};
 
 // --- V1 Definitions (preserved for parsing old BACKLOG.yaml files) ---

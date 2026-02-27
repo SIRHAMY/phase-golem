@@ -19,7 +19,6 @@ pub struct PhaseGolemConfig {
 #[serde(default)]
 pub struct ProjectConfig {
     pub prefix: String,
-    pub backlog_path: String,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -159,7 +158,6 @@ impl Default for ProjectConfig {
     fn default() -> Self {
         Self {
             prefix: "WRK".to_string(),
-            backlog_path: "BACKLOG.yaml".to_string(),
         }
     }
 }

@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use phase_golem::config::{PhaseConfig, PipelineConfig};
+use phase_golem::pg_item::{self, PgItem};
 use phase_golem::prompt::{self, PromptParams};
 use phase_golem::types::{
-    BacklogItem, DimensionLevel, ItemStatus, PhasePool, SizeLevel, StructuredDescription,
+    DimensionLevel, ItemStatus, PhasePool, SizeLevel, StructuredDescription,
 };
 
 // --- Test helpers ---
@@ -16,26 +17,25 @@ fn default_prd_config() -> PhaseConfig {
     }
 }
 
-fn make_item(id: &str, title: &str) -> BacklogItem {
-    BacklogItem {
-        id: id.to_string(),
-        title: title.to_string(),
-        status: ItemStatus::InProgress,
-        phase: Some("prd".to_string()),
-        created: "2026-01-01T00:00:00Z".to_string(),
-        updated: "2026-01-01T00:00:00Z".to_string(),
-        ..Default::default()
-    }
+fn make_item(id: &str, title: &str) -> PgItem {
+    let mut pg = pg_item::new_from_parts(
+        id.to_string(),
+        title.to_string(),
+        ItemStatus::InProgress,
+        vec![],
+        vec![],
+    );
+    pg_item::set_phase(&mut pg.0, Some("prd"));
+    pg
 }
 
-fn make_item_with_assessments() -> BacklogItem {
-    BacklogItem {
-        size: Some(SizeLevel::Medium),
-        complexity: Some(DimensionLevel::Medium),
-        risk: Some(DimensionLevel::Low),
-        impact: Some(DimensionLevel::High),
-        ..make_item("WRK-005", "Add dark mode")
-    }
+fn make_item_with_assessments() -> PgItem {
+    let mut pg = make_item("WRK-005", "Add dark mode");
+    pg_item::set_size(&mut pg.0, Some(&SizeLevel::Medium));
+    pg_item::set_complexity(&mut pg.0, Some(&DimensionLevel::Medium));
+    pg_item::set_risk(&mut pg.0, Some(&DimensionLevel::Low));
+    pg_item::set_impact(&mut pg.0, Some(&DimensionLevel::High));
+    pg
 }
 
 fn default_pipelines() -> HashMap<String, PipelineConfig> {
@@ -355,11 +355,10 @@ fn build_prompt_includes_assessments_when_present() {
 
 #[test]
 fn build_prompt_includes_partial_assessments() {
-    let item = BacklogItem {
-        size: Some(SizeLevel::Small),
-        risk: Some(DimensionLevel::High),
-        ..make_item("WRK-007", "Partial assessments")
-    };
+    let mut item = make_item("WRK-007", "Partial assessments");
+    pg_item::set_size(&mut item.0, Some(&SizeLevel::Small));
+    pg_item::set_risk(&mut item.0, Some(&DimensionLevel::High));
+
     let result_path = Path::new(".phase-golem/result.json");
     let change_folder = Path::new("changes/WRK-007_partial");
     let phase_config = default_prd_config();
@@ -675,13 +674,13 @@ fn build_prompt_with_all_optional_sections() {
 #[test]
 fn build_prompt_includes_structured_description() {
     let mut item = make_item_with_assessments();
-    item.description = Some(StructuredDescription {
+    pg_item::set_structured_description(&mut item.0, Some(&StructuredDescription {
         context: "Settings page exists".to_string(),
         problem: "No dark mode support".to_string(),
         solution: "Add toggle component".to_string(),
         impact: "Better night-time UX".to_string(),
         sizing_rationale: "Small — UI only".to_string(),
-    });
+    }));
     let result_path = Path::new(".phase-golem/result.json");
     let change_folder = Path::new("changes/WRK-005_add-dark-mode");
     let phase_config = default_prd_config();
@@ -709,13 +708,13 @@ fn build_prompt_includes_structured_description() {
 #[test]
 fn build_prompt_skips_empty_description_fields() {
     let mut item = make_item("WRK-001", "Test");
-    item.description = Some(StructuredDescription {
+    pg_item::set_structured_description(&mut item.0, Some(&StructuredDescription {
         context: "Some context".to_string(),
         problem: String::new(),
         solution: "A solution".to_string(),
         impact: String::new(),
         sizing_rationale: String::new(),
-    });
+    }));
     let result_path = Path::new(".phase-golem/result.json");
     let change_folder = Path::new("changes/WRK-001_test");
     let phase_config = default_prd_config();
@@ -742,13 +741,13 @@ fn build_prompt_skips_empty_description_fields() {
 #[test]
 fn build_prompt_omits_description_section_when_all_empty() {
     let mut item = make_item("WRK-001", "Test");
-    item.description = Some(StructuredDescription {
+    pg_item::set_structured_description(&mut item.0, Some(&StructuredDescription {
         context: String::new(),
         problem: String::new(),
         solution: String::new(),
         impact: String::new(),
         sizing_rationale: String::new(),
-    });
+    }));
     let result_path = Path::new(".phase-golem/result.json");
     let change_folder = Path::new("changes/WRK-001_test");
     let phase_config = default_prd_config();
@@ -771,7 +770,7 @@ fn build_prompt_omits_description_section_when_all_empty() {
 #[test]
 fn build_prompt_excludes_description_when_none() {
     let item = make_item("WRK-001", "Test");
-    assert_eq!(item.description, None);
+    assert_eq!(item.structured_description(), None);
     let result_path = Path::new(".phase-golem/result.json");
     let change_folder = Path::new("changes/WRK-001_test");
     let phase_config = default_prd_config();
@@ -796,9 +795,9 @@ fn build_prompt_excludes_description_when_none() {
 #[test]
 fn context_preamble_contains_mode_and_item() {
     let mut item = make_item("WRK-003", "Orchestrator v2");
-    item.pipeline_type = Some("feature".to_string());
-    item.phase = Some("build".to_string());
-    item.phase_pool = Some(PhasePool::Main);
+    pg_item::set_pipeline_type(&mut item.0, Some("feature"));
+    pg_item::set_phase(&mut item.0, Some("build"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
 
     let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(&item, &pipeline, None, None, None);
@@ -812,9 +811,9 @@ fn context_preamble_contains_mode_and_item() {
 #[test]
 fn context_preamble_shows_phase_position() {
     let mut item = make_item("WRK-001", "Test");
-    item.pipeline_type = Some("feature".to_string());
-    item.phase = Some("build".to_string());
-    item.phase_pool = Some(PhasePool::Main);
+    pg_item::set_pipeline_type(&mut item.0, Some("feature"));
+    pg_item::set_phase(&mut item.0, Some("build"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
 
     let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(&item, &pipeline, None, None, None);
@@ -826,9 +825,9 @@ fn context_preamble_shows_phase_position() {
 #[test]
 fn context_preamble_shows_pre_phase_position() {
     let mut item = make_item("WRK-001", "Test");
-    item.pipeline_type = Some("feature".to_string());
-    item.phase = Some("research".to_string());
-    item.phase_pool = Some(PhasePool::Pre);
+    pg_item::set_pipeline_type(&mut item.0, Some("feature"));
+    pg_item::set_phase(&mut item.0, Some("research"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Pre));
 
     let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(&item, &pipeline, None, None, None);
@@ -840,16 +839,16 @@ fn context_preamble_shows_pre_phase_position() {
 #[test]
 fn context_preamble_includes_description() {
     let mut item = make_item("WRK-001", "Test");
-    item.pipeline_type = Some("feature".to_string());
-    item.phase = Some("prd".to_string());
-    item.phase_pool = Some(PhasePool::Main);
-    item.description = Some(StructuredDescription {
+    pg_item::set_pipeline_type(&mut item.0, Some("feature"));
+    pg_item::set_phase(&mut item.0, Some("prd"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
+    pg_item::set_structured_description(&mut item.0, Some(&StructuredDescription {
         context: "Settings page needs theme support".to_string(),
         problem: "No dark mode available".to_string(),
         solution: "Add dark mode toggle to settings".to_string(),
         impact: "Better UX for night users".to_string(),
         sizing_rationale: String::new(),
-    });
+    }));
 
     let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(&item, &pipeline, None, None, None);
@@ -866,8 +865,8 @@ fn context_preamble_includes_description() {
 #[test]
 fn context_preamble_includes_previous_summary() {
     let mut item = make_item("WRK-001", "Test");
-    item.phase = Some("design".to_string());
-    item.phase_pool = Some(PhasePool::Main);
+    pg_item::set_phase(&mut item.0, Some("design"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
 
     let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(
@@ -885,8 +884,8 @@ fn context_preamble_includes_previous_summary() {
 #[test]
 fn context_preamble_includes_failure_context() {
     let mut item = make_item("WRK-001", "Test");
-    item.phase = Some("build".to_string());
-    item.phase_pool = Some(PhasePool::Main);
+    pg_item::set_phase(&mut item.0, Some("build"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
 
     let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(
@@ -904,8 +903,8 @@ fn context_preamble_includes_failure_context() {
 #[test]
 fn context_preamble_includes_unblock_notes() {
     let mut item = make_item("WRK-001", "Test");
-    item.phase = Some("build".to_string());
-    item.phase_pool = Some(PhasePool::Main);
+    pg_item::set_phase(&mut item.0, Some("build"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
 
     let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(
@@ -923,8 +922,8 @@ fn context_preamble_includes_unblock_notes() {
 #[test]
 fn context_preamble_omits_empty_optional_sections() {
     let mut item = make_item("WRK-001", "Test");
-    item.phase = Some("prd".to_string());
-    item.phase_pool = Some(PhasePool::Main);
+    pg_item::set_phase(&mut item.0, Some("prd"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
 
     let pipeline = phase_golem::config::default_feature_pipeline();
     let preamble = prompt::build_context_preamble(&item, &pipeline, None, None, None);
@@ -1005,8 +1004,13 @@ fn backlog_summary_empty_for_empty_backlog() {
 
 #[test]
 fn backlog_summary_includes_status() {
-    let mut item = make_item("WRK-001", "Blocked item");
-    item.status = ItemStatus::Blocked;
+    let item = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Blocked item".to_string(),
+        ItemStatus::Blocked,
+        vec![],
+        vec![],
+    );
 
     let summary = prompt::build_backlog_summary(&[item], "WRK-999").unwrap();
     assert!(summary.contains("[blocked]"));

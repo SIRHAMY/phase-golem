@@ -2,31 +2,6 @@ use phase_golem::config::*;
 use phase_golem::config::{AgentConfig, CliTool};
 use phase_golem::types::*;
 
-// --- backlog_path config tests ---
-
-#[test]
-fn default_backlog_path_is_backlog_yaml() {
-    let config = ProjectConfig::default();
-    assert_eq!(config.backlog_path, "BACKLOG.yaml");
-}
-
-#[test]
-fn custom_backlog_path_parses_from_toml() {
-    let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join("phase-golem.toml");
-    std::fs::write(
-        &config_path,
-        r#"
-[project]
-backlog_path = ".dev/BACKLOG.yaml"
-"#,
-    )
-    .unwrap();
-
-    let config = load_config(dir.path()).unwrap();
-    assert_eq!(config.project.backlog_path, ".dev/BACKLOG.yaml");
-}
-
 // --- PhaseConfig::new() constructor tests ---
 
 #[test]

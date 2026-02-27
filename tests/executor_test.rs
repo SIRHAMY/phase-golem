@@ -3,6 +3,7 @@ mod common;
 use std::fs;
 use std::process::Command;
 
+use task_golem::model::item::Item;
 use tokio_util::sync::CancellationToken;
 
 use phase_golem::agent::MockAgentRunner;
@@ -12,31 +13,31 @@ use phase_golem::executor::{
     check_staleness, execute_phase, passes_guardrails, resolve_transition,
     validate_result_identity, StalenessResult,
 };
+use phase_golem::pg_item::{self, PgItem};
 use phase_golem::types::{
-    BacklogItem, DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult, PhasePool,
-    PhaseResult, ResultCode, SizeLevel,
+    DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult, PhasePool, PhaseResult,
+    ResultCode, SizeLevel,
 };
 
 // --- Test helpers ---
 
-fn make_feature_item(id: &str, status: ItemStatus) -> BacklogItem {
-    let mut item = common::make_item(id, status);
-    item.pipeline_type = Some("feature".to_string());
-    item
+fn make_feature_item(id: &str, status: ItemStatus) -> PgItem {
+    let mut pg = common::make_pg_item(id, status);
+    pg_item::set_pipeline_type(&mut pg.0, Some("feature"));
+    pg
 }
 
-fn make_in_progress_item(id: &str, phase: &str) -> BacklogItem {
-    let mut item = common::make_in_progress_item(id, phase);
-    item.phase_pool = Some(PhasePool::Main);
-    item.pipeline_type = Some("feature".to_string());
-    item
+fn make_in_progress_item(id: &str, phase: &str) -> PgItem {
+    let mut pg = common::make_in_progress_pg_item(id, phase);
+    pg_item::set_pipeline_type(&mut pg.0, Some("feature"));
+    pg
 }
 
-fn make_scoping_item(id: &str, phase: &str) -> BacklogItem {
-    let mut item = make_feature_item(id, ItemStatus::Scoping);
-    item.phase = Some(phase.to_string());
-    item.phase_pool = Some(PhasePool::Pre);
-    item
+fn make_scoping_item(id: &str, phase: &str) -> PgItem {
+    let mut pg = make_feature_item(id, ItemStatus::Scoping);
+    pg_item::set_phase(&mut pg.0, Some(phase));
+    pg_item::set_phase_pool(&mut pg.0, Some(&PhasePool::Pre));
+    pg
 }
 
 fn make_phase_result(item_id: &str, phase: &str, result: ResultCode) -> PhaseResult {
@@ -94,6 +95,49 @@ fn make_simple_pipeline() -> PipelineConfig {
     }
 }
 
+/// Helper to save PgItems to the store and spawn a coordinator.
+fn save_and_commit_store(
+    root: &std::path::Path,
+    store: &task_golem::store::Store,
+    items: &[Item],
+) {
+    store.save_active(items).expect("save items to store");
+
+    Command::new("git")
+        .args(["add", ".task-golem/"])
+        .current_dir(root)
+        .output()
+        .expect("stage .task-golem/");
+
+    Command::new("git")
+        .args(["commit", "-m", "Save store"])
+        .current_dir(root)
+        .output()
+        .expect("commit store");
+}
+
+fn setup_coordinator_with_items(
+    items: Vec<PgItem>,
+) -> (
+    phase_golem::coordinator::CoordinatorHandle,
+    tokio::task::JoinHandle<()>,
+    tempfile::TempDir,
+) {
+    let dir = common::setup_test_env();
+    let store = common::setup_task_golem_store(dir.path());
+
+    let raw_items: Vec<Item> = items.into_iter().map(|pg| pg.0).collect();
+    save_and_commit_store(dir.path(), &store, &raw_items);
+
+    let (handle, coord_task) = spawn_coordinator(
+        store,
+        dir.path().to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    (handle, coord_task, dir)
+}
+
 // --- resolve_transition tests ---
 
 #[test]
@@ -113,7 +157,7 @@ fn resolve_transition_last_pre_phase_passes_guardrails_promotes_to_ready() {
 #[test]
 fn resolve_transition_last_pre_phase_fails_guardrails_blocks() {
     let mut item = make_scoping_item("WRK-001", "research");
-    item.size = Some(SizeLevel::Large); // Exceeds max_size: Medium
+    pg_item::set_size(&mut item.0, Some(&SizeLevel::Large)); // Exceeds max_size: Medium
     let result = make_phase_result("WRK-001", "research", ResultCode::PhaseComplete);
     let pipeline = make_simple_pipeline();
     let guardrails = default_guardrails();
@@ -132,7 +176,7 @@ fn resolve_transition_last_pre_phase_fails_guardrails_blocks() {
 #[test]
 fn resolve_transition_last_pre_phase_requires_human_review_blocks() {
     let mut item = make_scoping_item("WRK-001", "research");
-    item.requires_human_review = true;
+    pg_item::set_requires_human_review(&mut item.0, true);
     let result = make_phase_result("WRK-001", "research", ResultCode::PhaseComplete);
     let pipeline = make_simple_pipeline();
     let guardrails = default_guardrails();
@@ -276,7 +320,7 @@ fn resolve_transition_subphase_complete_returns_empty() {
 #[test]
 fn resolve_transition_no_phase_pool_treats_as_main() {
     let mut item = make_in_progress_item("WRK-001", "prd");
-    item.phase_pool = None; // Missing phase_pool
+    pg_item::set_phase_pool(&mut item.0, None); // Missing phase_pool
     let result = make_phase_result("WRK-001", "prd", ResultCode::PhaseComplete);
     let pipeline = make_simple_pipeline();
     let guardrails = default_guardrails();
@@ -292,9 +336,9 @@ fn resolve_transition_no_phase_pool_treats_as_main() {
 #[test]
 fn passes_guardrails_all_within_limits() {
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.size = Some(SizeLevel::Small);
-    item.complexity = Some(DimensionLevel::Low);
-    item.risk = Some(DimensionLevel::Low);
+    pg_item::set_size(&mut item.0, Some(&SizeLevel::Small));
+    pg_item::set_complexity(&mut item.0, Some(&DimensionLevel::Low));
+    pg_item::set_risk(&mut item.0, Some(&DimensionLevel::Low));
     let guardrails = default_guardrails();
 
     assert!(passes_guardrails(&item, &guardrails));
@@ -311,7 +355,7 @@ fn passes_guardrails_missing_dimensions_pass() {
 #[test]
 fn passes_guardrails_size_exceeds() {
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.size = Some(SizeLevel::Large);
+    pg_item::set_size(&mut item.0, Some(&SizeLevel::Large));
     let guardrails = default_guardrails(); // max_size: Medium
 
     assert!(!passes_guardrails(&item, &guardrails));
@@ -320,7 +364,7 @@ fn passes_guardrails_size_exceeds() {
 #[test]
 fn passes_guardrails_risk_exceeds() {
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.risk = Some(DimensionLevel::Medium);
+    pg_item::set_risk(&mut item.0, Some(&DimensionLevel::Medium));
     let guardrails = default_guardrails(); // max_risk: Low
 
     assert!(!passes_guardrails(&item, &guardrails));
@@ -329,7 +373,7 @@ fn passes_guardrails_risk_exceeds() {
 #[test]
 fn passes_guardrails_complexity_exceeds() {
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.complexity = Some(DimensionLevel::High);
+    pg_item::set_complexity(&mut item.0, Some(&DimensionLevel::High));
     let guardrails = default_guardrails(); // max_complexity: Medium
 
     assert!(!passes_guardrails(&item, &guardrails));
@@ -338,9 +382,9 @@ fn passes_guardrails_complexity_exceeds() {
 #[test]
 fn passes_guardrails_at_exact_limit_passes() {
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.size = Some(SizeLevel::Medium);
-    item.complexity = Some(DimensionLevel::Medium);
-    item.risk = Some(DimensionLevel::Low);
+    pg_item::set_size(&mut item.0, Some(&SizeLevel::Medium));
+    pg_item::set_complexity(&mut item.0, Some(&DimensionLevel::Medium));
+    pg_item::set_risk(&mut item.0, Some(&DimensionLevel::Low));
     let guardrails = default_guardrails();
 
     assert!(passes_guardrails(&item, &guardrails));
@@ -350,15 +394,7 @@ fn passes_guardrails_at_exact_limit_passes() {
 
 #[tokio::test]
 async fn check_staleness_no_prior_commit_proceeds() {
-    let dir = common::setup_test_env();
-    let backlog = common::make_backlog(vec![]);
-    let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task, _dir) = setup_coordinator_with_items(vec![]);
 
     let item = make_in_progress_item("WRK-001", "build");
     let phase_config = PhaseConfig {
@@ -401,17 +437,17 @@ async fn check_staleness_ancestor_commit_proceeds() {
         .output()
         .unwrap();
 
-    let backlog = common::make_backlog(vec![]);
+    let store = common::setup_task_golem_store(dir.path());
+    save_and_commit_store(dir.path(), &store, &[]);
+
     let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
+        store,
         dir.path().to_path_buf(),
         "WRK".to_string(),
     );
 
     let mut item = make_in_progress_item("WRK-001", "build");
-    item.last_phase_commit = Some(head_sha);
+    pg_item::set_last_phase_commit(&mut item.0, Some(&head_sha));
 
     let phase_config = PhaseConfig {
         staleness: StalenessAction::Block,
@@ -458,17 +494,17 @@ async fn check_staleness_not_ancestor_with_warn_config_warns() {
         .output()
         .unwrap();
 
-    let backlog = common::make_backlog(vec![]);
+    let store = common::setup_task_golem_store(dir.path());
+    save_and_commit_store(dir.path(), &store, &[]);
+
     let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
+        store,
         dir.path().to_path_buf(),
         "WRK".to_string(),
     );
 
     let mut item = make_in_progress_item("WRK-001", "build");
-    item.last_phase_commit = Some(head_sha);
+    pg_item::set_last_phase_commit(&mut item.0, Some(&head_sha));
 
     let phase_config = PhaseConfig {
         staleness: StalenessAction::Warn,
@@ -513,17 +549,17 @@ async fn check_staleness_not_ancestor_with_block_config_blocks() {
         .output()
         .unwrap();
 
-    let backlog = common::make_backlog(vec![]);
+    let store = common::setup_task_golem_store(dir.path());
+    save_and_commit_store(dir.path(), &store, &[]);
+
     let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
+        store,
         dir.path().to_path_buf(),
         "WRK".to_string(),
     );
 
     let mut item = make_in_progress_item("WRK-001", "build");
-    item.last_phase_commit = Some(head_sha);
+    pg_item::set_last_phase_commit(&mut item.0, Some(&head_sha));
 
     let phase_config = PhaseConfig {
         staleness: StalenessAction::Block,
@@ -574,17 +610,17 @@ async fn check_staleness_not_ancestor_with_ignore_config_proceeds() {
         .output()
         .unwrap();
 
-    let backlog = common::make_backlog(vec![]);
+    let store = common::setup_task_golem_store(dir.path());
+    save_and_commit_store(dir.path(), &store, &[]);
+
     let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
+        store,
         dir.path().to_path_buf(),
         "WRK".to_string(),
     );
 
     let mut item = make_in_progress_item("WRK-001", "build");
-    item.last_phase_commit = Some(head_sha);
+    pg_item::set_last_phase_commit(&mut item.0, Some(&head_sha));
 
     let phase_config = PhaseConfig::new("build", true);
 
@@ -595,19 +631,13 @@ async fn check_staleness_not_ancestor_with_ignore_config_proceeds() {
 
 #[tokio::test]
 async fn check_staleness_unknown_commit_blocks_regardless_of_config() {
-    let dir = common::setup_test_env();
-
-    let backlog = common::make_backlog(vec![]);
-    let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task, _dir) = setup_coordinator_with_items(vec![]);
 
     let mut item = make_in_progress_item("WRK-001", "build");
-    item.last_phase_commit = Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string());
+    pg_item::set_last_phase_commit(
+        &mut item.0,
+        Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
+    );
 
     let phase_config = PhaseConfig::new("build", true); // Even with ignore, unknown commits block
 
@@ -625,19 +655,8 @@ async fn check_staleness_unknown_commit_blocks_regardless_of_config() {
 
 #[tokio::test]
 async fn execute_phase_success_returns_success() {
-    let dir = common::setup_test_env();
     let item = make_in_progress_item("WRK-001", "prd");
-    let backlog = common::make_backlog(vec![item.clone()]);
-
-    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
-
-    let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task, dir) = setup_coordinator_with_items(vec![item.clone()]);
 
     let phase_result = PhaseResult {
         item_id: "WRK-001".to_string(),
@@ -682,19 +701,8 @@ async fn execute_phase_success_returns_success() {
 
 #[tokio::test]
 async fn execute_phase_failure_with_retry_returns_failed_after_exhaustion() {
-    let dir = common::setup_test_env();
     let item = make_in_progress_item("WRK-001", "prd");
-    let backlog = common::make_backlog(vec![item.clone()]);
-
-    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
-
-    let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task, dir) = setup_coordinator_with_items(vec![item.clone()]);
 
     // Config with max_retries: 1 (so 2 total attempts)
     let mut config = common::default_config();
@@ -757,19 +765,8 @@ async fn execute_phase_failure_with_retry_returns_failed_after_exhaustion() {
 
 #[tokio::test]
 async fn execute_phase_subphase_complete_returns_immediately() {
-    let dir = common::setup_test_env();
     let item = make_in_progress_item("WRK-001", "build");
-    let backlog = common::make_backlog(vec![item.clone()]);
-
-    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
-
-    let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task, dir) = setup_coordinator_with_items(vec![item.clone()]);
 
     let subphase_result = PhaseResult {
         item_id: "WRK-001".to_string(),
@@ -814,19 +811,8 @@ async fn execute_phase_subphase_complete_returns_immediately() {
 
 #[tokio::test]
 async fn execute_phase_cancellation_returns_cancelled() {
-    let dir = common::setup_test_env();
     let item = make_in_progress_item("WRK-001", "prd");
-    let backlog = common::make_backlog(vec![item.clone()]);
-
-    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
-
-    let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task, dir) = setup_coordinator_with_items(vec![item.clone()]);
 
     // Mock that never returns (we cancel before it completes)
     let mock = MockAgentRunner::new(vec![]);
@@ -854,19 +840,8 @@ async fn execute_phase_cancellation_returns_cancelled() {
 
 #[tokio::test]
 async fn execute_phase_blocked_result_returns_blocked() {
-    let dir = common::setup_test_env();
     let item = make_in_progress_item("WRK-001", "prd");
-    let backlog = common::make_backlog(vec![item.clone()]);
-
-    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
-
-    let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task, dir) = setup_coordinator_with_items(vec![item.clone()]);
 
     let blocked_result = PhaseResult {
         item_id: "WRK-001".to_string(),
@@ -911,19 +886,8 @@ async fn execute_phase_blocked_result_returns_blocked() {
 
 #[tokio::test]
 async fn execute_phase_agent_error_retries_and_fails() {
-    let dir = common::setup_test_env();
     let item = make_in_progress_item("WRK-001", "prd");
-    let backlog = common::make_backlog(vec![item.clone()]);
-
-    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
-
-    let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task, dir) = setup_coordinator_with_items(vec![item.clone()]);
 
     let mut config = common::default_config();
     config.execution.max_retries = 0; // Only 1 attempt
@@ -988,15 +952,13 @@ async fn execute_phase_staleness_blocks_destructive_phase() {
         .unwrap();
 
     let mut item = make_in_progress_item("WRK-001", "build");
-    item.last_phase_commit = Some(head_sha);
+    pg_item::set_last_phase_commit(&mut item.0, Some(&head_sha));
 
-    let backlog = common::make_backlog(vec![item.clone()]);
-    phase_golem::backlog::save(&dir.path().join("BACKLOG.yaml"), &backlog).unwrap();
+    let store = common::setup_task_golem_store(dir.path());
+    save_and_commit_store(dir.path(), &store, &[item.clone().0]);
 
     let (handle, _coord_task) = spawn_coordinator(
-        backlog,
-        dir.path().join("BACKLOG.yaml"),
-        dir.path().join("BACKLOG_INBOX.yaml"),
+        store,
         dir.path().to_path_buf(),
         "WRK".to_string(),
     );

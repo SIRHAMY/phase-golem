@@ -60,6 +60,10 @@ impl PgItem {
         &self.0.tags
     }
 
+    pub fn blocked_reason(&self) -> Option<&str> {
+        self.0.blocked_reason.as_deref()
+    }
+
     pub fn created_at(&self) -> DateTime<Utc> {
         self.0.created_at
     }
@@ -272,56 +276,6 @@ impl PgItem {
                 }
             }
         })
-    }
-}
-
-// --- Transitional bridges (Phase 3 → Phase 4a) ---
-
-/// Converts a `PgItem` back to the legacy `BacklogItem` struct.
-///
-/// This bridge allows scheduler, executor, filter, and prompt modules to keep
-/// using `BacklogItem` until their Phase 4a/4b migrations. It reads every field
-/// through the typed `PgItem` accessors so the conversion is always consistent.
-///
-/// This impl will be removed in Phase 4a/4b when all consumers adopt `PgItem`.
-impl From<PgItem> for crate::types::BacklogItem {
-    fn from(pg: PgItem) -> Self {
-        crate::types::BacklogItem {
-            id: pg.id().to_string(),
-            title: pg.title().to_string(),
-            status: pg.pg_status(),
-            phase: pg.phase(),
-            size: pg.size(),
-            complexity: pg.complexity(),
-            risk: pg.risk(),
-            impact: pg.impact(),
-            requires_human_review: pg.requires_human_review(),
-            origin: pg.origin(),
-            blocked_from_status: pg.pg_blocked_from_status(),
-            blocked_reason: pg.0.blocked_reason.clone(),
-            blocked_type: pg.blocked_type(),
-            unblock_context: pg.unblock_context(),
-            tags: pg.tags().to_vec(),
-            dependencies: pg.dependencies().to_vec(),
-            created: pg.created_at().to_rfc3339(),
-            updated: pg.updated_at().to_rfc3339(),
-            pipeline_type: pg.pipeline_type(),
-            description: pg.structured_description(),
-            phase_pool: pg.phase_pool(),
-            last_phase_commit: pg.last_phase_commit(),
-        }
-    }
-}
-
-/// Converts a `Vec<PgItem>` into a `BacklogFile` for legacy consumers.
-///
-/// Sets `schema_version: 3` and `next_item_id: 0` (unused by consumers).
-/// This function will be removed in Phase 4a/4b.
-pub fn to_backlog_file(items: &[PgItem]) -> crate::types::BacklogFile {
-    crate::types::BacklogFile {
-        schema_version: 3,
-        items: items.iter().cloned().map(crate::types::BacklogItem::from).collect(),
-        next_item_id: 0,
     }
 }
 

@@ -4,16 +4,15 @@ use phase_golem::filter::{
     apply_filters, format_filter_criteria, parse_filter, validate_filter_criteria, FilterField,
     FilterValue,
 };
-use phase_golem::types::{BacklogFile, DimensionLevel, ItemStatus, SizeLevel};
+use phase_golem::pg_item::{self, PgItem};
+use phase_golem::types::{DimensionLevel, ItemStatus, SizeLevel};
 
-use common::make_item;
+use common::make_pg_item;
 
-fn make_backlog(items: Vec<phase_golem::types::BacklogItem>) -> BacklogFile {
-    BacklogFile {
-        items,
-        schema_version: 2,
-        next_item_id: 0,
-    }
+fn make_item_with_impact(id: &str, status: ItemStatus, impact: DimensionLevel) -> PgItem {
+    let mut pg = make_pg_item(id, status);
+    pg_item::set_impact(&mut pg.0, Some(&impact));
+    pg
 }
 
 // --- Parse valid filters for all 7 field types ---
@@ -121,7 +120,7 @@ fn parse_filter_whitespace_only() {
 
 #[test]
 fn parse_filter_multiple_equals_splits_on_first() {
-    // "key=val=ue" should split on first = → field="key", value="val=ue"
+    // "key=val=ue" should split on first = -> field="key", value="val=ue"
     // "key" is not a valid field, so it'll error on unknown field
     let err = parse_filter("key=val=ue").unwrap_err();
     assert!(err.contains("Unknown filter field: key"));
@@ -187,13 +186,13 @@ fn parse_and_match_status_in_progress() {
     let f = parse_filter("status=in_progress").unwrap();
     assert_eq!(f.values, vec![FilterValue::Status(ItemStatus::InProgress)]);
 
-    let mut item = make_item("WRK-001", ItemStatus::InProgress);
-    item.phase = Some("build".to_string());
+    let mut item = make_pg_item("WRK-001", ItemStatus::InProgress);
+    pg_item::set_phase(&mut item.0, Some("build"));
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert_eq!(filtered.items.len(), 1);
-    assert_eq!(filtered.items[0].id, "WRK-001");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id(), "WRK-001");
 }
 
 // --- Tag filtering: empty tags never match ---
@@ -201,12 +200,12 @@ fn parse_and_match_status_in_progress() {
 #[test]
 fn tag_filter_empty_tags_never_match() {
     let f = parse_filter("tag=v1").unwrap();
-    let item = make_item("WRK-001", ItemStatus::Ready);
-    // item.tags is empty by default from make_item
+    let item = make_pg_item("WRK-001", ItemStatus::Ready);
+    // item tags are empty by default from make_pg_item
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert!(filtered.items.is_empty());
+    assert!(filtered.is_empty());
 }
 
 // --- Tag filtering: case-sensitive ---
@@ -215,24 +214,34 @@ fn tag_filter_empty_tags_never_match() {
 fn tag_filter_case_sensitive() {
     let f = parse_filter("tag=v1").unwrap();
 
-    let mut item = make_item("WRK-001", ItemStatus::Ready);
-    item.tags = vec!["V1".to_string()];
+    let item = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec!["V1".to_string()],
+        vec![],
+    );
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert!(filtered.items.is_empty(), "tag=v1 should NOT match tag V1");
+    assert!(filtered.is_empty(), "tag=v1 should NOT match tag V1");
 }
 
 #[test]
 fn tag_filter_exact_match() {
     let f = parse_filter("tag=v1").unwrap();
 
-    let mut item = make_item("WRK-001", ItemStatus::Ready);
-    item.tags = vec!["v1".to_string(), "other".to_string()];
+    let item = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec!["v1".to_string(), "other".to_string()],
+        vec![],
+    );
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert_eq!(filtered.items.len(), 1);
+    assert_eq!(filtered.len(), 1);
 }
 
 // --- Option::None fields never match ---
@@ -240,52 +249,52 @@ fn tag_filter_exact_match() {
 #[test]
 fn none_impact_never_matches() {
     let f = parse_filter("impact=high").unwrap();
-    let item = make_item("WRK-001", ItemStatus::Ready);
+    let item = make_pg_item("WRK-001", ItemStatus::Ready);
     // item.impact is None by default
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert!(filtered.items.is_empty());
+    assert!(filtered.is_empty());
 }
 
 #[test]
 fn none_size_never_matches() {
     let f = parse_filter("size=medium").unwrap();
-    let item = make_item("WRK-001", ItemStatus::Ready);
+    let item = make_pg_item("WRK-001", ItemStatus::Ready);
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert!(filtered.items.is_empty());
+    assert!(filtered.is_empty());
 }
 
 #[test]
 fn none_risk_never_matches() {
     let f = parse_filter("risk=low").unwrap();
-    let item = make_item("WRK-001", ItemStatus::Ready);
+    let item = make_pg_item("WRK-001", ItemStatus::Ready);
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert!(filtered.items.is_empty());
+    assert!(filtered.is_empty());
 }
 
 #[test]
 fn none_complexity_never_matches() {
     let f = parse_filter("complexity=high").unwrap();
-    let item = make_item("WRK-001", ItemStatus::Ready);
+    let item = make_pg_item("WRK-001", ItemStatus::Ready);
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert!(filtered.items.is_empty());
+    assert!(filtered.is_empty());
 }
 
 #[test]
 fn none_pipeline_type_never_matches() {
     let f = parse_filter("pipeline_type=feature").unwrap();
-    let item = make_item("WRK-001", ItemStatus::Ready);
+    let item = make_pg_item("WRK-001", ItemStatus::Ready);
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert!(filtered.items.is_empty());
+    assert!(filtered.is_empty());
 }
 
 // --- apply_filter returns correct subset ---
@@ -294,21 +303,16 @@ fn none_pipeline_type_never_matches() {
 fn apply_filter_returns_matching_subset() {
     let f = parse_filter("impact=high").unwrap();
 
-    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
-    item1.impact = Some(DimensionLevel::High);
+    let item1 = make_item_with_impact("WRK-001", ItemStatus::Ready, DimensionLevel::High);
+    let item2 = make_item_with_impact("WRK-002", ItemStatus::Ready, DimensionLevel::Low);
+    let item3 = make_item_with_impact("WRK-003", ItemStatus::InProgress, DimensionLevel::High);
 
-    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
-    item2.impact = Some(DimensionLevel::Low);
-
-    let mut item3 = make_item("WRK-003", ItemStatus::InProgress);
-    item3.impact = Some(DimensionLevel::High);
-
-    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let snapshot = vec![item1, item2, item3];
     let filtered = apply_filters(&[f.clone()], &snapshot);
 
-    assert_eq!(filtered.items.len(), 2);
-    assert_eq!(filtered.items[0].id, "WRK-001");
-    assert_eq!(filtered.items[1].id, "WRK-003");
+    assert_eq!(filtered.len(), 2);
+    assert_eq!(filtered[0].id(), "WRK-001");
+    assert_eq!(filtered[1].id(), "WRK-003");
 }
 
 // --- apply_filter on empty snapshot ---
@@ -316,24 +320,9 @@ fn apply_filter_returns_matching_subset() {
 #[test]
 fn apply_filter_empty_snapshot_returns_empty() {
     let f = parse_filter("impact=high").unwrap();
-    let snapshot = make_backlog(vec![]);
+    let snapshot: Vec<PgItem> = vec![];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert!(filtered.items.is_empty());
-    assert_eq!(filtered.schema_version, 2);
-}
-
-// --- apply_filter preserves schema_version ---
-
-#[test]
-fn apply_filter_preserves_schema_version() {
-    let f = parse_filter("status=ready").unwrap();
-    let backlog = BacklogFile {
-        items: vec![make_item("WRK-001", ItemStatus::Ready)],
-        schema_version: 2,
-        next_item_id: 0,
-    };
-    let filtered = apply_filters(&[f.clone()], &backlog);
-    assert_eq!(filtered.schema_version, 2);
+    assert!(filtered.is_empty());
 }
 
 // --- Display impl for FilterCriterion ---
@@ -376,13 +365,13 @@ fn filter_criterion_display_roundtrip() {
 fn pipeline_type_case_sensitive_matching() {
     let f = parse_filter("pipeline_type=feature").unwrap();
 
-    let mut item = make_item("WRK-001", ItemStatus::Ready);
-    item.pipeline_type = Some("Feature".to_string());
+    let mut item = make_pg_item("WRK-001", ItemStatus::Ready);
+    pg_item::set_pipeline_type(&mut item.0, Some("Feature"));
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
     assert!(
-        filtered.items.is_empty(),
+        filtered.is_empty(),
         "pipeline_type=feature should NOT match Feature"
     );
 }
@@ -391,12 +380,12 @@ fn pipeline_type_case_sensitive_matching() {
 fn pipeline_type_exact_match() {
     let f = parse_filter("pipeline_type=feature").unwrap();
 
-    let mut item = make_item("WRK-001", ItemStatus::Ready);
-    item.pipeline_type = Some("feature".to_string());
+    let mut item = make_pg_item("WRK-001", ItemStatus::Ready);
+    pg_item::set_pipeline_type(&mut item.0, Some("feature"));
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f.clone()], &snapshot);
-    assert_eq!(filtered.items.len(), 1);
+    assert_eq!(filtered.len(), 1);
 }
 
 // --- Status filter matching ---
@@ -405,30 +394,16 @@ fn pipeline_type_exact_match() {
 fn status_filter_matches_correctly() {
     let f = parse_filter("status=blocked").unwrap();
 
-    let item1 = make_item("WRK-001", ItemStatus::Blocked);
-    let item2 = make_item("WRK-002", ItemStatus::Ready);
-    let item3 = make_item("WRK-003", ItemStatus::Blocked);
+    let item1 = make_pg_item("WRK-001", ItemStatus::Blocked);
+    let item2 = make_pg_item("WRK-002", ItemStatus::Ready);
+    let item3 = make_pg_item("WRK-003", ItemStatus::Blocked);
 
-    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let snapshot = vec![item1, item2, item3];
     let filtered = apply_filters(&[f.clone()], &snapshot);
 
-    assert_eq!(filtered.items.len(), 2);
-    assert_eq!(filtered.items[0].id, "WRK-001");
-    assert_eq!(filtered.items[1].id, "WRK-003");
-}
-
-// --- apply_filter preserves next_item_id ---
-
-#[test]
-fn apply_filter_preserves_next_item_id() {
-    let f = parse_filter("status=ready").unwrap();
-    let backlog = BacklogFile {
-        items: vec![make_item("WRK-001", ItemStatus::Ready)],
-        schema_version: 3,
-        next_item_id: 42,
-    };
-    let filtered = apply_filters(&[f.clone()], &backlog);
-    assert_eq!(filtered.next_item_id, 42);
+    assert_eq!(filtered.len(), 2);
+    assert_eq!(filtered[0].id(), "WRK-001");
+    assert_eq!(filtered[1].id(), "WRK-003");
 }
 
 // --- Multiple equals in tag value ---
@@ -517,23 +492,23 @@ fn apply_filters_two_criteria_and() {
     let c1 = parse_filter("impact=high").unwrap();
     let c2 = parse_filter("size=small").unwrap();
 
-    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
-    item1.impact = Some(DimensionLevel::High);
-    item1.size = Some(SizeLevel::Small);
+    let mut item1 = make_pg_item("WRK-001", ItemStatus::Ready);
+    pg_item::set_impact(&mut item1.0, Some(&DimensionLevel::High));
+    pg_item::set_size(&mut item1.0, Some(&SizeLevel::Small));
 
-    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
-    item2.impact = Some(DimensionLevel::High);
-    item2.size = Some(SizeLevel::Large);
+    let mut item2 = make_pg_item("WRK-002", ItemStatus::Ready);
+    pg_item::set_impact(&mut item2.0, Some(&DimensionLevel::High));
+    pg_item::set_size(&mut item2.0, Some(&SizeLevel::Large));
 
-    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
-    item3.impact = Some(DimensionLevel::Low);
-    item3.size = Some(SizeLevel::Small);
+    let mut item3 = make_pg_item("WRK-003", ItemStatus::Ready);
+    pg_item::set_impact(&mut item3.0, Some(&DimensionLevel::Low));
+    pg_item::set_size(&mut item3.0, Some(&SizeLevel::Small));
 
-    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let snapshot = vec![item1, item2, item3];
     let filtered = apply_filters(&[c1, c2], &snapshot);
 
-    assert_eq!(filtered.items.len(), 1);
-    assert_eq!(filtered.items[0].id, "WRK-001");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id(), "WRK-001");
 }
 
 #[test]
@@ -541,14 +516,14 @@ fn apply_filters_item_matching_one_criterion_excluded() {
     let c1 = parse_filter("impact=high").unwrap();
     let c2 = parse_filter("risk=low").unwrap();
 
-    let mut item = make_item("WRK-001", ItemStatus::Ready);
-    item.impact = Some(DimensionLevel::High);
-    item.risk = Some(DimensionLevel::Medium);
+    let mut item = make_pg_item("WRK-001", ItemStatus::Ready);
+    pg_item::set_impact(&mut item.0, Some(&DimensionLevel::High));
+    pg_item::set_risk(&mut item.0, Some(&DimensionLevel::Medium));
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[c1, c2], &snapshot);
 
-    assert!(filtered.items.is_empty());
+    assert!(filtered.is_empty());
 }
 
 #[test]
@@ -556,14 +531,14 @@ fn apply_filters_none_optional_field_excluded_by_and() {
     let c1 = parse_filter("impact=high").unwrap();
     let c2 = parse_filter("size=small").unwrap();
 
-    let mut item = make_item("WRK-001", ItemStatus::Ready);
-    item.impact = Some(DimensionLevel::High);
+    let mut item = make_pg_item("WRK-001", ItemStatus::Ready);
+    pg_item::set_impact(&mut item.0, Some(&DimensionLevel::High));
     // size is None
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[c1, c2], &snapshot);
 
-    assert!(filtered.items.is_empty());
+    assert!(filtered.is_empty());
 }
 
 #[test]
@@ -571,48 +546,60 @@ fn apply_filters_multi_tag_and() {
     let c1 = parse_filter("tag=backend").unwrap();
     let c2 = parse_filter("tag=sprint-1").unwrap();
 
-    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
-    item1.tags = vec!["backend".to_string(), "sprint-1".to_string()];
+    let item1 = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec!["backend".to_string(), "sprint-1".to_string()],
+        vec![],
+    );
 
-    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
-    item2.tags = vec!["backend".to_string()];
+    let item2 = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Ready,
+        vec!["backend".to_string()],
+        vec![],
+    );
 
-    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
-    item3.tags = vec!["sprint-1".to_string()];
+    let item3 = pg_item::new_from_parts(
+        "WRK-003".to_string(),
+        "Test item WRK-003".to_string(),
+        ItemStatus::Ready,
+        vec!["sprint-1".to_string()],
+        vec![],
+    );
 
-    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let snapshot = vec![item1, item2, item3];
     let filtered = apply_filters(&[c1, c2], &snapshot);
 
-    assert_eq!(filtered.items.len(), 1);
-    assert_eq!(filtered.items[0].id, "WRK-001");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id(), "WRK-001");
 }
 
 #[test]
 fn apply_filters_empty_criteria_returns_all() {
-    let item1 = make_item("WRK-001", ItemStatus::Ready);
-    let item2 = make_item("WRK-002", ItemStatus::InProgress);
+    let item1 = make_pg_item("WRK-001", ItemStatus::Ready);
+    let item2 = make_pg_item("WRK-002", ItemStatus::InProgress);
 
-    let snapshot = make_backlog(vec![item1, item2]);
+    let snapshot = vec![item1, item2];
     let filtered = apply_filters(&[], &snapshot);
 
-    assert_eq!(filtered.items.len(), 2);
+    assert_eq!(filtered.len(), 2);
 }
 
 #[test]
 fn apply_filters_single_criterion_returns_matching() {
     let c = parse_filter("impact=high").unwrap();
 
-    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
-    item1.impact = Some(DimensionLevel::High);
+    let item1 = make_item_with_impact("WRK-001", ItemStatus::Ready, DimensionLevel::High);
+    let item2 = make_item_with_impact("WRK-002", ItemStatus::Ready, DimensionLevel::Low);
 
-    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
-    item2.impact = Some(DimensionLevel::Low);
-
-    let snapshot = make_backlog(vec![item1, item2]);
+    let snapshot = vec![item1, item2];
     let filtered = apply_filters(&[c], &snapshot);
 
-    assert_eq!(filtered.items.len(), 1);
-    assert_eq!(filtered.items[0].id, "WRK-001");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id(), "WRK-001");
 }
 
 // --- format_filter_criteria tests ---
@@ -655,27 +642,42 @@ fn apply_filters_three_heterogeneous_criteria() {
     let c2 = parse_filter("impact=high").unwrap();
     let c3 = parse_filter("tag=backend").unwrap();
 
-    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
-    item1.impact = Some(DimensionLevel::High);
-    item1.tags = vec!["backend".to_string()];
+    let mut item1 = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec!["backend".to_string()],
+        vec![],
+    );
+    pg_item::set_impact(&mut item1.0, Some(&DimensionLevel::High));
 
-    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
-    item2.impact = Some(DimensionLevel::High);
+    let mut item2 = make_pg_item("WRK-002", ItemStatus::Ready);
+    pg_item::set_impact(&mut item2.0, Some(&DimensionLevel::High));
     // no tag
 
-    let mut item3 = make_item("WRK-003", ItemStatus::InProgress);
-    item3.impact = Some(DimensionLevel::High);
-    item3.tags = vec!["backend".to_string()];
+    let mut item3 = pg_item::new_from_parts(
+        "WRK-003".to_string(),
+        "Test item WRK-003".to_string(),
+        ItemStatus::InProgress,
+        vec!["backend".to_string()],
+        vec![],
+    );
+    pg_item::set_impact(&mut item3.0, Some(&DimensionLevel::High));
 
-    let mut item4 = make_item("WRK-004", ItemStatus::Ready);
-    item4.impact = Some(DimensionLevel::Low);
-    item4.tags = vec!["backend".to_string()];
+    let mut item4 = pg_item::new_from_parts(
+        "WRK-004".to_string(),
+        "Test item WRK-004".to_string(),
+        ItemStatus::Ready,
+        vec!["backend".to_string()],
+        vec![],
+    );
+    pg_item::set_impact(&mut item4.0, Some(&DimensionLevel::Low));
 
-    let snapshot = make_backlog(vec![item1, item2, item3, item4]);
+    let snapshot = vec![item1, item2, item3, item4];
     let filtered = apply_filters(&[c1, c2, c3], &snapshot);
 
-    assert_eq!(filtered.items.len(), 1);
-    assert_eq!(filtered.items[0].id, "WRK-001");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id(), "WRK-001");
 }
 
 // --- Multi-value parsing (happy path) ---
@@ -798,36 +800,34 @@ fn parse_filter_tag_different_case_accepted() {
 fn multi_value_or_matches_first_value() {
     let f = parse_filter("impact=high,medium").unwrap();
 
-    let mut item = make_item("WRK-001", ItemStatus::Ready);
-    item.impact = Some(DimensionLevel::High);
+    let item = make_item_with_impact("WRK-001", ItemStatus::Ready, DimensionLevel::High);
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f], &snapshot);
-    assert_eq!(filtered.items.len(), 1);
+    assert_eq!(filtered.len(), 1);
 }
 
 #[test]
 fn multi_value_or_matches_second_value() {
     let f = parse_filter("impact=high,medium").unwrap();
 
-    let mut item = make_item("WRK-001", ItemStatus::Ready);
-    item.impact = Some(DimensionLevel::Medium);
+    let item = make_item_with_impact("WRK-001", ItemStatus::Ready, DimensionLevel::Medium);
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f], &snapshot);
-    assert_eq!(filtered.items.len(), 1);
+    assert_eq!(filtered.len(), 1);
 }
 
 #[test]
 fn multi_value_or_no_match() {
     let f = parse_filter("impact=high,medium").unwrap();
 
-    let item = make_item("WRK-001", ItemStatus::Ready);
+    let item = make_pg_item("WRK-001", ItemStatus::Ready);
     // impact is None
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let filtered = apply_filters(&[f], &snapshot);
-    assert!(filtered.items.is_empty());
+    assert!(filtered.is_empty());
 }
 
 #[test]
@@ -835,65 +835,65 @@ fn multi_value_or_composes_with_cross_field_and() {
     let c1 = parse_filter("impact=high,medium").unwrap();
     let c2 = parse_filter("size=small").unwrap();
 
-    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
-    item1.impact = Some(DimensionLevel::High);
-    item1.size = Some(SizeLevel::Small);
+    let mut item1 = make_pg_item("WRK-001", ItemStatus::Ready);
+    pg_item::set_impact(&mut item1.0, Some(&DimensionLevel::High));
+    pg_item::set_size(&mut item1.0, Some(&SizeLevel::Small));
 
-    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
-    item2.impact = Some(DimensionLevel::Medium);
-    item2.size = Some(SizeLevel::Large);
+    let mut item2 = make_pg_item("WRK-002", ItemStatus::Ready);
+    pg_item::set_impact(&mut item2.0, Some(&DimensionLevel::Medium));
+    pg_item::set_size(&mut item2.0, Some(&SizeLevel::Large));
 
-    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
-    item3.impact = Some(DimensionLevel::Low);
-    item3.size = Some(SizeLevel::Small);
+    let mut item3 = make_pg_item("WRK-003", ItemStatus::Ready);
+    pg_item::set_impact(&mut item3.0, Some(&DimensionLevel::Low));
+    pg_item::set_size(&mut item3.0, Some(&SizeLevel::Small));
 
-    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let snapshot = vec![item1, item2, item3];
     let filtered = apply_filters(&[c1, c2], &snapshot);
 
-    assert_eq!(filtered.items.len(), 1);
-    assert_eq!(filtered.items[0].id, "WRK-001");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id(), "WRK-001");
 }
 
 #[test]
 fn multi_value_or_size_matching() {
     let f = parse_filter("size=small,medium").unwrap();
 
-    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
-    item1.size = Some(SizeLevel::Small);
+    let mut item1 = make_pg_item("WRK-001", ItemStatus::Ready);
+    pg_item::set_size(&mut item1.0, Some(&SizeLevel::Small));
 
-    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
-    item2.size = Some(SizeLevel::Large);
+    let mut item2 = make_pg_item("WRK-002", ItemStatus::Ready);
+    pg_item::set_size(&mut item2.0, Some(&SizeLevel::Large));
 
-    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
-    item3.size = Some(SizeLevel::Medium);
+    let mut item3 = make_pg_item("WRK-003", ItemStatus::Ready);
+    pg_item::set_size(&mut item3.0, Some(&SizeLevel::Medium));
 
-    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let snapshot = vec![item1, item2, item3];
     let filtered = apply_filters(&[f], &snapshot);
 
-    assert_eq!(filtered.items.len(), 2);
-    assert_eq!(filtered.items[0].id, "WRK-001");
-    assert_eq!(filtered.items[1].id, "WRK-003");
+    assert_eq!(filtered.len(), 2);
+    assert_eq!(filtered[0].id(), "WRK-001");
+    assert_eq!(filtered[1].id(), "WRK-003");
 }
 
 #[test]
 fn multi_value_or_pipeline_type_matching() {
     let f = parse_filter("pipeline_type=feature,bugfix").unwrap();
 
-    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
-    item1.pipeline_type = Some("feature".to_string());
+    let mut item1 = make_pg_item("WRK-001", ItemStatus::Ready);
+    pg_item::set_pipeline_type(&mut item1.0, Some("feature"));
 
-    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
-    item2.pipeline_type = Some("release".to_string());
+    let mut item2 = make_pg_item("WRK-002", ItemStatus::Ready);
+    pg_item::set_pipeline_type(&mut item2.0, Some("release"));
 
-    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
-    item3.pipeline_type = Some("bugfix".to_string());
+    let mut item3 = make_pg_item("WRK-003", ItemStatus::Ready);
+    pg_item::set_pipeline_type(&mut item3.0, Some("bugfix"));
 
-    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let snapshot = vec![item1, item2, item3];
     let filtered = apply_filters(&[f], &snapshot);
 
-    assert_eq!(filtered.items.len(), 2);
-    assert_eq!(filtered.items[0].id, "WRK-001");
-    assert_eq!(filtered.items[1].id, "WRK-003");
+    assert_eq!(filtered.len(), 2);
+    assert_eq!(filtered[0].id(), "WRK-001");
+    assert_eq!(filtered[1].id(), "WRK-003");
 }
 
 // --- Multi-value display ---
@@ -920,21 +920,36 @@ fn format_filter_criteria_multi_value_and_single() {
 fn tag_or_matches_either() {
     let f = parse_filter("tag=a,b").unwrap();
 
-    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
-    item1.tags = vec!["a".to_string()];
+    let item1 = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec!["a".to_string()],
+        vec![],
+    );
 
-    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
-    item2.tags = vec!["b".to_string()];
+    let item2 = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Ready,
+        vec!["b".to_string()],
+        vec![],
+    );
 
-    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
-    item3.tags = vec!["c".to_string()];
+    let item3 = pg_item::new_from_parts(
+        "WRK-003".to_string(),
+        "Test item WRK-003".to_string(),
+        ItemStatus::Ready,
+        vec!["c".to_string()],
+        vec![],
+    );
 
-    let snapshot = make_backlog(vec![item1, item2, item3]);
+    let snapshot = vec![item1, item2, item3];
     let filtered = apply_filters(&[f], &snapshot);
 
-    assert_eq!(filtered.items.len(), 2);
-    assert_eq!(filtered.items[0].id, "WRK-001");
-    assert_eq!(filtered.items[1].id, "WRK-002");
+    assert_eq!(filtered.len(), 2);
+    assert_eq!(filtered[0].id(), "WRK-001");
+    assert_eq!(filtered[1].id(), "WRK-002");
 }
 
 #[test]
@@ -943,24 +958,44 @@ fn tag_or_and_composition() {
     let c1 = parse_filter("tag=a,b").unwrap();
     let c2 = parse_filter("tag=c").unwrap();
 
-    let mut item1 = make_item("WRK-001", ItemStatus::Ready);
-    item1.tags = vec!["a".to_string(), "c".to_string()];
+    let item1 = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec!["a".to_string(), "c".to_string()],
+        vec![],
+    );
 
-    let mut item2 = make_item("WRK-002", ItemStatus::Ready);
-    item2.tags = vec!["b".to_string(), "c".to_string()];
+    let item2 = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Ready,
+        vec!["b".to_string(), "c".to_string()],
+        vec![],
+    );
 
-    let mut item3 = make_item("WRK-003", ItemStatus::Ready);
-    item3.tags = vec!["a".to_string(), "b".to_string()];
+    let item3 = pg_item::new_from_parts(
+        "WRK-003".to_string(),
+        "Test item WRK-003".to_string(),
+        ItemStatus::Ready,
+        vec!["a".to_string(), "b".to_string()],
+        vec![],
+    );
 
-    let mut item4 = make_item("WRK-004", ItemStatus::Ready);
-    item4.tags = vec!["c".to_string()];
+    let item4 = pg_item::new_from_parts(
+        "WRK-004".to_string(),
+        "Test item WRK-004".to_string(),
+        ItemStatus::Ready,
+        vec!["c".to_string()],
+        vec![],
+    );
 
-    let snapshot = make_backlog(vec![item1, item2, item3, item4]);
+    let snapshot = vec![item1, item2, item3, item4];
     let filtered = apply_filters(&[c1, c2], &snapshot);
 
-    assert_eq!(filtered.items.len(), 2);
-    assert_eq!(filtered.items[0].id, "WRK-001");
-    assert_eq!(filtered.items[1].id, "WRK-002");
+    assert_eq!(filtered.len(), 2);
+    assert_eq!(filtered[0].id(), "WRK-001");
+    assert_eq!(filtered[1].id(), "WRK-002");
 }
 
 // --- Whitespace trimming ---

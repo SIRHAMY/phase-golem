@@ -2,59 +2,59 @@ mod common;
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 
+use task_golem::model::item::Item;
+
 use phase_golem::agent::MockAgentRunner;
-use phase_golem::backlog;
 use phase_golem::config::{
     default_feature_pipeline, ExecutionConfig, PhaseConfig, PhaseGolemConfig, PipelineConfig,
 };
 use phase_golem::coordinator;
 use phase_golem::filter;
+use phase_golem::pg_item::{self, PgItem};
 use phase_golem::scheduler::{
     self, advance_to_next_active_target, select_actions, select_targeted_actions,
     unmet_dep_summary, HaltReason, RunParams, RunningTasks,
 };
 use phase_golem::types::{
-    BacklogFile, BacklogItem, DimensionLevel, FollowUp, ItemStatus, PhasePool, PhaseResult,
-    ResultCode, SchedulerAction, SizeLevel, StructuredDescription, UpdatedAssessments,
+    DimensionLevel, FollowUp, ItemStatus, PhasePool, PhaseResult, ResultCode, SchedulerAction,
+    SizeLevel, StructuredDescription, UpdatedAssessments,
 };
 
 // --- Test helpers ---
 
-fn backlog_path(root: &Path) -> std::path::PathBuf {
-    root.join("BACKLOG.yaml")
-}
-
-fn make_item(id: &str, title: &str, status: ItemStatus) -> BacklogItem {
-    BacklogItem {
-        id: id.to_string(),
-        title: title.to_string(),
+fn make_item(id: &str, title: &str, status: ItemStatus) -> PgItem {
+    pg_item::new_from_parts(
+        id.to_string(),
+        title.to_string(),
         status,
-        created: "2026-01-01T00:00:00+00:00".to_string(),
-        updated: "2026-01-01T00:00:00+00:00".to_string(),
-        ..Default::default()
+        vec![],
+        vec![],
+    )
+}
+
+fn make_in_progress_item(id: &str, title: &str, phase: &str) -> PgItem {
+    let mut pg = make_item(id, title, ItemStatus::InProgress);
+    pg_item::set_phase(&mut pg.0, Some(phase));
+    pg_item::set_phase_pool(&mut pg.0, Some(&PhasePool::Main));
+    pg
+}
+
+fn make_scoping_item(id: &str, title: &str, phase: &str) -> PgItem {
+    let mut pg = make_item(id, title, ItemStatus::Scoping);
+    pg_item::set_phase(&mut pg.0, Some(phase));
+    pg_item::set_phase_pool(&mut pg.0, Some(&PhasePool::Pre));
+    pg
+}
+
+fn make_ready_item(id: &str, title: &str, impact: Option<DimensionLevel>) -> PgItem {
+    let mut pg = make_item(id, title, ItemStatus::Ready);
+    if let Some(ref level) = impact {
+        pg_item::set_impact(&mut pg.0, Some(level));
     }
-}
-
-fn make_in_progress_item(id: &str, title: &str, phase: &str) -> BacklogItem {
-    let mut item = make_item(id, title, ItemStatus::InProgress);
-    item.phase = Some(phase.to_string());
-    item.phase_pool = Some(PhasePool::Main);
-    item
-}
-
-fn make_scoping_item(id: &str, title: &str, phase: &str) -> BacklogItem {
-    let mut item = make_item(id, title, ItemStatus::Scoping);
-    item.phase = Some(phase.to_string());
-    item.phase_pool = Some(PhasePool::Pre);
-    item
-}
-
-fn make_ready_item(id: &str, title: &str, impact: Option<DimensionLevel>) -> BacklogItem {
-    let mut item = make_item(id, title, ItemStatus::Ready);
-    item.impact = impact;
-    item
+    pg
 }
 
 fn default_config() -> PhaseGolemConfig {
@@ -188,14 +188,6 @@ fn triage_result_with_assessments(item_id: &str) -> PhaseResult {
     }
 }
 
-fn make_backlog(items: Vec<BacklogItem>) -> BacklogFile {
-    BacklogFile {
-        schema_version: 2,
-        items,
-        next_item_id: 0,
-    }
-}
-
 fn run_params(root: &Path, target: Option<&str>, cap: u32) -> RunParams {
     RunParams {
         targets: target.map(|s| vec![s.to_string()]).unwrap_or_default(),
@@ -207,13 +199,56 @@ fn run_params(root: &Path, target: Option<&str>, cap: u32) -> RunParams {
     }
 }
 
+/// Helper to save PgItems to the store and spawn a coordinator.
+fn save_and_commit_store(
+    root: &Path,
+    store: &task_golem::store::Store,
+    items: &[Item],
+) {
+    store.save_active(items).expect("save items to store");
+
+    Command::new("git")
+        .args(["add", ".task-golem/"])
+        .current_dir(root)
+        .output()
+        .expect("stage .task-golem/");
+
+    Command::new("git")
+        .args(["commit", "-m", "Save store"])
+        .current_dir(root)
+        .output()
+        .expect("commit store");
+}
+
+fn setup_coordinator_with_items(
+    items: Vec<PgItem>,
+) -> (
+    phase_golem::coordinator::CoordinatorHandle,
+    tokio::task::JoinHandle<()>,
+    tempfile::TempDir,
+) {
+    let dir = common::setup_test_env();
+    let store = common::setup_task_golem_store(dir.path());
+
+    let raw_items: Vec<Item> = items.into_iter().map(|pg| pg.0).collect();
+    save_and_commit_store(dir.path(), &store, &raw_items);
+
+    let (handle, coord_task) = coordinator::spawn_coordinator(
+        store,
+        dir.path().to_path_buf(),
+        "WRK".to_string(),
+    );
+
+    (handle, coord_task, dir)
+}
+
 // ============================================================
 // select_actions() unit tests — pure function, no I/O
 // ============================================================
 
 #[test]
 fn select_actions_empty_backlog_returns_empty() {
-    let snapshot = make_backlog(vec![]);
+    let snapshot: Vec<PgItem> = vec![];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -224,7 +259,7 @@ fn select_actions_empty_backlog_returns_empty() {
 
 #[test]
 fn select_actions_all_done_returns_empty() {
-    let snapshot = make_backlog(vec![make_item("WRK-001", "Done task", ItemStatus::Done)]);
+    let snapshot = vec![make_item("WRK-001", "Done task", ItemStatus::Done)];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -235,11 +270,10 @@ fn select_actions_all_done_returns_empty() {
 
 #[test]
 fn select_actions_all_blocked_returns_empty() {
-    let mut item = make_item("WRK-001", "Blocked task", ItemStatus::Blocked);
-    item.blocked_from_status = Some(ItemStatus::InProgress);
-    item.blocked_reason = Some("needs input".to_string());
+    let mut item = common::make_blocked_pg_item("WRK-001", ItemStatus::InProgress);
+    item.0.blocked_reason = Some("needs input".to_string());
 
-    let snapshot = make_backlog(vec![item]);
+    let snapshot = vec![item];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -250,10 +284,10 @@ fn select_actions_all_blocked_returns_empty() {
 
 #[test]
 fn select_actions_promotes_ready_items_when_under_max_wip() {
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_ready_item("WRK-001", "Task A", Some(DimensionLevel::High)),
         make_ready_item("WRK-002", "Task B", Some(DimensionLevel::Low)),
-    ]);
+    ];
     let running = RunningTasks::new();
     let config = default_execution_config(); // max_wip=2
     let pipelines = default_pipelines();
@@ -273,7 +307,7 @@ fn select_actions_promotes_ready_items_when_under_max_wip() {
 
 #[test]
 fn select_actions_respects_max_wip_limit() {
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_in_progress_item("WRK-001", "Running", "prd"),
         make_in_progress_item("WRK-002", "Running 2", "build"),
         make_ready_item(
@@ -281,7 +315,7 @@ fn select_actions_respects_max_wip_limit() {
             "Ready but blocked by WIP",
             Some(DimensionLevel::High),
         ),
-    ]);
+    ];
     let running = RunningTasks::new();
     let config = default_execution_config(); // max_wip=2
     let pipelines = default_pipelines();
@@ -300,10 +334,10 @@ fn select_actions_respects_max_wip_limit() {
 fn select_actions_in_progress_advance_furthest_first() {
     // WRK-001 at "prd" (index 0), WRK-002 at "spec" (index 3)
     // Should pick WRK-002 first (furthest-first)
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_in_progress_item("WRK-001", "Early task", "prd"),
         make_in_progress_item("WRK-002", "Late task", "spec"),
-    ]);
+    ];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -328,10 +362,10 @@ fn select_actions_in_progress_advance_furthest_first() {
 #[test]
 fn select_actions_in_progress_before_scoping() {
     // InProgress items should be scheduled before Scoping items
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_scoping_item("WRK-001", "Scoping task", "research"),
         make_in_progress_item("WRK-002", "Active task", "prd"),
-    ]);
+    ];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -355,10 +389,10 @@ fn select_actions_in_progress_before_scoping() {
 #[test]
 fn select_actions_triage_after_phases() {
     // Triage is lowest priority — should come after InProgress phases
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_item("WRK-001", "New item", ItemStatus::New),
         make_in_progress_item("WRK-002", "Active task", "prd"),
-    ]);
+    ];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -392,10 +426,10 @@ fn select_actions_triage_after_phases() {
 #[test]
 fn select_actions_destructive_phase_is_exclusive() {
     // An item at "build" (destructive) should block all other phases
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_in_progress_item("WRK-001", "Build task", "build"),
         make_in_progress_item("WRK-002", "Other task", "prd"),
-    ]);
+    ];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -419,10 +453,10 @@ fn select_actions_destructive_phase_is_exclusive() {
 
 #[test]
 fn select_actions_destructive_running_blocks_all() {
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_in_progress_item("WRK-001", "Build running", "build"),
         make_in_progress_item("WRK-002", "Other task", "prd"),
-    ]);
+    ];
     let mut running = RunningTasks::new();
     running.insert_destructive("WRK-001", "build");
     let config = default_execution_config();
@@ -446,10 +480,10 @@ fn select_actions_destructive_running_blocks_all() {
 #[test]
 fn select_actions_respects_max_concurrent() {
     // With max_concurrent=1, only one phase action
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_in_progress_item("WRK-001", "Task A", "prd"),
         make_in_progress_item("WRK-002", "Task B", "spec"),
-    ]);
+    ];
     let running = RunningTasks::new();
     let config = ExecutionConfig {
         max_concurrent: 1,
@@ -474,10 +508,10 @@ fn select_actions_respects_max_concurrent() {
 
 #[test]
 fn select_actions_skips_already_running_items() {
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_in_progress_item("WRK-001", "Running task", "prd"),
         make_in_progress_item("WRK-002", "Idle task", "spec"),
-    ]);
+    ];
     let mut running = RunningTasks::new();
     running.insert_non_destructive("WRK-001", "prd");
     let config = default_execution_config();
@@ -501,10 +535,10 @@ fn select_actions_skips_already_running_items() {
 
 #[test]
 fn select_actions_new_items_trigger_triage() {
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_item("WRK-001", "New task 1", ItemStatus::New),
         make_item("WRK-002", "New task 2", ItemStatus::New),
-    ]);
+    ];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -521,11 +555,11 @@ fn select_actions_new_items_trigger_triage() {
 
 #[test]
 fn select_actions_promotion_tiebreaks_by_impact() {
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_ready_item("WRK-001", "Low impact", Some(DimensionLevel::Low)),
         make_ready_item("WRK-002", "High impact", Some(DimensionLevel::High)),
         make_ready_item("WRK-003", "Medium impact", Some(DimensionLevel::Medium)),
-    ]);
+    ];
     let running = RunningTasks::new();
     let config = ExecutionConfig {
         max_wip: 3,
@@ -552,11 +586,11 @@ fn select_actions_promotion_tiebreaks_by_impact() {
 #[test]
 fn select_actions_no_destructive_when_non_destructive_running() {
     // build (destructive) should NOT be scheduled if non-destructive tasks are already running
-    let snapshot = make_backlog(vec![make_in_progress_item(
+    let snapshot = vec![make_in_progress_item(
         "WRK-001",
         "Build task",
         "build",
-    )]);
+    )];
     let mut running = RunningTasks::new();
     running.insert_non_destructive("WRK-099", "prd"); // something else running
     let config = default_execution_config();
@@ -574,11 +608,11 @@ fn select_actions_no_destructive_when_non_destructive_running() {
 
 #[test]
 fn select_actions_scoping_items_with_pre_phases() {
-    let snapshot = make_backlog(vec![make_scoping_item(
+    let snapshot = vec![make_scoping_item(
         "WRK-001",
         "Scoping item",
         "research",
-    )]);
+    )];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -612,39 +646,24 @@ fn select_actions_scoping_items_with_pre_phases() {
 
 #[tokio::test]
 async fn scheduler_happy_path_single_item_all_phases() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-    let config = default_config();
-    let pipelines = simple_pipeline();
-
     let item = make_in_progress_item("WRK-001", "Test feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
         Ok(phase_complete_result("WRK-001", "review")),
     ]);
 
-    let mut config_with_simple = config.clone();
-    config_with_simple.pipelines = pipelines;
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
+    let mut config = default_config();
+    config.pipelines = simple_pipeline();
 
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary = scheduler::run_scheduler(
         coordinator_handle,
         Arc::new(runner),
-        config_with_simple,
+        config,
         params,
         cancel,
     )
@@ -658,28 +677,16 @@ async fn scheduler_happy_path_single_item_all_phases() {
 
 #[tokio::test]
 async fn scheduler_blocked_result_blocks_item() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![Ok(blocked_result("WRK-001", "build"))]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -693,12 +700,8 @@ async fn scheduler_blocked_result_blocks_item() {
 
 #[tokio::test]
 async fn scheduler_retry_then_success() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     // First attempt fails, second succeeds (within executor retry)
     // max_retries=1 means 2 attempts total
@@ -712,16 +715,8 @@ async fn scheduler_retry_then_success() {
     config.pipelines = simple_pipeline();
     config.execution.max_retries = 1;
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -733,12 +728,8 @@ async fn scheduler_retry_then_success() {
 
 #[tokio::test]
 async fn scheduler_retry_exhaustion_blocks_item() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     // Two consecutive failures exhausts retries (max_retries=1)
     let runner = MockAgentRunner::new(vec![
@@ -750,16 +741,8 @@ async fn scheduler_retry_exhaustion_blocks_item() {
     config.pipelines = simple_pipeline();
     config.execution.max_retries = 1;
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -772,12 +755,8 @@ async fn scheduler_retry_exhaustion_blocks_item() {
 
 #[tokio::test]
 async fn scheduler_cap_limits_phase_execution() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -787,16 +766,8 @@ async fn scheduler_cap_limits_phase_execution() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 1); // cap=1
+    let params = run_params(dir.path(), None, 1); // cap=1
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -809,26 +780,15 @@ async fn scheduler_cap_limits_phase_execution() {
 
 #[tokio::test]
 async fn scheduler_no_actionable_items_exits() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
-    let backlog = common::make_backlog(vec![make_item("WRK-001", "Done item", ItemStatus::Done)]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let item = make_item("WRK-001", "Done item", ItemStatus::Done);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![]);
 
     let config = default_config();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -841,12 +801,8 @@ async fn scheduler_no_actionable_items_exits() {
 
 #[tokio::test]
 async fn scheduler_target_mode_completes_specific_item() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -856,16 +812,8 @@ async fn scheduler_target_mode_completes_specific_item() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, Some("WRK-001"), 100);
+    let params = run_params(dir.path(), Some("WRK-001"), 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -878,12 +826,8 @@ async fn scheduler_target_mode_completes_specific_item() {
 
 #[tokio::test]
 async fn scheduler_subphase_complete_re_executes_phase() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     // First invocation returns SubphaseComplete, second returns PhaseComplete
     let runner = MockAgentRunner::new(vec![
@@ -895,16 +839,8 @@ async fn scheduler_subphase_complete_re_executes_phase() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -916,12 +852,8 @@ async fn scheduler_subphase_complete_re_executes_phase() {
 
 #[tokio::test]
 async fn scheduler_follow_ups_are_ingested() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let mut result = phase_complete_result("WRK-001", "build");
     result.follow_ups = vec![FollowUp {
@@ -939,16 +871,8 @@ async fn scheduler_follow_ups_are_ingested() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -964,22 +888,10 @@ async fn scheduler_follow_ups_are_ingested() {
 
 #[tokio::test]
 async fn triage_small_low_risk_promotes_to_ready() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_item("WRK-001", "Small fix", ItemStatus::New);
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
 
     let config = default_config();
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
 
     let triage_result = triage_result_with_assessments("WRK-001");
     scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
@@ -987,32 +899,20 @@ async fn triage_small_low_risk_promotes_to_ready() {
         .expect("apply_triage_result should succeed");
 
     let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
 
-    // Small + Low risk → should be Ready
-    assert_eq!(item.status, ItemStatus::Ready);
-    assert_eq!(item.size, Some(SizeLevel::Small));
-    assert_eq!(item.risk, Some(DimensionLevel::Low));
+    // Small + Low risk -> should be Ready
+    assert_eq!(item.pg_status(), ItemStatus::Ready);
+    assert_eq!(item.size(), Some(SizeLevel::Small));
+    assert_eq!(item.risk(), Some(DimensionLevel::Low));
 }
 
 #[tokio::test]
 async fn triage_large_item_goes_to_scoping_with_pre_phase() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_item("WRK-001", "Big feature", ItemStatus::New);
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
 
     let config = default_config();
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
 
     let mut triage_result = triage_result_with_assessments("WRK-001");
     triage_result.updated_assessments = Some(UpdatedAssessments {
@@ -1027,32 +927,20 @@ async fn triage_large_item_goes_to_scoping_with_pre_phase() {
         .expect("apply_triage_result should succeed");
 
     let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
 
-    // Large + High risk → should be Scoping with first pre_phase
-    assert_eq!(item.status, ItemStatus::Scoping);
-    assert_eq!(item.phase, Some("research".to_string()));
-    assert_eq!(item.phase_pool, Some(PhasePool::Pre));
+    // Large + High risk -> should be Scoping with first pre_phase
+    assert_eq!(item.pg_status(), ItemStatus::Scoping);
+    assert_eq!(item.phase(), Some("research".to_string()));
+    assert_eq!(item.phase_pool(), Some(PhasePool::Pre));
 }
 
 #[tokio::test]
 async fn triage_blocked_result_blocks_item() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_item("WRK-001", "Unclear item", ItemStatus::New);
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
 
     let config = default_config();
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
 
     let triage_result = blocked_result("WRK-001", "triage");
     scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
@@ -1060,29 +948,17 @@ async fn triage_blocked_result_blocks_item() {
         .expect("apply_triage_result should succeed");
 
     let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
 
-    assert_eq!(item.status, ItemStatus::Blocked);
+    assert_eq!(item.pg_status(), ItemStatus::Blocked);
 }
 
 #[tokio::test]
 async fn triage_with_invalid_pipeline_type_blocks() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_item("WRK-001", "Item", ItemStatus::New);
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
 
     let config = default_config();
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
 
     let mut triage_result = triage_result_with_assessments("WRK-001");
     triage_result.pipeline_type = Some("nonexistent_pipeline".to_string());
@@ -1092,12 +968,11 @@ async fn triage_with_invalid_pipeline_type_blocks() {
         .expect("apply_triage_result should succeed");
 
     let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
 
-    assert_eq!(item.status, ItemStatus::Blocked);
+    assert_eq!(item.pg_status(), ItemStatus::Blocked);
     assert!(item
-        .blocked_reason
-        .as_ref()
+        .blocked_reason()
         .unwrap()
         .contains("nonexistent_pipeline"));
 }
@@ -1106,22 +981,10 @@ async fn triage_with_invalid_pipeline_type_blocks() {
 
 #[tokio::test]
 async fn triage_applies_description_when_present() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_item("WRK-001", "Item", ItemStatus::New);
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
 
     let config = default_config();
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
 
     let mut triage_result = triage_result_with_assessments("WRK-001");
     triage_result.description = Some(StructuredDescription {
@@ -1137,32 +1000,21 @@ async fn triage_applies_description_when_present() {
         .expect("apply_triage_result should succeed");
 
     let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
 
-    assert!(item.description.is_some());
-    let desc = item.description.as_ref().unwrap();
+    let desc = item.structured_description();
+    assert!(desc.is_some());
+    let desc = desc.unwrap();
     assert_eq!(desc.context, "Originated from user feedback");
     assert_eq!(desc.problem, "Login fails on mobile");
 }
 
 #[tokio::test]
 async fn triage_does_not_apply_description_when_none() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_item("WRK-001", "Item", ItemStatus::New);
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
 
     let config = default_config();
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
 
     let triage_result = triage_result_with_assessments("WRK-001");
     assert!(triage_result.description.is_none());
@@ -1172,29 +1024,17 @@ async fn triage_does_not_apply_description_when_none() {
         .expect("apply_triage_result should succeed");
 
     let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
 
-    assert!(item.description.is_none());
+    assert!(item.structured_description().is_none());
 }
 
 #[tokio::test]
 async fn triage_does_not_apply_empty_description() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_item("WRK-001", "Item", ItemStatus::New);
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
 
     let config = default_config();
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
 
     let mut triage_result = triage_result_with_assessments("WRK-001");
     triage_result.description = Some(StructuredDescription::default());
@@ -1204,29 +1044,17 @@ async fn triage_does_not_apply_empty_description() {
         .expect("apply_triage_result should succeed");
 
     let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
 
-    assert!(item.description.is_none());
+    assert!(item.structured_description().is_none());
 }
 
 #[tokio::test]
 async fn triage_applies_partial_description() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_item("WRK-001", "Item", ItemStatus::New);
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
 
     let config = default_config();
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
 
     let mut triage_result = triage_result_with_assessments("WRK-001");
     triage_result.description = Some(StructuredDescription {
@@ -1245,10 +1073,11 @@ async fn triage_applies_partial_description() {
         .expect("apply_triage_result should succeed");
 
     let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.items.iter().find(|i| i.id == "WRK-001").unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
 
-    assert!(item.description.is_some());
-    let desc = item.description.as_ref().unwrap();
+    let desc = item.structured_description();
+    assert!(desc.is_some());
+    let desc = desc.unwrap();
     assert_eq!(desc.context, "From user feedback");
     assert_eq!(desc.problem, "Login broken");
     assert!(desc.solution.is_empty());
@@ -1260,18 +1089,10 @@ async fn triage_applies_partial_description() {
 
 #[test]
 fn select_actions_destructive_pending_blocks_new_non_destructive() {
-    // WRK-001 at "build" (destructive, furthest along — highest priority)
-    // WRK-002 at "prd" (non-destructive, lower priority)
-    // WRK-099 is running non-destructive
-    //
-    // Previously, `continue` would skip the destructive action and let WRK-002's
-    // prd phase leak through, starving the destructive action indefinitely.
-    // With `break`, zero RunPhase actions are scheduled — running tasks drain
-    // naturally, and the destructive action runs on the next iteration.
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_in_progress_item("WRK-001", "Build task", "build"),
         make_in_progress_item("WRK-002", "PRD task", "prd"),
-    ]);
+    ];
     let mut running = RunningTasks::new();
     running.insert_non_destructive("WRK-099", "prd");
     let config = default_execution_config();
@@ -1292,13 +1113,10 @@ fn select_actions_destructive_pending_blocks_new_non_destructive() {
 
 #[test]
 fn select_actions_destructive_pending_blocks_triage() {
-    // Same starvation scenario but with a New item that could be triaged.
-    // The destructive build can't run (non-destructive in flight), so `break`
-    // should prevent the triage from being scheduled too.
-    let snapshot = make_backlog(vec![
+    let snapshot = vec![
         make_in_progress_item("WRK-001", "Build task", "build"),
         make_item("WRK-002", "New item", ItemStatus::New),
-    ]);
+    ];
     let mut running = RunningTasks::new();
     running.insert_non_destructive("WRK-099", "prd");
     let config = default_execution_config();
@@ -1328,17 +1146,11 @@ fn select_actions_destructive_pending_blocks_triage() {
 
 #[tokio::test]
 async fn scheduler_circuit_breaker_trips_after_consecutive_exhaustions() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     // Two items that will both exhaust retries (0 retries = 1 attempt each)
-    let mut item1 = make_in_progress_item("WRK-001", "Feature 1", "build");
-    item1.created = "2026-01-01T00:00:00+00:00".to_string();
-    let mut item2 = make_in_progress_item("WRK-002", "Feature 2", "build");
-    item2.created = "2026-01-02T00:00:00+00:00".to_string();
-
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let item1 = make_in_progress_item("WRK-001", "Feature 1", "build");
+    let item2 = make_in_progress_item("WRK-002", "Feature 2", "build");
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
     // Both items fail — 2 consecutive exhaustions trips the breaker
     let runner = MockAgentRunner::new(vec![
@@ -1351,16 +1163,8 @@ async fn scheduler_circuit_breaker_trips_after_consecutive_exhaustions() {
     config.execution.max_retries = 0; // 1 attempt only
     config.execution.max_concurrent = 1; // One at a time to guarantee order
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -1377,10 +1181,10 @@ async fn scheduler_circuit_breaker_trips_after_consecutive_exhaustions() {
 #[test]
 fn test_ready_item_with_unmet_dep_not_promoted() {
     let mut item_a = make_ready_item("WRK-001", "Depends on WRK-002", Some(DimensionLevel::High));
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_item("WRK-002", "Dependency", ItemStatus::Ready);
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1405,10 +1209,10 @@ fn test_ready_item_with_unmet_dep_not_promoted() {
 #[test]
 fn test_ready_item_with_met_dep_promoted() {
     let mut item_a = make_ready_item("WRK-001", "Depends on WRK-002", Some(DimensionLevel::High));
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_item("WRK-002", "Done dependency", ItemStatus::Done);
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1436,9 +1240,9 @@ fn test_ready_item_with_absent_dep_promoted() {
         "Depends on archived item",
         Some(DimensionLevel::High),
     );
-    item_a.dependencies = vec!["WRK-ARCHIVED".to_string()];
+    item_a.0.dependencies = vec!["WRK-ARCHIVED".to_string()];
 
-    let snapshot = make_backlog(vec![item_a]);
+    let snapshot = vec![item_a];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1462,11 +1266,11 @@ fn test_ready_item_with_absent_dep_promoted() {
 #[test]
 fn test_ready_item_with_partial_deps_not_promoted() {
     let mut item_a = make_ready_item("WRK-001", "Depends on A and B", Some(DimensionLevel::High));
-    item_a.dependencies = vec!["WRK-002".to_string(), "WRK-003".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string(), "WRK-003".to_string()];
     let item_b = make_item("WRK-002", "Done dep", ItemStatus::Done);
     let item_c = make_item("WRK-003", "Still Ready dep", ItemStatus::Ready);
 
-    let snapshot = make_backlog(vec![item_a, item_b, item_c]);
+    let snapshot = vec![item_a, item_b, item_c];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1490,12 +1294,11 @@ fn test_ready_item_with_partial_deps_not_promoted() {
 #[test]
 fn test_ready_item_with_blocked_dep_not_promoted() {
     let mut item_a = make_ready_item("WRK-001", "Depends on blocked", Some(DimensionLevel::High));
-    item_a.dependencies = vec!["WRK-002".to_string()];
-    let mut item_b = make_item("WRK-002", "Blocked dep", ItemStatus::Blocked);
-    item_b.blocked_from_status = Some(ItemStatus::InProgress);
-    item_b.blocked_reason = Some("needs input".to_string());
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
+    let mut item_b = common::make_blocked_pg_item("WRK-002", ItemStatus::InProgress);
+    item_b.0.blocked_reason = Some("needs input".to_string());
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1523,10 +1326,10 @@ fn test_ready_item_with_in_progress_dep_not_promoted() {
         "Depends on in-progress",
         Some(DimensionLevel::High),
     );
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_in_progress_item("WRK-002", "In-progress dep", "build");
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1550,10 +1353,10 @@ fn test_ready_item_with_in_progress_dep_not_promoted() {
 #[test]
 fn test_in_progress_with_unmet_dep_no_phase_action() {
     let mut item_a = make_in_progress_item("WRK-001", "Has unmet dep", "build");
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_item("WRK-002", "Still Ready", ItemStatus::Ready);
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1574,10 +1377,10 @@ fn test_in_progress_with_unmet_dep_no_phase_action() {
 #[test]
 fn test_in_progress_with_met_dep_gets_phase_action() {
     let mut item_a = make_in_progress_item("WRK-001", "Has met dep", "build");
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_item("WRK-002", "Done dep", ItemStatus::Done);
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1599,10 +1402,10 @@ fn test_in_progress_with_met_dep_gets_phase_action() {
 #[test]
 fn test_scoping_with_unmet_dep_no_phase_action() {
     let mut item_a = make_scoping_item("WRK-001", "Has unmet dep", "research");
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_item("WRK-002", "Still Ready", ItemStatus::Ready);
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1623,10 +1426,10 @@ fn test_scoping_with_unmet_dep_no_phase_action() {
 #[test]
 fn test_new_item_with_unmet_dep_not_triaged() {
     let mut item_a = make_item("WRK-001", "New with unmet dep", ItemStatus::New);
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_item("WRK-002", "Still Ready", ItemStatus::Ready);
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1647,10 +1450,10 @@ fn test_new_item_with_unmet_dep_not_triaged() {
 #[test]
 fn test_new_item_with_met_dep_triaged() {
     let mut item_a = make_item("WRK-001", "New with met dep", ItemStatus::New);
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_item("WRK-002", "Done dep", ItemStatus::Done);
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1669,7 +1472,7 @@ fn test_new_item_with_met_dep_triaged() {
 fn test_no_deps_scheduled_normally() {
     let item_a = make_ready_item("WRK-001", "No deps", Some(DimensionLevel::High));
 
-    let snapshot = make_backlog(vec![item_a]);
+    let snapshot = vec![item_a];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1695,11 +1498,11 @@ fn test_unmet_dep_does_not_consume_wip_slot() {
     // max_wip=1, two Ready items: WRK-001 has unmet dep, WRK-002 doesn't
     // WRK-001 should be skipped and WRK-002 should be promoted
     let mut item_a = make_ready_item("WRK-001", "Has unmet dep", Some(DimensionLevel::High));
-    item_a.dependencies = vec!["WRK-003".to_string()];
+    item_a.0.dependencies = vec!["WRK-003".to_string()];
     let item_b = make_ready_item("WRK-002", "No deps", Some(DimensionLevel::Low));
     let item_c = make_item("WRK-003", "Scoping dep", ItemStatus::Scoping);
 
-    let snapshot = make_backlog(vec![item_a, item_b, item_c]);
+    let snapshot = vec![item_a, item_b, item_c];
     let running = RunningTasks::new();
     let config = ExecutionConfig {
         max_wip: 1,
@@ -1731,10 +1534,10 @@ fn test_unmet_dep_does_not_consume_wip_slot() {
 #[test]
 fn test_targeted_with_unmet_dep_returns_empty() {
     let mut item_a = make_in_progress_item("WRK-001", "Target with unmet dep", "build");
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_item("WRK-002", "Still Ready", ItemStatus::Ready);
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1750,10 +1553,10 @@ fn test_targeted_with_unmet_dep_returns_empty() {
 #[test]
 fn test_targeted_with_met_dep_returns_action() {
     let mut item_a = make_in_progress_item("WRK-001", "Target with met dep", "build");
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    item_a.0.dependencies = vec!["WRK-002".to_string()];
     let item_b = make_item("WRK-002", "Done dep", ItemStatus::Done);
 
-    let snapshot = make_backlog(vec![item_a, item_b]);
+    let snapshot = vec![item_a, item_b];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1769,9 +1572,9 @@ fn test_targeted_with_met_dep_returns_action() {
 #[test]
 fn test_targeted_with_absent_dep_returns_action() {
     let mut item_a = make_in_progress_item("WRK-001", "Target with absent dep", "build");
-    item_a.dependencies = vec!["WRK-ARCHIVED".to_string()];
+    item_a.0.dependencies = vec!["WRK-ARCHIVED".to_string()];
 
-    let snapshot = make_backlog(vec![item_a]);
+    let snapshot = vec![item_a];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -1785,14 +1588,84 @@ fn test_targeted_with_absent_dep_returns_action() {
 }
 
 // ============================================================
+// Mixed ID format dependency resolution
+// ============================================================
+
+#[test]
+fn test_mixed_id_formats_resolve_correctly() {
+    // WRK-001 (numeric) depends on WRK-a1b2c (hex) which is Done -> dep satisfied
+    let mut item_a = make_ready_item(
+        "WRK-001",
+        "Depends on hex-format item",
+        Some(DimensionLevel::High),
+    );
+    item_a.0.dependencies = vec!["WRK-a1b2c".to_string()];
+
+    let dep_hex = make_item("WRK-a1b2c", "Hex ID item", ItemStatus::Done);
+
+    let snapshot = vec![item_a, dep_hex];
+    let running = RunningTasks::new();
+    let config = default_execution_config();
+    let pipelines = default_pipelines();
+
+    let actions = select_actions(&snapshot, &running, &config, &pipelines);
+
+    let promotions: Vec<String> = actions
+        .iter()
+        .filter_map(|a| match a {
+            SchedulerAction::Promote(id) => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        promotions.contains(&"WRK-001".to_string()),
+        "Numeric-format item depending on Done hex-format item should be promoted"
+    );
+}
+
+#[test]
+fn test_mixed_id_formats_unmet_dep_blocks() {
+    // WRK-001 (numeric) depends on WRK-a1b2c (hex) which is Ready -> dep NOT satisfied
+    let mut item_a = make_ready_item(
+        "WRK-001",
+        "Depends on hex-format item",
+        Some(DimensionLevel::High),
+    );
+    item_a.0.dependencies = vec!["WRK-a1b2c".to_string()];
+
+    let dep_hex = make_item("WRK-a1b2c", "Hex ID item", ItemStatus::Ready);
+
+    let snapshot = vec![item_a, dep_hex];
+    let running = RunningTasks::new();
+    let config = default_execution_config();
+    let pipelines = default_pipelines();
+
+    let actions = select_actions(&snapshot, &running, &config, &pipelines);
+
+    let promotions: Vec<String> = actions
+        .iter()
+        .filter_map(|a| match a {
+            SchedulerAction::Promote(id) => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        !promotions.contains(&"WRK-001".to_string()),
+        "Item with unmet hex-format dep should NOT be promoted"
+    );
+}
+
+// ============================================================
 // unmet_dep_summary() unit tests
 // ============================================================
 
 #[test]
 fn test_unmet_dep_summary_no_unmet_deps() {
-    // All deps are Done → None
+    // All deps are Done -> None
     let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
-    item.dependencies = vec!["WRK-002".to_string()];
+    item.0.dependencies = vec!["WRK-002".to_string()];
     let dep = make_item("WRK-002", "Done dep", ItemStatus::Done);
 
     let result = unmet_dep_summary(&item, &[item.clone(), dep]);
@@ -1802,7 +1675,7 @@ fn test_unmet_dep_summary_no_unmet_deps() {
 #[test]
 fn test_unmet_dep_summary_single_unmet_dep() {
     let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
-    item.dependencies = vec!["WRK-002".to_string()];
+    item.0.dependencies = vec!["WRK-002".to_string()];
     let dep = make_item("WRK-002", "Ready dep", ItemStatus::Ready);
 
     let result = unmet_dep_summary(&item, &[item.clone(), dep]);
@@ -1817,7 +1690,7 @@ fn test_unmet_dep_summary_single_unmet_dep() {
 #[test]
 fn test_unmet_dep_summary_multiple_unmet_deps() {
     let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
-    item.dependencies = vec!["WRK-002".to_string(), "WRK-003".to_string()];
+    item.0.dependencies = vec!["WRK-002".to_string(), "WRK-003".to_string()];
     let dep_a = make_item("WRK-002", "Ready dep", ItemStatus::Ready);
     let dep_b = make_in_progress_item("WRK-003", "InProgress dep", "build");
 
@@ -1840,14 +1713,14 @@ fn test_unmet_dep_summary_multiple_unmet_deps() {
 #[test]
 fn test_unmet_dep_summary_mix_of_met_and_unmet() {
     let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
-    item.dependencies = vec![
+    item.0.dependencies = vec![
         "WRK-002".to_string(),
         "WRK-003".to_string(),
         "WRK-004".to_string(),
     ];
     let dep_done = make_item("WRK-002", "Done dep", ItemStatus::Done);
     let dep_ready = make_item("WRK-003", "Ready dep", ItemStatus::Ready);
-    // WRK-004 is absent (not in the list) → met
+    // WRK-004 is absent (not in the list) -> met
 
     let result = unmet_dep_summary(&item, &[item.clone(), dep_done, dep_ready]);
     let summary = result.expect("Should return Some for unmet deps");
@@ -1868,7 +1741,7 @@ fn test_unmet_dep_summary_mix_of_met_and_unmet() {
 fn test_advance_skips_done_targets() {
     let done_item = make_item("WRK-001", "Done target", ItemStatus::Done);
     let active_item = make_in_progress_item("WRK-002", "Active target", "build");
-    let snapshot = make_backlog(vec![done_item, active_item]);
+    let snapshot = vec![done_item, active_item];
 
     let result = advance_to_next_active_target(
         &["WRK-001".to_string(), "WRK-002".to_string()],
@@ -1886,7 +1759,7 @@ fn test_advance_skips_done_targets() {
 fn test_advance_skips_archived_targets() {
     // WRK-001 not in snapshot (archived), WRK-002 is active
     let active_item = make_in_progress_item("WRK-002", "Active target", "build");
-    let snapshot = make_backlog(vec![active_item]);
+    let snapshot = vec![active_item];
 
     let result = advance_to_next_active_target(
         &["WRK-001".to_string(), "WRK-002".to_string()],
@@ -1900,7 +1773,7 @@ fn test_advance_skips_archived_targets() {
 #[test]
 fn test_advance_all_exhausted() {
     let done_item = make_item("WRK-001", "Done", ItemStatus::Done);
-    let snapshot = make_backlog(vec![done_item]);
+    let snapshot = vec![done_item];
 
     let result = advance_to_next_active_target(
         &["WRK-001".to_string(), "WRK-099".to_string()],
@@ -1917,7 +1790,7 @@ fn test_advance_all_exhausted() {
 #[test]
 fn test_advance_first_is_active() {
     let active_item = make_in_progress_item("WRK-001", "Active", "build");
-    let snapshot = make_backlog(vec![active_item]);
+    let snapshot = vec![active_item];
 
     let result = advance_to_next_active_target(&["WRK-001".to_string()], 0, &[], &snapshot);
     assert_eq!(result, 0, "Should return 0 when first target is active");
@@ -1928,7 +1801,7 @@ fn test_advance_mixed_states() {
     let done_item = make_item("WRK-001", "Done", ItemStatus::Done);
     // WRK-002 not in snapshot (archived)
     let active_item = make_in_progress_item("WRK-003", "Active", "build");
-    let snapshot = make_backlog(vec![done_item, active_item]);
+    let snapshot = vec![done_item, active_item];
 
     let result = advance_to_next_active_target(
         &[
@@ -1945,7 +1818,7 @@ fn test_advance_mixed_states() {
 
 #[test]
 fn test_advance_empty_targets() {
-    let snapshot = make_backlog(vec![]);
+    let snapshot: Vec<PgItem> = vec![];
 
     let result = advance_to_next_active_target(&[], 0, &[], &snapshot);
     assert_eq!(
@@ -1956,11 +1829,9 @@ fn test_advance_empty_targets() {
 
 #[test]
 fn test_advance_skips_pre_blocked_targets() {
-    let mut blocked_item = make_item("WRK-001", "Pre-blocked target", ItemStatus::Blocked);
-    blocked_item.blocked_from_status = Some(ItemStatus::InProgress);
-    blocked_item.blocked_reason = Some("needs input".to_string());
+    let blocked_item = common::make_blocked_pg_item("WRK-001", ItemStatus::InProgress);
     let active_item = make_in_progress_item("WRK-002", "Active target", "build");
-    let snapshot = make_backlog(vec![blocked_item, active_item]);
+    let snapshot = vec![blocked_item, active_item];
 
     let result = advance_to_next_active_target(
         &["WRK-001".to_string(), "WRK-002".to_string()],
@@ -1979,7 +1850,7 @@ fn test_advance_skips_items_in_completed_list() {
     // WRK-001 is in items_completed but still InProgress in snapshot (race condition)
     let item = make_in_progress_item("WRK-001", "Completed via items_completed", "build");
     let active_item = make_in_progress_item("WRK-002", "Active", "build");
-    let snapshot = make_backlog(vec![item, active_item]);
+    let snapshot = vec![item, active_item];
 
     let result = advance_to_next_active_target(
         &["WRK-001".to_string(), "WRK-002".to_string()],
@@ -1996,13 +1867,10 @@ fn test_advance_skips_items_in_completed_list() {
 
 #[tokio::test]
 async fn test_multi_target_processes_in_order() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -2014,21 +1882,13 @@ async fn test_multi_target_processes_in_order() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2044,13 +1904,10 @@ async fn test_multi_target_processes_in_order() {
 
 #[tokio::test]
 async fn test_multi_target_halts_on_block() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -2061,21 +1918,13 @@ async fn test_multi_target_halts_on_block() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2091,34 +1940,23 @@ async fn test_multi_target_halts_on_block() {
 
 #[tokio::test]
 async fn test_multi_target_all_done_at_startup() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item1 = make_item("WRK-001", "Done 1", ItemStatus::Done);
     let item2 = make_item("WRK-002", "Done 2", ItemStatus::Done);
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2133,13 +1971,10 @@ async fn test_multi_target_all_done_at_startup() {
 
 #[tokio::test]
 async fn test_multi_target_skips_done_targets() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item1 = make_item("WRK-001", "Already done", ItemStatus::Done);
     let item2 = make_in_progress_item("WRK-002", "Active", "build");
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-002", "build")),
@@ -2149,21 +1984,13 @@ async fn test_multi_target_skips_done_targets() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2179,12 +2006,8 @@ async fn test_multi_target_skips_done_targets() {
 #[tokio::test]
 async fn test_multi_target_single_element_backward_compat() {
     // Single target in Vec should behave identically to pre-change behavior
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -2194,21 +2017,13 @@ async fn test_multi_target_single_element_backward_compat() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2224,13 +2039,9 @@ async fn test_multi_target_single_element_backward_compat() {
 #[tokio::test]
 async fn test_multi_target_target_archived_during_run() {
     // Target not in snapshot should be skipped (treated as done/archived)
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     // Only WRK-002 in backlog; WRK-001 is "archived" (not present)
     let item2 = make_in_progress_item("WRK-002", "Active", "build");
-    let backlog = common::make_backlog(vec![item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-002", "build")),
@@ -2240,21 +2051,13 @@ async fn test_multi_target_target_archived_during_run() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2269,15 +2072,10 @@ async fn test_multi_target_target_archived_during_run() {
 
 #[tokio::test]
 async fn test_multi_target_skips_pre_blocked_targets() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
-    let mut blocked_item = make_item("WRK-001", "Pre-blocked", ItemStatus::Blocked);
-    blocked_item.blocked_from_status = Some(ItemStatus::InProgress);
-    blocked_item.blocked_reason = Some("needs input".to_string());
+    let blocked_item = common::make_blocked_pg_item("WRK-001", ItemStatus::InProgress);
     let item2 = make_in_progress_item("WRK-002", "Active", "build");
-    let backlog = common::make_backlog(vec![blocked_item, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![blocked_item, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-002", "build")),
@@ -2287,21 +2085,13 @@ async fn test_multi_target_skips_pre_blocked_targets() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2320,13 +2110,10 @@ async fn test_multi_target_skips_pre_blocked_targets() {
 
 #[tokio::test]
 async fn test_auto_advance_skips_blocked_target() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(blocked_result("WRK-001", "build")),
@@ -2337,21 +2124,13 @@ async fn test_auto_advance_skips_blocked_target() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: true,
     };
 
@@ -2369,13 +2148,10 @@ async fn test_auto_advance_skips_blocked_target() {
 
 #[tokio::test]
 async fn test_auto_advance_all_targets_blocked() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(blocked_result("WRK-001", "build")),
@@ -2385,21 +2161,13 @@ async fn test_auto_advance_all_targets_blocked() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: true,
     };
 
@@ -2417,12 +2185,8 @@ async fn test_auto_advance_all_targets_blocked() {
 
 #[tokio::test]
 async fn test_auto_advance_single_target_blocked() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(blocked_result("WRK-001", "build")),
@@ -2431,21 +2195,13 @@ async fn test_auto_advance_single_target_blocked() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: true,
     };
 
@@ -2462,18 +2218,12 @@ async fn test_auto_advance_single_target_blocked() {
 
 #[tokio::test]
 async fn test_auto_advance_circuit_breaker_not_tripped() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
-    // Each target: initial attempt fails, retry fails → retries exhausted → blocked
-    // consecutive_exhaustions increments by 1 per target
-    // Without reset: target1 (1) + target2 (2) = CIRCUIT_BREAKER_THRESHOLD → tripped
-    // With reset: target1 (1) → reset to 0 → target2 (1) → never reaches 2
+    // Each target: initial attempt fails, retry fails -> retries exhausted -> blocked
     let runner = MockAgentRunner::new(vec![
         Ok(failed_result("WRK-001", "build")),
         Ok(failed_result("WRK-001", "build")),
@@ -2485,21 +2235,13 @@ async fn test_auto_advance_circuit_breaker_not_tripped() {
     config.pipelines = simple_pipeline();
     config.execution.max_retries = 1;
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: true,
     };
 
@@ -2508,8 +2250,7 @@ async fn test_auto_advance_circuit_breaker_not_tripped() {
             .await
             .expect("Scheduler should succeed");
 
-    // Should NOT be CircuitBreakerTripped — the reset between targets prevents it
-    // (relies on CIRCUIT_BREAKER_THRESHOLD == 2; adjust if that constant changes)
+    // Should NOT be CircuitBreakerTripped -- the reset between targets prevents it
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
     assert_eq!(summary.items_blocked.len(), 2);
     assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
@@ -2520,37 +2261,26 @@ async fn test_auto_advance_circuit_breaker_not_tripped() {
 #[tokio::test]
 async fn test_auto_advance_backward_compat() {
     // Without --auto-advance, first blocked target should halt the run
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(blocked_result("WRK-001", "build")),
-        // WRK-002 results not needed — scheduler halts before reaching it
+        // WRK-002 results not needed -- scheduler halts before reaching it
     ]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
 
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2573,15 +2303,12 @@ async fn test_auto_advance_backward_compat() {
 
 #[tokio::test]
 async fn test_filter_restricts_scheduler_to_matching_items() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let mut high_item = make_in_progress_item("WRK-001", "High impact", "build");
-    high_item.impact = Some(DimensionLevel::High);
+    pg_item::set_impact(&mut high_item.0, Some(&DimensionLevel::High));
     let mut low_item = make_in_progress_item("WRK-002", "Low impact", "build");
-    low_item.impact = Some(DimensionLevel::Low);
-    let backlog = common::make_backlog(vec![high_item, low_item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    pg_item::set_impact(&mut low_item.0, Some(&DimensionLevel::Low));
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![high_item, low_item]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -2591,21 +2318,13 @@ async fn test_filter_restricts_scheduler_to_matching_items() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
         filter: vec![filter::parse_filter("impact=high").unwrap()],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2622,34 +2341,23 @@ async fn test_filter_restricts_scheduler_to_matching_items() {
 
 #[tokio::test]
 async fn test_filter_no_matching_items_halts() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let mut low_item = make_in_progress_item("WRK-001", "Low impact", "build");
-    low_item.impact = Some(DimensionLevel::Low);
-    let backlog = common::make_backlog(vec![low_item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    pg_item::set_impact(&mut low_item.0, Some(&DimensionLevel::Low));
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![low_item]);
 
     let runner = MockAgentRunner::new(vec![]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
         filter: vec![filter::parse_filter("impact=high").unwrap()],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2664,34 +2372,23 @@ async fn test_filter_no_matching_items_halts() {
 
 #[tokio::test]
 async fn test_filter_all_exhausted_halts() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let mut done_item = make_item("WRK-001", "Done high impact", ItemStatus::Done);
-    done_item.impact = Some(DimensionLevel::High);
-    let backlog = common::make_backlog(vec![done_item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    pg_item::set_impact(&mut done_item.0, Some(&DimensionLevel::High));
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![done_item]);
 
     let runner = MockAgentRunner::new(vec![]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
         filter: vec![filter::parse_filter("impact=high").unwrap()],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2710,14 +2407,8 @@ async fn test_filter_all_exhausted_halts() {
 
 #[tokio::test]
 async fn test_integration_single_target_backward_compat() {
-    // Single target in Vec should behave identically to pre-change behavior:
-    // same halt reason, items_completed, and action sequence.
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -2727,21 +2418,13 @@ async fn test_integration_single_target_backward_compat() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2753,7 +2436,6 @@ async fn test_integration_single_target_backward_compat() {
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
     assert!(summary.items_blocked.is_empty());
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-    // All phases of the single target should have been executed
     assert!(
         summary.phases_executed >= 2,
         "Both build and review phases should execute"
@@ -2762,15 +2444,11 @@ async fn test_integration_single_target_backward_compat() {
 
 #[tokio::test]
 async fn test_integration_multi_target_sequential() {
-    // Three targets processed in order, all completing successfully
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
     let item3 = make_in_progress_item("WRK-003", "Third", "build");
-    let backlog = common::make_backlog(vec![item1, item2, item3]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2, item3]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -2784,14 +2462,6 @@ async fn test_integration_multi_target_sequential() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![
@@ -2801,8 +2471,8 @@ async fn test_integration_multi_target_sequential() {
         ],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2811,27 +2481,22 @@ async fn test_integration_multi_target_sequential() {
             .await
             .expect("Scheduler should succeed");
 
-    // All three items completed in order
     assert!(summary.items_completed.contains(&"WRK-001".to_string()));
     assert!(summary.items_completed.contains(&"WRK-002".to_string()));
     assert!(summary.items_completed.contains(&"WRK-003".to_string()));
     assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
     assert!(
         summary.phases_executed >= 6,
-        "All 6 phases should execute (2 per item × 3 items)"
+        "All 6 phases should execute (2 per item x 3 items)"
     );
 }
 
 #[tokio::test]
 async fn test_integration_multi_target_with_block() {
-    // First target completes, second target blocks → halt
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second (will block)", "build");
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -2842,21 +2507,13 @@ async fn test_integration_multi_target_with_block() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
         filter: vec![],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2872,20 +2529,16 @@ async fn test_integration_multi_target_with_block() {
 
 #[tokio::test]
 async fn test_integration_filter_impact_high() {
-    // Filter with impact=high processes only high-impact items, ignores others
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let mut high1 = make_in_progress_item("WRK-001", "High impact 1", "build");
-    high1.impact = Some(DimensionLevel::High);
+    pg_item::set_impact(&mut high1.0, Some(&DimensionLevel::High));
     let mut high2 = make_in_progress_item("WRK-002", "High impact 2", "build");
-    high2.impact = Some(DimensionLevel::High);
+    pg_item::set_impact(&mut high2.0, Some(&DimensionLevel::High));
     let mut medium_item = make_in_progress_item("WRK-003", "Medium impact", "build");
-    medium_item.impact = Some(DimensionLevel::Medium);
+    pg_item::set_impact(&mut medium_item.0, Some(&DimensionLevel::Medium));
     let mut low_item = make_in_progress_item("WRK-004", "Low impact", "build");
-    low_item.impact = Some(DimensionLevel::Low);
-    let backlog = common::make_backlog(vec![high1, high2, medium_item, low_item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    pg_item::set_impact(&mut low_item.0, Some(&DimensionLevel::Low));
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![high1, high2, medium_item, low_item]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -2897,21 +2550,13 @@ async fn test_integration_filter_impact_high() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
         filter: vec![filter::parse_filter("impact=high").unwrap()],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2920,7 +2565,6 @@ async fn test_integration_filter_impact_high() {
             .await
             .expect("Scheduler should succeed");
 
-    // Only WRK-001 and WRK-002 (high impact) should be processed
     assert!(summary.items_completed.contains(&"WRK-001".to_string()));
     assert!(summary.items_completed.contains(&"WRK-002".to_string()));
     assert!(!summary.items_completed.contains(&"WRK-003".to_string()));
@@ -2930,37 +2574,25 @@ async fn test_integration_filter_impact_high() {
 
 #[tokio::test]
 async fn test_integration_filter_no_matches() {
-    // Filter with no matching items halts immediately with NoMatchingItems
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let mut item1 = make_in_progress_item("WRK-001", "Medium impact", "build");
-    item1.impact = Some(DimensionLevel::Medium);
+    pg_item::set_impact(&mut item1.0, Some(&DimensionLevel::Medium));
     let mut item2 = make_in_progress_item("WRK-002", "Low impact", "build");
-    item2.impact = Some(DimensionLevel::Low);
-    let backlog = common::make_backlog(vec![item1, item2]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    pg_item::set_impact(&mut item2.0, Some(&DimensionLevel::Low));
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
         filter: vec![filter::parse_filter("impact=high").unwrap()],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -2997,12 +2629,8 @@ fn cleanup_terminal_summary_removes_entry_and_noop_for_missing() {
 
 #[tokio::test]
 async fn cleanup_done_via_handle_phase_success() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -3012,16 +2640,8 @@ async fn cleanup_done_via_handle_phase_success() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -3035,14 +2655,10 @@ async fn cleanup_done_via_handle_phase_success() {
 
 #[tokio::test]
 async fn cleanup_blocked_via_handle_phase_failed() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
-    // Single attempt (max_retries=0) that fails → handle_phase_failed
+    // Single attempt (max_retries=0) that fails -> handle_phase_failed
     let runner = MockAgentRunner::new(vec![Ok(failed_result("WRK-001", "build"))]);
 
     let mut config = default_config();
@@ -3050,16 +2666,8 @@ async fn cleanup_blocked_via_handle_phase_failed() {
     config.execution.max_retries = 0;
     config.execution.max_concurrent = 1;
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -3072,28 +2680,16 @@ async fn cleanup_blocked_via_handle_phase_failed() {
 
 #[tokio::test]
 async fn cleanup_blocked_via_handle_phase_blocked() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![Ok(blocked_result("WRK-001", "build"))]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -3107,15 +2703,10 @@ async fn cleanup_blocked_via_handle_phase_blocked() {
 
 #[tokio::test]
 async fn non_terminal_phase_retains_summary() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
-    // Subphase → phase complete → review complete
-    // The summary from subphase should persist for the next build invocation
+    // Subphase -> phase complete -> review complete
     let runner = MockAgentRunner::new(vec![
         Ok(subphase_complete_result("WRK-001", "build")),
         Ok(phase_complete_result("WRK-001", "build")),
@@ -3125,16 +2716,8 @@ async fn non_terminal_phase_retains_summary() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -3147,16 +2730,13 @@ async fn non_terminal_phase_retains_summary() {
 
 #[tokio::test]
 async fn many_items_complete_with_bounded_summaries() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
-    // 4 items, max_wip=2 — items processed in batches
+    // 4 items, max_wip=2 -- items processed in batches
     let item1 = make_in_progress_item("WRK-001", "Feature 1", "build");
     let item2 = make_in_progress_item("WRK-002", "Feature 2", "build");
     let item3 = make_in_progress_item("WRK-003", "Feature 3", "build");
     let item4 = make_in_progress_item("WRK-004", "Feature 4", "build");
-    let backlog = common::make_backlog(vec![item1, item2, item3, item4]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) =
+        setup_coordinator_with_items(vec![item1, item2, item3, item4]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -3174,16 +2754,8 @@ async fn many_items_complete_with_bounded_summaries() {
     config.execution.max_wip = 2;
     config.execution.max_concurrent = 1;
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -3197,12 +2769,8 @@ async fn many_items_complete_with_bounded_summaries() {
 
 #[tokio::test]
 async fn retry_then_success_summary_persists() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     // First attempt fails, second succeeds (executor retries internally)
     let runner = MockAgentRunner::new(vec![
@@ -3215,16 +2783,8 @@ async fn retry_then_success_summary_persists() {
     config.pipelines = simple_pipeline();
     config.execution.max_retries = 1;
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(root, None, 100);
+    let params = run_params(dir.path(), None, 100);
 
     let summary =
         scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
@@ -3237,28 +2797,16 @@ async fn retry_then_success_summary_persists() {
 
 #[tokio::test]
 async fn test_multi_filter_no_matching_items_halts() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
-    // Item matches impact=high but not size=small → AND intersection is empty
+    // Item matches impact=high but not size=small -> AND intersection is empty
     let mut item = make_in_progress_item("WRK-001", "High impact large", "build");
-    item.impact = Some(DimensionLevel::High);
-    item.size = Some(SizeLevel::Large);
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    pg_item::set_impact(&mut item.0, Some(&DimensionLevel::High));
+    pg_item::set_size(&mut item.0, Some(&SizeLevel::Large));
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
-
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
 
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
@@ -3268,8 +2816,8 @@ async fn test_multi_filter_no_matching_items_halts() {
             filter::parse_filter("size=small").unwrap(),
         ],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 
@@ -3284,15 +2832,11 @@ async fn test_multi_filter_no_matching_items_halts() {
 
 #[tokio::test]
 async fn test_multi_filter_exhausted_halts() {
-    let dir = common::setup_test_env();
-    let root = dir.path();
-
     // Item matches both impact=high AND size=small
     let mut item = make_in_progress_item("WRK-001", "High impact small", "build");
-    item.impact = Some(DimensionLevel::High);
-    item.size = Some(SizeLevel::Small);
-    let backlog = common::make_backlog(vec![item]);
-    backlog::save(&backlog_path(root), &backlog).unwrap();
+    pg_item::set_impact(&mut item.0, Some(&DimensionLevel::High));
+    pg_item::set_size(&mut item.0, Some(&SizeLevel::Small));
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -3302,14 +2846,6 @@ async fn test_multi_filter_exhausted_halts() {
     let mut config = default_config();
     config.pipelines = simple_pipeline();
 
-    let (coordinator_handle, _coord_task) = coordinator::spawn_coordinator(
-        backlog,
-        backlog_path(root),
-        root.join("BACKLOG_INBOX.yaml"),
-        root.to_path_buf(),
-        "WRK".to_string(),
-    );
-
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = RunParams {
         targets: vec![],
@@ -3318,8 +2854,8 @@ async fn test_multi_filter_exhausted_halts() {
             filter::parse_filter("size=small").unwrap(),
         ],
         cap: 100,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
+        root: dir.path().to_path_buf(),
+        config_base: dir.path().to_path_buf(),
         auto_advance: false,
     };
 

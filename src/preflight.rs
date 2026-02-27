@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::config::PhaseGolemConfig;
-use crate::types::{BacklogFile, BacklogItem, ItemStatus, PhasePool};
+use crate::pg_item::PgItem;
+use crate::types::{ItemStatus, PhasePool};
 
 /// A single preflight validation error with actionable context.
 #[derive(Debug, Clone, PartialEq)]
@@ -37,11 +38,22 @@ impl std::fmt::Display for PreflightError {
 /// Returns `Ok(())` if all checks pass, or `Err(Vec<PreflightError>)` with all errors.
 pub fn run_preflight(
     config: &PhaseGolemConfig,
-    backlog: &BacklogFile,
-    _project_root: &Path,
+    items: &[PgItem],
+    project_root: &Path,
     config_base: &Path,
 ) -> Result<(), Vec<PreflightError>> {
     let mut errors = Vec::new();
+
+    // Phase 0: .task-golem/ directory existence check
+    let task_golem_dir = project_root.join(".task-golem");
+    if !task_golem_dir.is_dir() {
+        errors.push(PreflightError {
+            condition: ".task-golem/ directory not found".to_string(),
+            config_location: format!("{}", task_golem_dir.display()),
+            suggested_fix: "Run `tg init` to initialize the task-golem store".to_string(),
+        });
+        return Err(errors);
+    }
 
     // Phase 1: Structural validation (reuses config::validate but with richer errors)
     errors.extend(validate_structure(config));
@@ -56,14 +68,14 @@ pub fn run_preflight(
 
     // Phase 3: Item validation
     if structural_ok {
-        errors.extend(validate_items(config, backlog));
+        errors.extend(validate_items(config, items));
     }
 
     // Phase 4: Duplicate ID validation
-    errors.extend(validate_duplicate_ids(&backlog.items));
+    errors.extend(validate_duplicate_ids(items));
 
     // Phase 5: Dependency graph validation
-    errors.extend(validate_dependency_graph(&backlog.items));
+    errors.extend(validate_dependency_graph(items));
 
     if errors.is_empty() {
         Ok(())
@@ -224,26 +236,28 @@ fn probe_workflows(config: &PhaseGolemConfig, project_root: &Path) -> Vec<Prefli
 // --- Phase 3: Item validation ---
 
 /// Validate that in-progress and scoping items reference valid pipeline/phase combos.
-fn validate_items(config: &PhaseGolemConfig, backlog: &BacklogFile) -> Vec<PreflightError> {
+fn validate_items(config: &PhaseGolemConfig, items: &[PgItem]) -> Vec<PreflightError> {
     let mut errors = Vec::new();
 
-    for item in &backlog.items {
+    for item in items {
         // Only validate items that are actively being processed
-        if item.status != ItemStatus::InProgress && item.status != ItemStatus::Scoping {
+        let status = item.pg_status();
+        if status != ItemStatus::InProgress && status != ItemStatus::Scoping {
             continue;
         }
 
         // Check pipeline_type references a valid pipeline
-        let pipeline_type = item.pipeline_type.as_deref().unwrap_or("feature");
+        let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+        let pipeline_type = pipeline_type_owned.as_str();
         let pipeline = match config.pipelines.get(pipeline_type) {
             Some(p) => p,
             None => {
                 errors.push(PreflightError {
                     condition: format!(
                         "Item {} references unknown pipeline type \"{}\"",
-                        item.id, pipeline_type
+                        item.id(), pipeline_type
                     ),
-                    config_location: format!("BACKLOG.yaml → item {} → pipeline_type", item.id),
+                    config_location: format!("items → {} → pipeline_type", item.id()),
                     suggested_fix: format!(
                         "Add a [pipelines.{}] section to phase-golem.toml or update the item's pipeline_type",
                         pipeline_type
@@ -254,17 +268,17 @@ fn validate_items(config: &PhaseGolemConfig, backlog: &BacklogFile) -> Vec<Prefl
         };
 
         // Check phase references a valid phase name
-        if let Some(ref phase_name) = item.phase {
-            let phase_in_pre = pipeline.pre_phases.iter().any(|p| p.name == *phase_name);
-            let phase_in_main = pipeline.phases.iter().any(|p| p.name == *phase_name);
+        if let Some(phase_name) = item.phase() {
+            let phase_in_pre = pipeline.pre_phases.iter().any(|p| p.name == phase_name);
+            let phase_in_main = pipeline.phases.iter().any(|p| p.name == phase_name);
 
             if !phase_in_pre && !phase_in_main {
                 errors.push(PreflightError {
                     condition: format!(
                         "Item {} references unknown phase \"{}\" in pipeline \"{}\"",
-                        item.id, phase_name, pipeline_type
+                        item.id(), phase_name, pipeline_type
                     ),
-                    config_location: format!("BACKLOG.yaml → item {} → phase", item.id),
+                    config_location: format!("items → {} → phase", item.id()),
                     suggested_fix: format!(
                         "Update the item's phase to a valid phase name in the \"{}\" pipeline",
                         pipeline_type
@@ -274,7 +288,7 @@ fn validate_items(config: &PhaseGolemConfig, backlog: &BacklogFile) -> Vec<Prefl
             }
 
             // Check phase_pool matches phase location
-            if let Some(ref pool) = item.phase_pool {
+            if let Some(ref pool) = item.phase_pool() {
                 let expected_pool = if phase_in_pre {
                     PhasePool::Pre
                 } else {
@@ -284,11 +298,11 @@ fn validate_items(config: &PhaseGolemConfig, backlog: &BacklogFile) -> Vec<Prefl
                     errors.push(PreflightError {
                         condition: format!(
                             "Item {} has phase_pool {:?} but phase \"{}\" is in {:?}",
-                            item.id, pool, phase_name, expected_pool
+                            item.id(), pool, phase_name, expected_pool
                         ),
                         config_location: format!(
-                            "BACKLOG.yaml → item {} → phase_pool",
-                            item.id
+                            "items → {} → phase_pool",
+                            item.id()
                         ),
                         suggested_fix: format!(
                             "Update phase_pool to {:?} to match the phase's location in the pipeline",
@@ -310,10 +324,10 @@ fn validate_items(config: &PhaseGolemConfig, backlog: &BacklogFile) -> Vec<Prefl
 /// Uses HashMap<&str, Vec<usize>> instead of HashSet::insert() (used by the
 /// dependency graph phase) because we need to report ALL indices where a
 /// duplicate ID appears, not just the second occurrence.
-fn validate_duplicate_ids(items: &[BacklogItem]) -> Vec<PreflightError> {
+fn validate_duplicate_ids(items: &[PgItem]) -> Vec<PreflightError> {
     let mut id_indices: HashMap<&str, Vec<usize>> = HashMap::new();
     for (index, item) in items.iter().enumerate() {
-        id_indices.entry(item.id.as_str()).or_default().push(index);
+        id_indices.entry(item.id()).or_default().push(index);
     }
 
     let mut duplicates: Vec<_> = id_indices
@@ -341,28 +355,28 @@ fn validate_duplicate_ids(items: &[BacklogItem]) -> Vec<PreflightError> {
 ///
 /// Dangling references: an item depends on an ID that doesn't exist in the backlog.
 /// Cycles: a set of non-Done items form a circular dependency chain.
-pub fn validate_dependency_graph(items: &[BacklogItem]) -> Vec<PreflightError> {
+pub fn validate_dependency_graph(items: &[PgItem]) -> Vec<PreflightError> {
     let mut errors = Vec::new();
 
     // Build set of all item IDs for dangling reference detection
-    let all_ids: HashSet<&str> = items.iter().map(|item| item.id.as_str()).collect();
+    let all_ids: HashSet<&str> = items.iter().map(|item| item.id()).collect();
 
     // Check for dangling references
     for item in items {
-        for dep_id in &item.dependencies {
+        for dep_id in item.dependencies() {
             if !all_ids.contains(dep_id.as_str()) {
                 errors.push(PreflightError {
                     condition: format!(
                         "Item '{}' depends on '{}' which does not exist in the backlog",
-                        item.id, dep_id
+                        item.id(), dep_id
                     ),
                     config_location: format!(
-                        "BACKLOG.yaml → items → {} → dependencies",
-                        item.id
+                        "items → {} → dependencies",
+                        item.id()
                     ),
                     suggested_fix: format!(
                         "Remove '{}' from {}'s dependencies, or add the missing item to the backlog",
-                        dep_id, item.id
+                        dep_id, item.id()
                     ),
                 });
             }
@@ -370,9 +384,9 @@ pub fn validate_dependency_graph(items: &[BacklogItem]) -> Vec<PreflightError> {
     }
 
     // Filter to non-Done items for cycle detection
-    let non_done_items: Vec<&BacklogItem> = items
+    let non_done_items: Vec<&PgItem> = items
         .iter()
-        .filter(|item| item.status != ItemStatus::Done)
+        .filter(|item| item.pg_status() != ItemStatus::Done)
         .collect();
 
     for cycle in detect_cycles(&non_done_items) {
@@ -394,7 +408,7 @@ pub fn validate_dependency_graph(items: &[BacklogItem]) -> Vec<PreflightError> {
 /// DFS three-color cycle detection on non-Done items.
 ///
 /// Returns each cycle as a path like `["A", "B", "C", "A"]`.
-fn detect_cycles(items: &[&BacklogItem]) -> Vec<Vec<String>> {
+fn detect_cycles(items: &[&PgItem]) -> Vec<Vec<String>> {
     #[derive(Clone, Copy, PartialEq)]
     enum VisitState {
         Unvisited,
@@ -402,16 +416,16 @@ fn detect_cycles(items: &[&BacklogItem]) -> Vec<Vec<String>> {
         Done,
     }
 
-    let item_ids: HashSet<&str> = items.iter().map(|item| item.id.as_str()).collect();
+    let item_ids: HashSet<&str> = items.iter().map(|item| item.id()).collect();
     let mut state: HashMap<&str, VisitState> = items
         .iter()
-        .map(|item| (item.id.as_str(), VisitState::Unvisited))
+        .map(|item| (item.id(), VisitState::Unvisited))
         .collect();
     let mut cycles = Vec::new();
 
     fn dfs<'a>(
         item_id: &'a str,
-        items: &'a [&BacklogItem],
+        items: &'a [&PgItem],
         item_ids: &HashSet<&str>,
         state: &mut HashMap<&'a str, VisitState>,
         path: &mut Vec<&'a str>,
@@ -422,9 +436,9 @@ fn detect_cycles(items: &[&BacklogItem]) -> Vec<Vec<String>> {
 
         let item = items
             .iter()
-            .find(|i| i.id == item_id)
+            .find(|i| i.id() == item_id)
             .expect("BUG: DFS called with item_id not in items slice");
-        for dep_id in &item.dependencies {
+        for dep_id in item.dependencies() {
             // Skip edges to IDs not in our non-Done item set (dangling refs caught separately)
             if !item_ids.contains(dep_id.as_str()) {
                 continue;
@@ -454,10 +468,10 @@ fn detect_cycles(items: &[&BacklogItem]) -> Vec<Vec<String>> {
     }
 
     for item in items {
-        if state.get(item.id.as_str()) == Some(&VisitState::Unvisited) {
+        if state.get(item.id()) == Some(&VisitState::Unvisited) {
             let mut path = Vec::new();
             dfs(
-                item.id.as_str(),
+                item.id(),
                 items,
                 &item_ids,
                 &mut state,

@@ -3,15 +3,33 @@ mod common;
 use std::path::Path;
 
 use phase_golem::config::{PhaseConfig, PhaseGolemConfig, PipelineConfig, StalenessAction};
+use phase_golem::pg_item::{self, PgItem};
 use phase_golem::preflight::{run_preflight, PreflightError};
-use phase_golem::types::{BacklogItem, ItemStatus, PhasePool};
+use phase_golem::types::{ItemStatus, PhasePool};
+
+// --- Test project root with .task-golem/ directory ---
+
+/// Returns a stable project root path with a `.task-golem/` directory.
+///
+/// Uses `/tmp/pg-preflight-test` and creates `.task-golem/` on first call.
+/// All preflight tests share this root since they only read (never write) from it.
+fn test_project_root() -> &'static Path {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    static DIR: &str = "/tmp/pg-preflight-test";
+    INIT.call_once(|| {
+        std::fs::create_dir_all(format!("{}/.task-golem", DIR))
+            .expect("Failed to create .task-golem dir for preflight tests");
+    });
+    Path::new(DIR)
+}
 
 // --- Test helpers ---
 
-fn make_feature_item(id: &str, status: ItemStatus) -> BacklogItem {
-    let mut item = common::make_item(id, status);
-    item.pipeline_type = Some("feature".to_string());
-    item
+fn make_feature_item(id: &str, status: ItemStatus) -> PgItem {
+    let mut pg = common::make_pg_item(id, status);
+    pg_item::set_pipeline_type(&mut pg.0, Some("feature"));
+    pg
 }
 
 /// Build a default feature pipeline with empty workflow lists.
@@ -40,18 +58,58 @@ fn default_config() -> PhaseGolemConfig {
     config
 }
 
+// --- .task-golem/ directory existence check ---
+
+#[test]
+fn preflight_fails_when_task_golem_dir_missing() {
+    let dir = tempfile::TempDir::new().expect("Failed to create temp dir");
+    // Do NOT create .task-golem/ — that's the point of the test
+
+    let config = default_config();
+    let items: Vec<PgItem> = vec![];
+
+    let result = run_preflight(&config, &items, dir.path(), dir.path());
+
+    let errors = result.expect_err("Should fail when .task-golem/ is missing");
+    assert_eq!(errors.len(), 1);
+    assert!(
+        errors[0].condition.contains(".task-golem/"),
+        "Error should mention .task-golem/ directory: {:?}",
+        errors[0].condition
+    );
+    assert!(
+        errors[0].suggested_fix.contains("tg init"),
+        "Fix should suggest `tg init`: {:?}",
+        errors[0].suggested_fix
+    );
+}
+
+#[test]
+fn preflight_passes_when_task_golem_dir_exists() {
+    let dir = tempfile::TempDir::new().expect("Failed to create temp dir");
+    std::fs::create_dir_all(dir.path().join(".task-golem"))
+        .expect("Failed to create .task-golem dir");
+
+    let config = default_config();
+    let items: Vec<PgItem> = vec![];
+
+    let result = run_preflight(&config, &items, dir.path(), dir.path());
+
+    assert!(result.is_ok(), "Should pass when .task-golem/ exists");
+}
+
 // --- Structural validation tests ---
 
 #[test]
 fn preflight_valid_config_passes() {
     let config = default_config();
-    let backlog = common::make_backlog(vec![]);
+    let items: Vec<PgItem> = vec![];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -68,13 +126,13 @@ fn preflight_no_main_phases_fails() {
         },
     );
 
-    let backlog = common::make_backlog(vec![]);
+    let items: Vec<PgItem> = vec![];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -103,13 +161,13 @@ fn preflight_duplicate_phase_names_fails() {
         },
     );
 
-    let backlog = common::make_backlog(vec![]);
+    let items: Vec<PgItem> = vec![];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -135,13 +193,13 @@ fn preflight_destructive_pre_phase_fails() {
         },
     );
 
-    let backlog = common::make_backlog(vec![]);
+    let items: Vec<PgItem> = vec![];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -155,13 +213,13 @@ fn preflight_max_wip_zero_fails() {
     let mut config = default_config();
     config.execution.max_wip = 0;
 
-    let backlog = common::make_backlog(vec![]);
+    let items: Vec<PgItem> = vec![];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -173,13 +231,13 @@ fn preflight_max_concurrent_zero_fails() {
     let mut config = default_config();
     config.execution.max_concurrent = 0;
 
-    let backlog = common::make_backlog(vec![]);
+    let items: Vec<PgItem> = vec![];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -204,13 +262,13 @@ fn preflight_staleness_block_with_max_wip_gt_1_fails() {
         },
     );
 
-    let backlog = common::make_backlog(vec![]);
+    let items: Vec<PgItem> = vec![];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -226,13 +284,13 @@ fn preflight_errors_contain_config_location() {
     let mut config = default_config();
     config.execution.max_wip = 0;
 
-    let backlog = common::make_backlog(vec![]);
+    let items: Vec<PgItem> = vec![];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -279,8 +337,8 @@ fn preflight_workflow_files_exist_passes() {
         },
     );
 
-    let backlog = common::make_backlog(vec![]);
-    let result = run_preflight(&config, &backlog, root, root);
+    let items: Vec<PgItem> = vec![];
+    let result = run_preflight(&config, &items, root, root);
 
     assert!(result.is_ok());
 }
@@ -302,8 +360,8 @@ fn preflight_missing_workflow_files_fails() {
         },
     );
 
-    let backlog = common::make_backlog(vec![]);
-    let result = run_preflight(&config, &backlog, root, root);
+    let items: Vec<PgItem> = vec![];
+    let result = run_preflight(&config, &items, root, root);
 
     let errors = result.unwrap_err();
     assert!(errors
@@ -317,17 +375,17 @@ fn preflight_missing_workflow_files_fails() {
 fn preflight_valid_in_progress_item_passes() {
     let config = default_config();
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.phase = Some("prd".to_string());
-    item.phase_pool = Some(PhasePool::Main);
-    item.pipeline_type = Some("feature".to_string());
+    pg_item::set_phase(&mut item.0, Some("prd"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
+    pg_item::set_pipeline_type(&mut item.0, Some("feature"));
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -337,17 +395,17 @@ fn preflight_valid_in_progress_item_passes() {
 fn preflight_invalid_pipeline_type_fails() {
     let config = default_config();
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.phase = Some("prd".to_string());
-    item.phase_pool = Some(PhasePool::Main);
-    item.pipeline_type = Some("nonexistent".to_string());
+    pg_item::set_phase(&mut item.0, Some("prd"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
+    pg_item::set_pipeline_type(&mut item.0, Some("nonexistent"));
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -360,17 +418,17 @@ fn preflight_invalid_pipeline_type_fails() {
 fn preflight_invalid_phase_name_fails() {
     let config = default_config();
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.phase = Some("nonexistent-phase".to_string());
-    item.phase_pool = Some(PhasePool::Main);
-    item.pipeline_type = Some("feature".to_string());
+    pg_item::set_phase(&mut item.0, Some("nonexistent-phase"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
+    pg_item::set_pipeline_type(&mut item.0, Some("feature"));
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -381,17 +439,17 @@ fn preflight_invalid_phase_name_fails() {
 fn preflight_mismatched_phase_pool_fails() {
     let config = default_config();
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.phase = Some("research".to_string()); // research is in pre_phases
-    item.phase_pool = Some(PhasePool::Main); // But pool says main
-    item.pipeline_type = Some("feature".to_string());
+    pg_item::set_phase(&mut item.0, Some("research")); // research is in pre_phases
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main)); // But pool says main
+    pg_item::set_pipeline_type(&mut item.0, Some("feature"));
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -403,18 +461,18 @@ fn preflight_skips_new_and_done_items() {
     let config = default_config();
     // These items have invalid pipeline_type but should be skipped
     let mut new_item = make_feature_item("WRK-001", ItemStatus::New);
-    new_item.pipeline_type = Some("nonexistent".to_string());
+    pg_item::set_pipeline_type(&mut new_item.0, Some("nonexistent"));
 
     let mut done_item = make_feature_item("WRK-002", ItemStatus::Done);
-    done_item.pipeline_type = Some("nonexistent".to_string());
+    pg_item::set_pipeline_type(&mut done_item.0, Some("nonexistent"));
 
-    let backlog = common::make_backlog(vec![new_item, done_item]);
+    let items = vec![new_item, done_item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -424,17 +482,17 @@ fn preflight_skips_new_and_done_items() {
 fn preflight_validates_scoping_items() {
     let config = default_config();
     let mut item = make_feature_item("WRK-001", ItemStatus::Scoping);
-    item.phase = Some("research".to_string());
-    item.phase_pool = Some(PhasePool::Pre);
-    item.pipeline_type = Some("feature".to_string());
+    pg_item::set_phase(&mut item.0, Some("research"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Pre));
+    pg_item::set_pipeline_type(&mut item.0, Some("feature"));
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -444,17 +502,17 @@ fn preflight_validates_scoping_items() {
 fn preflight_item_with_default_pipeline_type_passes() {
     let config = default_config();
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.phase = Some("prd".to_string());
-    item.phase_pool = Some(PhasePool::Main);
-    item.pipeline_type = None; // Should default to "feature"
+    pg_item::set_phase(&mut item.0, Some("prd"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
+    pg_item::set_pipeline_type(&mut item.0, None); // Should default to "feature"
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -465,13 +523,13 @@ fn preflight_item_with_default_pipeline_type_passes() {
 #[test]
 fn preflight_empty_backlog_no_duplicate_errors() {
     let config = default_config();
-    let backlog = common::make_backlog(vec![]);
+    let items: Vec<PgItem> = vec![];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -482,13 +540,13 @@ fn preflight_single_item_no_duplicate_errors() {
     let config = default_config();
     let item = make_feature_item("WRK-001", ItemStatus::New);
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -501,13 +559,13 @@ fn preflight_unique_ids_no_duplicate_errors() {
     let item_b = make_feature_item("WRK-002", ItemStatus::Ready);
     let item_c = make_feature_item("WRK-003", ItemStatus::Done);
 
-    let backlog = common::make_backlog(vec![item_a, item_b, item_c]);
+    let items = vec![item_a, item_b, item_c];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -519,13 +577,13 @@ fn preflight_duplicate_id_pair_fails() {
     let item_a = make_feature_item("WRK-001", ItemStatus::New);
     let item_b = make_feature_item("WRK-001", ItemStatus::Done);
 
-    let backlog = common::make_backlog(vec![item_a, item_b]);
+    let items = vec![item_a, item_b];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -550,13 +608,13 @@ fn preflight_multiple_distinct_duplicate_ids_fails() {
     let item_c = make_feature_item("WRK-002", ItemStatus::Done);
     let item_d = make_feature_item("WRK-001", ItemStatus::New);
 
-    let backlog = common::make_backlog(vec![item_a, item_b, item_c, item_d]);
+    let items = vec![item_a, item_b, item_c, item_d];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -580,13 +638,13 @@ fn preflight_three_way_duplicate_id_fails() {
     let item_d = make_feature_item("WRK-003", ItemStatus::New);
     let item_e = make_feature_item("WRK-001", ItemStatus::InProgress);
 
-    let backlog = common::make_backlog(vec![item_a, item_b, item_c, item_d, item_e]);
+    let items = vec![item_a, item_b, item_c, item_d, item_e];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -605,13 +663,13 @@ fn preflight_case_sensitive_ids_not_duplicates() {
     let item_a = make_feature_item("WRK-001", ItemStatus::New);
     let item_b = make_feature_item("wrk-001", ItemStatus::Ready);
 
-    let backlog = common::make_backlog(vec![item_a, item_b]);
+    let items = vec![item_a, item_b];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -622,16 +680,21 @@ fn preflight_case_sensitive_ids_not_duplicates() {
 #[test]
 fn preflight_dangling_dependency_fails() {
     let config = default_config();
-    let mut item = make_feature_item("WRK-001", ItemStatus::Ready);
-    item.dependencies = vec!["WRK-999".to_string()];
+    let item = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-999".to_string()],
+    );
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -643,19 +706,29 @@ fn preflight_dangling_dependency_fails() {
 #[test]
 fn preflight_multiple_dangling_references() {
     let config = default_config();
-    let mut item_a = make_feature_item("WRK-001", ItemStatus::Ready);
-    item_a.dependencies = vec!["WRK-888".to_string()];
+    let item_a = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-888".to_string()],
+    );
 
-    let mut item_b = make_feature_item("WRK-002", ItemStatus::Ready);
-    item_b.dependencies = vec!["WRK-999".to_string()];
+    let item_b = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-999".to_string()],
+    );
 
-    let backlog = common::make_backlog(vec![item_a, item_b]);
+    let items = vec![item_a, item_b];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -670,16 +743,21 @@ fn preflight_multiple_dangling_references() {
 fn preflight_valid_dependencies_passes() {
     let config = default_config();
     let item_a = make_feature_item("WRK-001", ItemStatus::Done);
-    let mut item_b = make_feature_item("WRK-002", ItemStatus::Ready);
-    item_b.dependencies = vec!["WRK-001".to_string()];
+    let item_b = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-001".to_string()],
+    );
 
-    let backlog = common::make_backlog(vec![item_a, item_b]);
+    let items = vec![item_a, item_b];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -690,16 +768,21 @@ fn preflight_valid_dependencies_passes() {
 #[test]
 fn preflight_self_dependency_fails() {
     let config = default_config();
-    let mut item = make_feature_item("WRK-001", ItemStatus::Ready);
-    item.dependencies = vec!["WRK-001".to_string()];
+    let item = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-001".to_string()],
+    );
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -714,19 +797,29 @@ fn preflight_self_dependency_fails() {
 #[test]
 fn preflight_two_node_cycle_fails() {
     let config = default_config();
-    let mut item_a = make_feature_item("WRK-001", ItemStatus::Ready);
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    let item_a = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-002".to_string()],
+    );
 
-    let mut item_b = make_feature_item("WRK-002", ItemStatus::Ready);
-    item_b.dependencies = vec!["WRK-001".to_string()];
+    let item_b = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-001".to_string()],
+    );
 
-    let backlog = common::make_backlog(vec![item_a, item_b]);
+    let items = vec![item_a, item_b];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -745,22 +838,37 @@ fn preflight_two_node_cycle_fails() {
 #[test]
 fn preflight_three_node_cycle_fails() {
     let config = default_config();
-    let mut item_a = make_feature_item("WRK-001", ItemStatus::Ready);
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    let item_a = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-002".to_string()],
+    );
 
-    let mut item_b = make_feature_item("WRK-002", ItemStatus::Ready);
-    item_b.dependencies = vec!["WRK-003".to_string()];
+    let item_b = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-003".to_string()],
+    );
 
-    let mut item_c = make_feature_item("WRK-003", ItemStatus::Ready);
-    item_c.dependencies = vec!["WRK-001".to_string()];
+    let item_c = pg_item::new_from_parts(
+        "WRK-003".to_string(),
+        "Test item WRK-003".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-001".to_string()],
+    );
 
-    let backlog = common::make_backlog(vec![item_a, item_b, item_c]);
+    let items = vec![item_a, item_b, item_c];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -782,26 +890,46 @@ fn preflight_three_node_cycle_fails() {
 fn preflight_multiple_independent_cycles() {
     let config = default_config();
     // Cycle 1: A <-> B
-    let mut item_a = make_feature_item("WRK-001", ItemStatus::Ready);
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    let item_a = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-002".to_string()],
+    );
 
-    let mut item_b = make_feature_item("WRK-002", ItemStatus::Ready);
-    item_b.dependencies = vec!["WRK-001".to_string()];
+    let item_b = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-001".to_string()],
+    );
 
     // Cycle 2: C <-> D
-    let mut item_c = make_feature_item("WRK-003", ItemStatus::Ready);
-    item_c.dependencies = vec!["WRK-004".to_string()];
+    let item_c = pg_item::new_from_parts(
+        "WRK-003".to_string(),
+        "Test item WRK-003".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-004".to_string()],
+    );
 
-    let mut item_d = make_feature_item("WRK-004", ItemStatus::Ready);
-    item_d.dependencies = vec!["WRK-003".to_string()];
+    let item_d = pg_item::new_from_parts(
+        "WRK-004".to_string(),
+        "Test item WRK-004".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-003".to_string()],
+    );
 
-    let backlog = common::make_backlog(vec![item_a, item_b, item_c, item_d]);
+    let items = vec![item_a, item_b, item_c, item_d];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -823,20 +951,24 @@ fn preflight_multiple_independent_cycles() {
 #[test]
 fn preflight_cycle_with_blocked_item_detected() {
     let config = default_config();
-    let mut item_a = make_feature_item("WRK-001", ItemStatus::Ready);
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    let item_a = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-002".to_string()],
+    );
 
-    let mut item_b = make_feature_item("WRK-002", ItemStatus::Blocked);
-    item_b.blocked_from_status = Some(ItemStatus::Ready);
-    item_b.dependencies = vec!["WRK-001".to_string()];
+    let mut item_b = common::make_blocked_pg_item("WRK-002", ItemStatus::Ready);
+    item_b.0.dependencies = vec!["WRK-001".to_string()];
 
-    let backlog = common::make_backlog(vec![item_a, item_b]);
+    let items = vec![item_a, item_b];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -849,19 +981,29 @@ fn preflight_cycle_with_blocked_item_detected() {
 fn preflight_done_items_excluded_from_cycle_detection() {
     let config = default_config();
     // A depends on B (Done), B depends on A — but B is Done so no cycle
-    let mut item_a = make_feature_item("WRK-001", ItemStatus::Ready);
-    item_a.dependencies = vec!["WRK-002".to_string()];
+    let item_a = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-002".to_string()],
+    );
 
-    let mut item_b = make_feature_item("WRK-002", ItemStatus::Done);
-    item_b.dependencies = vec!["WRK-001".to_string()];
+    let item_b = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Done,
+        vec![],
+        vec!["WRK-001".to_string()],
+    );
 
-    let backlog = common::make_backlog(vec![item_a, item_b]);
+    let items = vec![item_a, item_b];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -871,24 +1013,39 @@ fn preflight_done_items_excluded_from_cycle_detection() {
 fn preflight_diamond_dag_no_false_positive() {
     let config = default_config();
     // Diamond: A→B, A→C, B→D, C→D (not a cycle)
-    let mut item_a = make_feature_item("WRK-001", ItemStatus::Ready);
-    item_a.dependencies = vec!["WRK-002".to_string(), "WRK-003".to_string()];
+    let item_a = pg_item::new_from_parts(
+        "WRK-001".to_string(),
+        "Test item WRK-001".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-002".to_string(), "WRK-003".to_string()],
+    );
 
-    let mut item_b = make_feature_item("WRK-002", ItemStatus::Ready);
-    item_b.dependencies = vec!["WRK-004".to_string()];
+    let item_b = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-004".to_string()],
+    );
 
-    let mut item_c = make_feature_item("WRK-003", ItemStatus::Ready);
-    item_c.dependencies = vec!["WRK-004".to_string()];
+    let item_c = pg_item::new_from_parts(
+        "WRK-003".to_string(),
+        "Test item WRK-003".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-004".to_string()],
+    );
 
     let item_d = make_feature_item("WRK-004", ItemStatus::Ready);
 
-    let backlog = common::make_backlog(vec![item_a, item_b, item_c, item_d]);
+    let items = vec![item_a, item_b, item_c, item_d];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -900,19 +1057,29 @@ fn preflight_transitive_chain_no_cycle() {
     // C→B→A (valid DAG chain)
     let item_a = make_feature_item("WRK-001", ItemStatus::Ready);
 
-    let mut item_b = make_feature_item("WRK-002", ItemStatus::Ready);
-    item_b.dependencies = vec!["WRK-001".to_string()];
+    let item_b = pg_item::new_from_parts(
+        "WRK-002".to_string(),
+        "Test item WRK-002".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-001".to_string()],
+    );
 
-    let mut item_c = make_feature_item("WRK-003", ItemStatus::Ready);
-    item_c.dependencies = vec!["WRK-002".to_string()];
+    let item_c = pg_item::new_from_parts(
+        "WRK-003".to_string(),
+        "Test item WRK-003".to_string(),
+        ItemStatus::Ready,
+        vec![],
+        vec!["WRK-002".to_string()],
+    );
 
-    let backlog = common::make_backlog(vec![item_a, item_b, item_c]);
+    let items = vec![item_a, item_b, item_c];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -924,13 +1091,13 @@ fn preflight_no_dependencies_passes() {
     let item_a = make_feature_item("WRK-001", ItemStatus::Ready);
     let item_b = make_feature_item("WRK-002", ItemStatus::Ready);
 
-    let backlog = common::make_backlog(vec![item_a, item_b]);
+    let items = vec![item_a, item_b];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     assert!(result.is_ok());
@@ -954,17 +1121,17 @@ fn preflight_phase3_skipped_when_phase1_fails() {
     // would trigger Phase 3 "unknown pipeline type" error if Phase 3 ran,
     // but Phase 1 should gate it
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.pipeline_type = Some("nonexistent".to_string());
-    item.phase = Some("build".to_string());
-    item.phase_pool = Some(PhasePool::Main);
+    pg_item::set_pipeline_type(&mut item.0, Some("nonexistent"));
+    pg_item::set_phase(&mut item.0, Some("build"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -1000,13 +1167,13 @@ fn preflight_phase3_runs_when_phase1_passes_but_phase2_fails() {
     // InProgress item with an invalid phase — Phase 3 will report "unknown phase"
     // if it runs, proving the gate did not suppress it
     let mut item = make_feature_item("WRK-001", ItemStatus::InProgress);
-    item.pipeline_type = Some("feature".to_string());
-    item.phase = Some("nonexistent-phase".to_string());
-    item.phase_pool = Some(PhasePool::Main);
+    pg_item::set_pipeline_type(&mut item.0, Some("feature"));
+    pg_item::set_phase(&mut item.0, Some("nonexistent-phase"));
+    pg_item::set_phase_pool(&mut item.0, Some(&PhasePool::Main));
 
-    let backlog = common::make_backlog(vec![item]);
+    let items = vec![item];
 
-    let result = run_preflight(&config, &backlog, root, root);
+    let result = run_preflight(&config, &items, root, root);
 
     let errors = result.unwrap_err();
     // Phase 2 ran and found missing workflow file
@@ -1033,13 +1200,13 @@ fn preflight_phase4_and_phase5_run_when_phase1_fails() {
     let item_a = make_feature_item("WRK-DUP", ItemStatus::New);
     let item_b = make_feature_item("WRK-DUP", ItemStatus::New);
 
-    let backlog = common::make_backlog(vec![item_a, item_b]);
+    let items = vec![item_a, item_b];
 
     let result = run_preflight(
         &config,
-        &backlog,
-        Path::new("/tmp/test"),
-        Path::new("/tmp/test"),
+        &items,
+        test_project_root(),
+        test_project_root(),
     );
 
     let errors = result.unwrap_err();
@@ -1081,16 +1248,16 @@ fn preflight_config_base_differs_from_project_root() {
         },
     );
 
-    let backlog = common::make_backlog(vec![]);
+    let items: Vec<PgItem> = vec![];
 
     // The workflow file exists under config_base but NOT under project_root directly,
     // so this should pass because probe_workflows resolves relative to config_base.
-    let result = run_preflight(&config, &backlog, project_root, &config_base);
+    let result = run_preflight(&config, &items, project_root, &config_base);
     assert!(result.is_ok());
 
     // Verify it would fail if we passed project_root as config_base instead,
     // since the file does not exist at project_root/workflows/build.md.
-    let result = run_preflight(&config, &backlog, project_root, project_root);
+    let result = run_preflight(&config, &items, project_root, project_root);
     let errors = result.unwrap_err();
     assert!(errors
         .iter()

@@ -11,10 +11,10 @@ use crate::config::{ExecutionConfig, PhaseGolemConfig, PipelineConfig};
 use crate::coordinator::CoordinatorHandle;
 use crate::executor;
 use crate::filter;
-use crate::pg_item;
+use crate::pg_item::PgItem;
 use crate::prompt;
 use crate::types::{
-    BacklogFile, BacklogItem, DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult,
+    DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult,
     PhasePool, PhaseResult, ResultCode, SchedulerAction, SizeLevel,
 };
 use crate::{log_debug, log_info, log_warn};
@@ -148,7 +148,7 @@ impl RunningTasks {
 /// - If next phase is destructive, it must be the ONLY action
 /// - Items already running are excluded
 pub fn select_actions(
-    snapshot: &BacklogFile,
+    items: &[PgItem],
     running: &RunningTasks,
     config: &ExecutionConfig,
     pipelines: &HashMap<String, PipelineConfig>,
@@ -169,26 +169,25 @@ pub fn select_actions(
     let mut actions: Vec<SchedulerAction> = Vec::new();
 
     // Count current InProgress items (not Blocked, not Done)
-    let in_progress_count = snapshot
-        .items
+    let in_progress_count = items
         .iter()
-        .filter(|i| i.status == ItemStatus::InProgress)
+        .filter(|i| i.pg_status() == ItemStatus::InProgress)
         .count() as u32;
 
     // (2) Promote Ready → InProgress when under max_wip
     // Promotions don't consume executor slots — they're instant state transitions
     let promotions_needed = config.max_wip.saturating_sub(in_progress_count) as usize;
-    let ready_items = sorted_ready_items(&snapshot.items);
+    let ready_items = sorted_ready_items(items);
     let mut promoted = 0usize;
     for item in &ready_items {
         if promoted >= promotions_needed {
             break;
         }
-        if skip_for_unmet_deps(item, &snapshot.items) {
+        if skip_for_unmet_deps(item, items) {
             continue;
         }
-        if !running.is_item_running(&item.id) {
-            actions.push(SchedulerAction::Promote(item.id.clone()));
+        if !running.is_item_running(item.id()) {
+            actions.push(SchedulerAction::Promote(item.id().to_string()));
             promoted += 1;
         }
     }
@@ -197,12 +196,12 @@ pub fn select_actions(
     let mut phase_actions = Vec::new();
 
     // InProgress items with phases to run
-    let in_progress_runnable = sorted_in_progress_items(&snapshot.items, pipelines);
+    let in_progress_runnable = sorted_in_progress_items(items, pipelines);
     for item in &in_progress_runnable {
-        if running.is_item_running(&item.id) {
+        if running.is_item_running(item.id()) {
             continue;
         }
-        if skip_for_unmet_deps(item, &snapshot.items) {
+        if skip_for_unmet_deps(item, items) {
             continue;
         }
         if let Some(action) = build_run_phase_action(item, pipelines) {
@@ -211,12 +210,12 @@ pub fn select_actions(
     }
 
     // Scoping items with phases to run
-    let scoping_runnable = sorted_scoping_items(&snapshot.items, pipelines);
+    let scoping_runnable = sorted_scoping_items(items, pipelines);
     for item in &scoping_runnable {
-        if running.is_item_running(&item.id) {
+        if running.is_item_running(item.id()) {
             continue;
         }
-        if skip_for_unmet_deps(item, &snapshot.items) {
+        if skip_for_unmet_deps(item, items) {
             continue;
         }
         if let Some(action) = build_run_phase_action(item, pipelines) {
@@ -225,15 +224,15 @@ pub fn select_actions(
     }
 
     // (5) Triage New items (lowest priority)
-    let new_items = sorted_new_items(&snapshot.items);
+    let new_items = sorted_new_items(items);
     for item in &new_items {
-        if running.is_item_running(&item.id) {
+        if running.is_item_running(item.id()) {
             continue;
         }
-        if skip_for_unmet_deps(item, &snapshot.items) {
+        if skip_for_unmet_deps(item, items) {
             continue;
         }
-        phase_actions.push(SchedulerAction::Triage(item.id.clone()));
+        phase_actions.push(SchedulerAction::Triage(item.id().to_string()));
     }
 
     // Fill slots respecting destructive exclusion
@@ -285,17 +284,17 @@ pub fn select_actions(
 // --- Sorting helpers ---
 
 /// Sort Ready items by impact (desc), then created date (asc, FIFO).
-fn sorted_ready_items(items: &[BacklogItem]) -> Vec<&BacklogItem> {
-    let mut ready: Vec<&BacklogItem> = items
+fn sorted_ready_items(items: &[PgItem]) -> Vec<&PgItem> {
+    let mut ready: Vec<&PgItem> = items
         .iter()
-        .filter(|i| i.status == ItemStatus::Ready)
+        .filter(|i| i.pg_status() == ItemStatus::Ready)
         .collect();
     ready.sort_by(|a, b| {
-        let impact_a = impact_sort_value(&a.impact);
-        let impact_b = impact_sort_value(&b.impact);
+        let impact_a = impact_sort_value(&a.impact());
+        let impact_b = impact_sort_value(&b.impact());
         impact_b
             .cmp(&impact_a)
-            .then_with(|| a.created.cmp(&b.created))
+            .then_with(|| a.created_at().cmp(&b.created_at()))
     });
     ready
 }
@@ -303,47 +302,47 @@ fn sorted_ready_items(items: &[BacklogItem]) -> Vec<&BacklogItem> {
 /// Sort InProgress items by advance-furthest-first: higher phase index first,
 /// then created date asc (FIFO).
 fn sorted_in_progress_items<'a>(
-    items: &'a [BacklogItem],
+    items: &'a [PgItem],
     pipelines: &HashMap<String, PipelineConfig>,
-) -> Vec<&'a BacklogItem> {
-    let mut in_progress: Vec<&BacklogItem> = items
+) -> Vec<&'a PgItem> {
+    let mut in_progress: Vec<&PgItem> = items
         .iter()
-        .filter(|i| i.status == ItemStatus::InProgress && i.phase.is_some())
+        .filter(|i| i.pg_status() == ItemStatus::InProgress && i.phase().is_some())
         .collect();
     in_progress.sort_by(|a, b| {
         let idx_a = phase_index(a, pipelines);
         let idx_b = phase_index(b, pipelines);
         idx_b
             .cmp(&idx_a) // Higher index first (furthest-first)
-            .then_with(|| a.created.cmp(&b.created))
+            .then_with(|| a.created_at().cmp(&b.created_at()))
     });
     in_progress
 }
 
 /// Sort Scoping items by phase index (desc), then created date (asc).
 fn sorted_scoping_items<'a>(
-    items: &'a [BacklogItem],
+    items: &'a [PgItem],
     pipelines: &HashMap<String, PipelineConfig>,
-) -> Vec<&'a BacklogItem> {
-    let mut scoping: Vec<&BacklogItem> = items
+) -> Vec<&'a PgItem> {
+    let mut scoping: Vec<&PgItem> = items
         .iter()
-        .filter(|i| i.status == ItemStatus::Scoping && i.phase.is_some())
+        .filter(|i| i.pg_status() == ItemStatus::Scoping && i.phase().is_some())
         .collect();
     scoping.sort_by(|a, b| {
         let idx_a = phase_index(a, pipelines);
         let idx_b = phase_index(b, pipelines);
-        idx_b.cmp(&idx_a).then_with(|| a.created.cmp(&b.created))
+        idx_b.cmp(&idx_a).then_with(|| a.created_at().cmp(&b.created_at()))
     });
     scoping
 }
 
 /// Sort New items by created date (asc, FIFO).
-fn sorted_new_items(items: &[BacklogItem]) -> Vec<&BacklogItem> {
-    let mut new_items: Vec<&BacklogItem> = items
+fn sorted_new_items(items: &[PgItem]) -> Vec<&PgItem> {
+    let mut new_items: Vec<&PgItem> = items
         .iter()
-        .filter(|i| i.status == ItemStatus::New)
+        .filter(|i| i.pg_status() == ItemStatus::New)
         .collect();
-    new_items.sort_by(|a, b| a.created.cmp(&b.created));
+    new_items.sort_by_key(|a| a.created_at());
     new_items
 }
 
@@ -356,17 +355,17 @@ fn sorted_new_items(items: &[BacklogItem]) -> Vec<&BacklogItem> {
 /// A dependency is met if:
 /// - The dep ID is not found in `all_items` (absent = archived = met)
 /// - The dep ID is found with status `Done`
-pub fn unmet_dep_summary(item: &BacklogItem, all_items: &[BacklogItem]) -> Option<String> {
-    if item.dependencies.is_empty() {
+pub fn unmet_dep_summary(item: &PgItem, all_items: &[PgItem]) -> Option<String> {
+    if item.dependencies().is_empty() {
         return None;
     }
     let unmet: Vec<String> = item
-        .dependencies
+        .dependencies()
         .iter()
         .filter_map(|dep_id| {
-            match all_items.iter().find(|i| i.id == *dep_id) {
-                Some(dep_item) if dep_item.status != ItemStatus::Done => {
-                    Some(format!("{} ({:?})", dep_id, dep_item.status))
+            match all_items.iter().find(|i| i.id() == dep_id) {
+                Some(dep_item) if dep_item.pg_status() != ItemStatus::Done => {
+                    Some(format!("{} ({:?})", dep_id, dep_item.pg_status()))
                 }
                 _ => None, // Done or absent = met
             }
@@ -380,9 +379,9 @@ pub fn unmet_dep_summary(item: &BacklogItem, all_items: &[BacklogItem]) -> Optio
 }
 
 /// Check and log if item has unmet dependencies. Returns true if unmet deps exist.
-fn skip_for_unmet_deps(item: &BacklogItem, all_items: &[BacklogItem]) -> bool {
+fn skip_for_unmet_deps(item: &PgItem, all_items: &[PgItem]) -> bool {
     if let Some(summary) = unmet_dep_summary(item, all_items) {
-        log_debug!("Item {} skipped: unmet dependencies: {}", item.id, summary);
+        log_debug!("Item {} skipped: unmet dependencies: {}", item.id(), summary);
         return true;
     }
     false
@@ -392,19 +391,19 @@ fn skip_for_unmet_deps(item: &BacklogItem, all_items: &[BacklogItem]) -> bool {
 ///
 /// InProgress items always sort ahead of Scoping items (higher base offset).
 /// Within each pool, higher phase index = further along.
-fn phase_index(item: &BacklogItem, pipelines: &HashMap<String, PipelineConfig>) -> usize {
-    let pipeline_type = item.pipeline_type.as_deref().unwrap_or("feature");
-    let pipeline = match pipelines.get(pipeline_type) {
+fn phase_index(item: &PgItem, pipelines: &HashMap<String, PipelineConfig>) -> usize {
+    let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+    let pipeline = match pipelines.get(&pipeline_type_owned) {
         Some(p) => p,
         None => return 0,
     };
 
-    let phase_name = match &item.phase {
-        Some(name) => name.as_str(),
+    let phase_name = match item.phase() {
+        Some(name) => name,
         None => return 0,
     };
 
-    let pool = item.phase_pool.as_ref();
+    let pool = item.phase_pool();
     match pool {
         Some(PhasePool::Pre) => pipeline
             .pre_phases
@@ -434,12 +433,12 @@ fn impact_sort_value(impact: &Option<DimensionLevel>) -> u8 {
 
 /// Build a RunPhase action for an item based on its current phase.
 fn build_run_phase_action(
-    item: &BacklogItem,
+    item: &PgItem,
     pipelines: &HashMap<String, PipelineConfig>,
 ) -> Option<SchedulerAction> {
-    let pipeline_type = item.pipeline_type.as_deref().unwrap_or("feature");
-    let pipeline = pipelines.get(pipeline_type)?;
-    let phase_name = item.phase.as_deref()?;
+    let pipeline_type = item.pipeline_type().as_deref().unwrap_or("feature").to_string();
+    let pipeline = pipelines.get(&pipeline_type)?;
+    let phase_name = item.phase()?;
 
     let phase_config = pipeline
         .pre_phases
@@ -447,11 +446,11 @@ fn build_run_phase_action(
         .chain(pipeline.phases.iter())
         .find(|p| p.name == phase_name)?;
 
-    let phase_pool = item.phase_pool.clone().unwrap_or(PhasePool::Main);
+    let phase_pool = item.phase_pool().unwrap_or(PhasePool::Main);
 
     Some(SchedulerAction::RunPhase {
-        item_id: item.id.clone(),
-        phase: phase_name.to_string(),
+        item_id: item.id().to_string(),
+        phase: phase_name,
         phase_pool,
         is_destructive: phase_config.is_destructive,
     })
@@ -471,12 +470,12 @@ pub fn advance_to_next_active_target(
     targets: &[String],
     current_index: usize,
     items_completed: &[String],
-    snapshot: &BacklogFile,
+    items: &[PgItem],
 ) -> usize {
     let mut index = current_index;
     while index < targets.len() {
         let target = &targets[index];
-        let target_item = snapshot.items.iter().find(|i| i.id == *target);
+        let target_item = items.iter().find(|i| i.id() == target);
         match target_item {
             None => {
                 log_warn!(
@@ -487,7 +486,7 @@ pub fn advance_to_next_active_target(
                 );
                 index += 1;
             }
-            Some(item) if items_completed.contains(&item.id) || item.status == ItemStatus::Done => {
+            Some(item) if items_completed.contains(&item.id().to_string()) || item.pg_status() == ItemStatus::Done => {
                 log_info!(
                     "[target] {} already done. Skipping ({}/{}).",
                     target,
@@ -496,7 +495,7 @@ pub fn advance_to_next_active_target(
                 );
                 index += 1;
             }
-            Some(item) if item.status == ItemStatus::Blocked => {
+            Some(item) if item.pg_status() == ItemStatus::Blocked => {
                 log_info!(
                     "[target] {} already blocked. Skipping ({}/{}).",
                     target,
@@ -589,9 +588,8 @@ pub async fn run_scheduler(
             return Ok(build_summary(state, HaltReason::CircuitBreakerTripped));
         }
 
-        // Get current snapshot (PgItem vec -> BacklogFile for legacy consumers)
-        let pg_snapshot = coordinator.get_snapshot().await?;
-        let snapshot = pg_item::to_backlog_file(&pg_snapshot);
+        // Get current snapshot
+        let snapshot = coordinator.get_snapshot().await?;
 
         // Check target completion/block (multi-target with cursor advancement)
         if !params.targets.is_empty() {
@@ -667,12 +665,11 @@ pub async fn run_scheduler(
             let filtered = filter::apply_filters(&params.filter, &snapshot);
             let criteria_display = filter::format_filter_criteria(&params.filter);
             // Check halt conditions based on filter results
-            if filtered.items.is_empty() {
+            if filtered.is_empty() {
                 // Determine if no items match at all, or all matching are Done/Blocked/archived.
                 // Check both the current snapshot and items we've already completed/blocked
                 // (which may have been archived and removed from the snapshot).
                 let any_match_in_snapshot = snapshot
-                    .items
                     .iter()
                     .any(|item| params.filter.iter().all(|c| filter::matches_item(c, item)));
                 let has_prior_progress =
@@ -713,9 +710,8 @@ pub async fn run_scheduler(
             }
             // Check if all remaining filtered items are Done or Blocked
             let all_done_or_blocked = filtered
-                .items
                 .iter()
-                .all(|i| matches!(i.status, ItemStatus::Done | ItemStatus::Blocked));
+                .all(|i| matches!(i.pg_status(), ItemStatus::Done | ItemStatus::Blocked));
             if all_done_or_blocked {
                 log_info!(
                     "[filter] All items matching {} are done or blocked.",
@@ -757,12 +753,11 @@ pub async fn run_scheduler(
             // Nothing to do and nothing running
             // Log items blocked by unmet dependencies for diagnostics
             let dep_blocked: Vec<String> = snapshot
-                .items
                 .iter()
-                .filter(|i| i.status != ItemStatus::Done)
+                .filter(|i| i.pg_status() != ItemStatus::Done)
                 .filter_map(|i| {
-                    unmet_dep_summary(i, &snapshot.items)
-                        .map(|summary| format!("{} (waiting on: {})", i.id, summary))
+                    unmet_dep_summary(i, &snapshot)
+                        .map(|summary| format!("{} (waiting on: {})", i.id(), summary))
                 })
                 .collect();
             if !dep_blocked.is_empty() {
@@ -857,7 +852,7 @@ pub async fn run_scheduler(
 
                     join_set.spawn(async move {
                         // Get a fresh snapshot of the item for execution
-                        let pg_snap = match coord.get_snapshot().await {
+                        let snap = match coord.get_snapshot().await {
                             Ok(s) => s,
                             Err(e) => {
                                 return (
@@ -869,8 +864,8 @@ pub async fn run_scheduler(
                                 )
                             }
                         };
-                        let item: BacklogItem = match pg_snap.iter().find(|i| i.id() == item_id) {
-                            Some(i) => i.clone().into(),
+                        let item = match snap.iter().find(|i| i.id() == item_id) {
+                            Some(i) => i.clone(),
                             None => {
                                 return (
                                     item_id,
@@ -881,7 +876,8 @@ pub async fn run_scheduler(
                             }
                         };
 
-                        let pipeline_type = item.pipeline_type.as_deref().unwrap_or("feature");
+                        let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+                        let pipeline_type = pipeline_type_owned.as_str();
                         let pipeline = match cfg.pipelines.get(pipeline_type) {
                             Some(p) => p,
                             None => {
@@ -985,25 +981,25 @@ pub async fn run_scheduler(
 
 /// Like `select_actions` but restricted to a specific target item.
 pub fn select_targeted_actions(
-    snapshot: &BacklogFile,
+    items: &[PgItem],
     running: &RunningTasks,
     _config: &ExecutionConfig,
     pipelines: &HashMap<String, PipelineConfig>,
     target_id: &str,
 ) -> Vec<SchedulerAction> {
     // Find the target item
-    let target = match snapshot.items.iter().find(|i| i.id == target_id) {
+    let target = match items.iter().find(|i| i.id() == target_id) {
         Some(item) => item,
         None => return Vec::new(),
     };
 
     // If target has unmet dependencies, skip it
-    if skip_for_unmet_deps(target, &snapshot.items) {
+    if skip_for_unmet_deps(target, items) {
         return Vec::new();
     }
 
     // If target is done or blocked and not running, nothing to do
-    if matches!(target.status, ItemStatus::Done | ItemStatus::Blocked)
+    if matches!(target.pg_status(), ItemStatus::Done | ItemStatus::Blocked)
         && !running.is_item_running(target_id)
     {
         return Vec::new();
@@ -1016,7 +1012,7 @@ pub fn select_targeted_actions(
 
     let mut actions = Vec::new();
 
-    match target.status {
+    match target.pg_status() {
         ItemStatus::New => {
             if !running.is_item_running(target_id) {
                 actions.push(SchedulerAction::Triage(target_id.to_string()));
@@ -1058,7 +1054,7 @@ async fn handle_task_completion(
     //   then re-fetches after mutations (process_merges/apply_triage_result).
     // - phase_success mutates first (assessments, follow-ups), then fetches its
     //   own snapshot at the mutation boundary — it does not use the pre-fetched one.
-    let snapshot = pg_item::to_backlog_file(&coordinator.get_snapshot().await?);
+    let snapshot = coordinator.get_snapshot().await?;
 
     match exec_result {
         PhaseExecutionResult::Success(phase_result) => {
@@ -1114,10 +1110,10 @@ async fn handle_task_completion(
         PhaseExecutionResult::Cancelled => {
             log_info!("[{}] Phase cancelled", item_id);
             // Write worklog entry
-            if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
-                let phase = item.phase.as_deref().unwrap_or("unknown");
+            if let Some(item) = snapshot.iter().find(|i| i.id() == item_id) {
+                let phase = item.phase().unwrap_or_else(|| "unknown".to_string());
                 let _ = coordinator
-                    .write_worklog(&item.id, &item.title, phase, "Cancelled", "Shutdown requested")
+                    .write_worklog(item.id(), item.title(), &phase, "Cancelled", "Shutdown requested")
                     .await;
             }
             Ok(())
@@ -1166,14 +1162,14 @@ async fn handle_phase_success(
     }
 
     // Get current item state for transition resolution
-    let snapshot = pg_item::to_backlog_file(&coordinator.get_snapshot().await?);
+    let snapshot = coordinator.get_snapshot().await?;
     let item = snapshot
-        .items
         .iter()
-        .find(|i| i.id == item_id)
+        .find(|i| i.id() == item_id)
         .ok_or_else(|| format!("Item {} not found after phase completion", item_id))?;
 
-    let pipeline_type = item.pipeline_type.as_deref().unwrap_or("feature");
+    let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+    let pipeline_type = pipeline_type_owned.as_str();
     let pipeline = config
         .pipelines
         .get(pipeline_type)
@@ -1189,7 +1185,7 @@ async fn handle_phase_success(
 
     // Write worklog entry
     let _ = coordinator
-        .write_worklog(&item.id, &item.title, &phase, "Complete", &summary)
+        .write_worklog(item.id(), item.title(), &phase, "Complete", &summary)
         .await;
 
     // Complete phase (stage + commit for destructive, stage for non-destructive)
@@ -1239,7 +1235,7 @@ async fn handle_phase_success(
 }
 
 async fn handle_subphase_complete(
-    snapshot: &BacklogFile,
+    snapshot: &[PgItem],
     item_id: &str,
     phase_result: PhaseResult,
     coordinator: &CoordinatorHandle,
@@ -1258,9 +1254,9 @@ async fn handle_subphase_complete(
     );
 
     // Write worklog entry
-    if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
+    if let Some(item) = snapshot.iter().find(|i| i.id() == item_id) {
         let _ = coordinator
-            .write_worklog(&item.id, &item.title, &phase, "Subphase Complete", &summary)
+            .write_worklog(item.id(), item.title(), &phase, "Subphase Complete", &summary)
             .await;
     }
 
@@ -1294,7 +1290,7 @@ async fn handle_subphase_complete(
 }
 
 async fn handle_phase_failed(
-    snapshot: &BacklogFile,
+    snapshot: &[PgItem],
     item_id: &str,
     reason: &str,
     coordinator: &CoordinatorHandle,
@@ -1304,10 +1300,10 @@ async fn handle_phase_failed(
     log_info!("[{}] Phase failed: {}", item_id, reason);
 
     // Write worklog entry
-    if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
-        let phase = item.phase.as_deref().unwrap_or("unknown");
+    if let Some(item) = snapshot.iter().find(|i| i.id() == item_id) {
+        let phase = item.phase().unwrap_or_else(|| "unknown".to_string());
         let _ = coordinator
-            .write_worklog(&item.id, &item.title, phase, "Failed", reason)
+            .write_worklog(item.id(), item.title(), &phase, "Failed", reason)
             .await;
     }
 
@@ -1323,7 +1319,7 @@ async fn handle_phase_failed(
 }
 
 async fn handle_phase_blocked(
-    snapshot: &BacklogFile,
+    snapshot: &[PgItem],
     item_id: &str,
     reason: &str,
     coordinator: &CoordinatorHandle,
@@ -1333,10 +1329,10 @@ async fn handle_phase_blocked(
     log_info!("[{}] Phase blocked: {}", item_id, reason);
 
     // Write worklog entry
-    if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
-        let phase = item.phase.as_deref().unwrap_or("unknown");
+    if let Some(item) = snapshot.iter().find(|i| i.id() == item_id) {
+        let phase = item.phase().unwrap_or_else(|| "unknown".to_string());
         let _ = coordinator
-            .write_worklog(&item.id, &item.title, phase, "Blocked", reason)
+            .write_worklog(item.id(), item.title(), &phase, "Blocked", reason)
             .await;
     }
 
@@ -1374,9 +1370,9 @@ async fn process_merges(
 
     for dup_id in duplicates {
         // Validate the duplicate exists and isn't Done
-        let snap = pg_item::to_backlog_file(&coordinator.get_snapshot().await?);
-        let dup_item = match snap.items.iter().find(|i| i.id == *dup_id) {
-            Some(item) if item.status == ItemStatus::Done => {
+        let snap = coordinator.get_snapshot().await?;
+        let dup_item = match snap.iter().find(|i| i.id() == dup_id.as_str()) {
+            Some(item) if item.pg_status() == ItemStatus::Done => {
                 log_info!(
                     "[{}] Skipping merge with {} (already done)",
                     item_id,
@@ -1408,15 +1404,15 @@ async fn process_merges(
 
         // Write worklog for the item being merged away
         let merged_away_item = if source_id == item_id {
-            snap.items.iter().find(|i| i.id == item_id).cloned()
+            snap.iter().find(|i| i.id() == item_id).cloned()
         } else {
             Some(dup_item)
         };
         if let Some(item) = merged_away_item {
             let _ = coordinator
                 .write_worklog(
-                    &item.id,
-                    &item.title,
+                    item.id(),
+                    item.title(),
                     "triage",
                     "Merged",
                     &format!("Merged into {}", target_id),
@@ -1456,7 +1452,7 @@ async fn process_merges(
 }
 
 async fn handle_triage_success(
-    snapshot: &BacklogFile,
+    snapshot: &[PgItem],
     item_id: &str,
     phase_result: &PhaseResult,
     coordinator: &CoordinatorHandle,
@@ -1476,7 +1472,7 @@ async fn handle_triage_success(
     );
 
     // Write worklog entry for triage
-    if let Some(item) = snapshot.items.iter().find(|i| i.id == item_id) {
+    if let Some(item) = snapshot.iter().find(|i| i.id() == item_id) {
         let outcome = match phase_result.result {
             ResultCode::PhaseComplete => "Complete",
             ResultCode::Failed => "Failed",
@@ -1484,7 +1480,7 @@ async fn handle_triage_success(
             ResultCode::SubphaseComplete => "Subphase Complete",
         };
         let _ = coordinator
-            .write_worklog(&item.id, &item.title, "triage", outcome, &phase_result.summary)
+            .write_worklog(item.id(), item.title(), "triage", outcome, &phase_result.summary)
             .await;
     }
 
@@ -1512,9 +1508,9 @@ async fn handle_triage_success(
     apply_triage_result(coordinator, item_id, phase_result, config).await?;
 
     // Check if item got blocked by triage
-    let triage_snap = pg_item::to_backlog_file(&coordinator.get_snapshot().await?);
-    if let Some(item) = triage_snap.items.iter().find(|i| i.id == item_id) {
-        if item.status == ItemStatus::Blocked {
+    let triage_snap = coordinator.get_snapshot().await?;
+    if let Some(item) = triage_snap.iter().find(|i| i.id() == item_id) {
+        if item.pg_status() == ItemStatus::Blocked {
             state.items_blocked.push(item_id.to_string());
         }
     }
@@ -1525,18 +1521,18 @@ async fn handle_triage_success(
 // --- Promotion ---
 
 async fn handle_promote(
-    snapshot: &BacklogFile,
+    snapshot: &[PgItem],
     coordinator: &CoordinatorHandle,
     item_id: &str,
     config: &PhaseGolemConfig,
 ) -> Result<(), String> {
     let item = snapshot
-        .items
         .iter()
-        .find(|i| i.id == item_id)
+        .find(|i| i.id() == item_id)
         .ok_or_else(|| format!("Item {} not found for promotion", item_id))?;
 
-    let pipeline_type = item.pipeline_type.as_deref().unwrap_or("feature");
+    let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+    let pipeline_type = pipeline_type_owned.as_str();
     let pipeline = config
         .pipelines
         .get(pipeline_type)
@@ -1596,7 +1592,7 @@ async fn spawn_triage(
     let root = root.to_path_buf();
 
     join_set.spawn(async move {
-        let pg_snap = match coord.get_snapshot().await {
+        let snap = match coord.get_snapshot().await {
             Ok(s) => s,
             Err(e) => {
                 return (
@@ -1605,9 +1601,8 @@ async fn spawn_triage(
                 )
             }
         };
-        let snap = pg_item::to_backlog_file(&pg_snap);
-        let item: BacklogItem = match pg_snap.iter().find(|i| i.id() == item_id) {
-            Some(i) => i.clone().into(),
+        let item = match snap.iter().find(|i| i.id() == item_id) {
+            Some(i) => i.clone(),
             None => {
                 return (
                     item_id,
@@ -1616,7 +1611,7 @@ async fn spawn_triage(
             }
         };
 
-        let backlog_summary = prompt::build_backlog_summary(&snap.items, &item_id);
+        let backlog_summary = prompt::build_backlog_summary(&snap, &item_id);
         let result_path = executor::result_file_path(&root, &item_id, "triage");
         let prompt_str = prompt::build_triage_prompt(
             &item,
@@ -1688,17 +1683,17 @@ pub async fn apply_triage_result(
     match result.result {
         ResultCode::PhaseComplete => {
             // Get current item state to check routing
-            let route_snap = pg_item::to_backlog_file(&coordinator.get_snapshot().await?);
+            let route_snap = coordinator.get_snapshot().await?;
             let item = route_snap
-                .items
                 .iter()
-                .find(|i| i.id == item_id)
+                .find(|i| i.id() == item_id)
                 .ok_or_else(|| format!("Item {} not found after triage", item_id))?;
 
-            let is_small_low_risk = matches!(item.size, Some(SizeLevel::Small))
-                && matches!(item.risk, Some(DimensionLevel::Low) | None);
+            let is_small_low_risk = matches!(item.size(), Some(SizeLevel::Small))
+                && matches!(item.risk(), Some(DimensionLevel::Low) | None);
 
-            let pipeline_type = item.pipeline_type.as_deref().unwrap_or("feature");
+            let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+            let pipeline_type = pipeline_type_owned.as_str();
             let pipeline = config.pipelines.get(pipeline_type);
             let has_pre_phases = pipeline.map(|p| !p.pre_phases.is_empty()).unwrap_or(false);
 

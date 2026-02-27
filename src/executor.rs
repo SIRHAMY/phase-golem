@@ -8,10 +8,11 @@ use crate::config::{
     GuardrailsConfig, PhaseConfig, PhaseGolemConfig, PipelineConfig, StalenessAction,
 };
 use crate::coordinator::CoordinatorHandle;
+use crate::pg_item::PgItem;
 use crate::prompt;
 use crate::types::{
-    BacklogItem, DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult, PhasePool,
-    PhaseResult, ResultCode, SizeLevel,
+    DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult, PhasePool, PhaseResult,
+    ResultCode, SizeLevel,
 };
 use crate::{log_info, log_warn};
 
@@ -79,12 +80,12 @@ pub enum StalenessResult {
 ///   - Block → Block with reason
 /// - Unknown commit (exit 128 / error) → Block regardless of config (data integrity)
 pub async fn check_staleness(
-    item: &BacklogItem,
+    item: &PgItem,
     phase_config: &PhaseConfig,
     coordinator: &CoordinatorHandle,
 ) -> StalenessResult {
-    let last_commit = match &item.last_phase_commit {
-        Some(sha) => sha.clone(),
+    let last_commit = match item.last_phase_commit() {
+        Some(sha) => sha,
         None => return StalenessResult::Proceed,
     };
 
@@ -127,7 +128,7 @@ pub async fn check_staleness(
 /// - Phase failed (result code) → SetBlocked with reason
 /// - Retry exhaustion → SetBlocked with reason
 pub fn resolve_transition(
-    item: &BacklogItem,
+    item: &PgItem,
     result: &PhaseResult,
     pipeline: &PipelineConfig,
     guardrails: &GuardrailsConfig,
@@ -159,15 +160,15 @@ pub fn resolve_transition(
 }
 
 fn resolve_phase_complete(
-    item: &BacklogItem,
+    item: &PgItem,
     result: &PhaseResult,
     pipeline: &PipelineConfig,
     guardrails: &GuardrailsConfig,
 ) -> Vec<ItemUpdate> {
-    let phase_pool = item.phase_pool.as_ref();
+    let phase_pool = item.phase_pool();
     let current_phase = result.phase.as_str();
 
-    match phase_pool {
+    match phase_pool.as_ref() {
         Some(PhasePool::Pre) => {
             // Check if this is the last pre_phase
             let is_last = pipeline
@@ -178,7 +179,7 @@ fn resolve_phase_complete(
 
             if is_last {
                 // Last pre_phase: check guardrails for auto-promote
-                if item.requires_human_review {
+                if item.requires_human_review() {
                     return vec![ItemUpdate::SetBlocked(
                         "Requires human review before entering pipeline".to_string(),
                     )];
@@ -254,21 +255,21 @@ fn next_phase_in_list(phases: &[PhaseConfig], current: &str) -> Option<String> {
 ///
 /// An item passes if all of its dimensions are within the configured maximums.
 /// Missing dimensions are treated as passing (no data = no concern).
-pub fn passes_guardrails(item: &BacklogItem, guardrails: &GuardrailsConfig) -> bool {
-    let size_ok = match &item.size {
-        Some(size) => size_level_value(size) <= size_level_value(&guardrails.max_size),
+pub fn passes_guardrails(item: &PgItem, guardrails: &GuardrailsConfig) -> bool {
+    let size_ok = match item.size() {
+        Some(ref size) => size_level_value(size) <= size_level_value(&guardrails.max_size),
         None => true,
     };
 
-    let complexity_ok = match &item.complexity {
-        Some(complexity) => {
+    let complexity_ok = match item.complexity() {
+        Some(ref complexity) => {
             dimension_level_value(complexity) <= dimension_level_value(&guardrails.max_complexity)
         }
         None => true,
     };
 
-    let risk_ok = match &item.risk {
-        Some(risk) => dimension_level_value(risk) <= dimension_level_value(&guardrails.max_risk),
+    let risk_ok = match item.risk() {
+        Some(ref risk) => dimension_level_value(risk) <= dimension_level_value(&guardrails.max_risk),
         None => true,
     };
 
@@ -306,7 +307,7 @@ fn dimension_level_value(level: &DimensionLevel) -> u8 {
 /// `PhaseExecutionResult` that the scheduler uses to drive coordinator updates.
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_phase(
-    item: &BacklogItem,
+    item: &PgItem,
     phase_config: &PhaseConfig,
     config: &PhaseGolemConfig,
     coordinator: &CoordinatorHandle,
@@ -323,7 +324,7 @@ pub async fn execute_phase(
             StalenessResult::Warn => {
                 log_warn!(
                     "[{}][{}] Warning: prior phase artifacts may be stale",
-                    item.id,
+                    item.id(),
                     phase_config.name.to_uppercase()
                 );
             }
@@ -339,16 +340,17 @@ pub async fn execute_phase(
         Err(e) => return PhaseExecutionResult::Failed(format!("Failed to get HEAD SHA: {}", e)),
     };
 
-    if let Err(e) = coordinator.record_phase_start(&item.id, &head_sha).await {
+    if let Err(e) = coordinator.record_phase_start(item.id(), &head_sha).await {
         return PhaseExecutionResult::Failed(format!("Failed to record phase start: {}", e));
     }
 
     // 3. Build prompt and paths
-    let result_path = result_file_path(root, &item.id, &phase_config.name);
-    let change_folder = match resolve_or_find_change_folder(root, &item.id, &item.title).await {
-        Ok(path) => path,
-        Err(e) => return PhaseExecutionResult::Failed(e),
-    };
+    let result_path = result_file_path(root, item.id(), &phase_config.name);
+    let change_folder =
+        match resolve_or_find_change_folder(root, item.id(), item.title()).await {
+            Ok(path) => path,
+            Err(e) => return PhaseExecutionResult::Failed(e),
+        };
 
     let timeout = Duration::from_secs(config.execution.phase_timeout_minutes as u64 * 60);
     let max_attempts = config.execution.max_retries + 1;
@@ -356,7 +358,7 @@ pub async fn execute_phase(
     // 4. Log CLI tool and model for this phase
     log_info!(
         "[{}][{}] Using {} (model: {})",
-        item.id,
+        item.id(),
         phase_config.name.to_uppercase(),
         config.agent.cli.display_name(),
         config.agent.model.as_deref().unwrap_or("default")
@@ -372,7 +374,7 @@ pub async fn execute_phase(
 
         log_info!(
             "[{}][{}] Starting phase (attempt {}/{})",
-            item.id,
+            item.id(),
             phase_config.name.to_uppercase(),
             attempt,
             max_attempts
@@ -385,7 +387,7 @@ pub async fn execute_phase(
             &result_path,
             &change_folder,
             previous_summary,
-            item.unblock_context.as_deref(),
+            item.unblock_context().as_deref(),
             failure_context.as_deref(),
             config_base,
         );
@@ -402,7 +404,7 @@ pub async fn execute_phase(
             Ok(phase_result) => {
                 // Validate result identity before processing — non-retryable on mismatch
                 if let Err(e) =
-                    validate_result_identity(&phase_result, &item.id, &phase_config.name)
+                    validate_result_identity(&phase_result, item.id(), &phase_config.name)
                 {
                     return PhaseExecutionResult::Failed(e);
                 }
@@ -431,7 +433,7 @@ pub async fn execute_phase(
                         }
                         log_info!(
                             "[{}][{}] Failed (attempt {}/{}): {}",
-                            item.id,
+                            item.id(),
                             phase_config.name.to_uppercase(),
                             attempt,
                             max_attempts,
@@ -450,7 +452,7 @@ pub async fn execute_phase(
                 }
                 log_info!(
                     "[{}][{}] Agent error (attempt {}/{}): {}",
-                    item.id,
+                    item.id(),
                     phase_config.name.to_uppercase(),
                     attempt,
                     max_attempts,
@@ -477,7 +479,7 @@ pub async fn execute_phase(
 fn build_executor_prompt(
     phase: &str,
     phase_config: &PhaseConfig,
-    item: &BacklogItem,
+    item: &PgItem,
     result_path: &Path,
     change_folder: &Path,
     previous_summary: Option<&str>,

@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::config::{PhaseConfig, PipelineConfig};
-use crate::types::{BacklogItem, PhasePool, StructuredDescription};
+use crate::pg_item::PgItem;
+use crate::types::{PhasePool, StructuredDescription};
 
 /// Parameters for building a workflow phase prompt.
 pub struct PromptParams<'a> {
     pub phase: &'a str,
     pub phase_config: &'a PhaseConfig,
-    pub item: &'a BacklogItem,
+    pub item: &'a PgItem,
     pub result_path: &'a Path,
     pub change_folder: &'a Path,
     pub previous_summary: Option<&'a str>,
@@ -46,7 +47,7 @@ pub fn build_prompt(params: &PromptParams) -> String {
             params.change_folder,
             params.config_base,
         ),
-        build_output_suffix(&params.item.id, params.phase, params.result_path),
+        build_output_suffix(params.item.id(), params.phase, params.result_path),
     ]
     .join("\n\n")
 }
@@ -55,13 +56,13 @@ pub fn build_prompt(params: &PromptParams) -> String {
 ///
 /// Returns `None` if the backlog is empty (after excluding the current item).
 /// Each line: `- {id}: {title} [{status}]`
-pub fn build_backlog_summary(items: &[BacklogItem], exclude_id: &str) -> Option<String> {
+pub fn build_backlog_summary(items: &[PgItem], exclude_id: &str) -> Option<String> {
     let lines: Vec<String> = items
         .iter()
-        .filter(|i| i.id != exclude_id)
+        .filter(|i| i.id() != exclude_id)
         .map(|i| {
-            let status = format!("{:?}", i.status).to_lowercase();
-            format!("- {}: {} [{}]", i.id, i.title, status)
+            let status = format!("{:?}", i.pg_status()).to_lowercase();
+            format!("- {}: {} [{}]", i.id(), i.title(), status)
         })
         .collect();
 
@@ -79,7 +80,7 @@ pub fn build_backlog_summary(items: &[BacklogItem], exclude_id: &str) -> Option<
 /// Includes available pipeline types from config for classification.
 /// When `backlog_summary` is provided, includes it for duplicate detection.
 pub fn build_triage_prompt(
-    item: &BacklogItem,
+    item: &PgItem,
     result_path: &Path,
     available_pipelines: &HashMap<String, PipelineConfig>,
     backlog_summary: Option<&str>,
@@ -149,7 +150,7 @@ pub fn build_triage_prompt(
         pipeline_list,
     ));
 
-    sections.push(build_triage_output_suffix(&item.id, result_path));
+    sections.push(build_triage_output_suffix(item.id(), result_path));
 
     sections.join("\n\n")
 }
@@ -218,7 +219,7 @@ fn build_triage_output_suffix(item_id: &str, result_path: &Path) -> String {
 fn build_preamble(
     heading: &str,
     intro: &str,
-    item: &BacklogItem,
+    item: &PgItem,
     extra_item_field: Option<&str>,
     previous_summary: Option<&str>,
     unblock_notes: Option<&str>,
@@ -234,8 +235,8 @@ fn build_preamble(
         - **Title:** {title}",
         heading = heading,
         intro = intro,
-        id = item.id,
-        title = item.title,
+        id = item.id(),
+        title = item.title(),
     );
 
     if let Some(extra) = extra_item_field {
@@ -246,8 +247,8 @@ fn build_preamble(
         preamble.push_str(&format!("\n\n## Current Assessments\n\n{}", assessments));
     }
 
-    if let Some(ref desc) = item.description {
-        let rendered = render_structured_description(desc);
+    if let Some(desc) = item.structured_description() {
+        let rendered = render_structured_description(&desc);
         if !rendered.is_empty() {
             preamble.push_str(&format!("\n\n## Description\n\n{}", rendered));
         }
@@ -389,13 +390,13 @@ fn build_output_suffix(item_id: &str, phase_str: &str, result_path: &Path) -> St
 /// when the scheduler calls `execute_phase` with full pipeline context.
 #[allow(dead_code)]
 pub fn build_context_preamble(
-    item: &BacklogItem,
+    item: &PgItem,
     pipeline: &PipelineConfig,
     previous_summary: Option<&str>,
     unblock_notes: Option<&str>,
     failure_context: Option<&str>,
 ) -> String {
-    let pipeline_type = item.pipeline_type.as_deref().unwrap_or("feature");
+    let pipeline_type = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
     let phase_position = format_phase_position(item, pipeline);
 
     let mut sections = vec![format!(
@@ -404,11 +405,11 @@ pub fn build_context_preamble(
         **Item:** {} — {}\n\
         **Pipeline:** {}\n\
         **Phase:** {}",
-        item.id, item.title, pipeline_type, phase_position
+        item.id(), item.title(), pipeline_type, phase_position
     )];
 
-    if let Some(ref desc) = item.description {
-        let rendered = render_structured_description(desc);
+    if let Some(desc) = item.structured_description() {
+        let rendered = render_structured_description(&desc);
         if !rendered.is_empty() {
             sections.push(format!("### Description\n\n{}", rendered));
         }
@@ -433,11 +434,12 @@ pub fn build_context_preamble(
 }
 
 /// Format the phase position string (e.g., "build (4/6, main)").
-fn format_phase_position(item: &BacklogItem, pipeline: &PipelineConfig) -> String {
-    let phase_name = item.phase.as_deref().unwrap_or("unknown");
-    let pool = item.phase_pool.as_ref();
+fn format_phase_position(item: &PgItem, pipeline: &PipelineConfig) -> String {
+    let phase_name_owned = item.phase().unwrap_or_else(|| "unknown".to_string());
+    let phase_name = phase_name_owned.as_str();
+    let pool = item.phase_pool();
 
-    let (phase_list, pool_label) = match pool {
+    let (phase_list, pool_label) = match pool.as_ref() {
         Some(PhasePool::Pre) => (&pipeline.pre_phases, "pre"),
         _ => (&pipeline.phases, "main"),
     };
@@ -480,19 +482,19 @@ fn render_structured_description(desc: &StructuredDescription) -> String {
 }
 
 /// Format current assessments for display in prompts.
-fn format_assessments(item: &BacklogItem) -> Option<String> {
+fn format_assessments(item: &PgItem) -> Option<String> {
     let mut lines = Vec::new();
 
-    if let Some(ref size) = item.size {
+    if let Some(ref size) = item.size() {
         lines.push(format!("- **Size:** {}", size));
     }
-    if let Some(ref complexity) = item.complexity {
+    if let Some(ref complexity) = item.complexity() {
         lines.push(format!("- **Complexity:** {}", complexity));
     }
-    if let Some(ref risk) = item.risk {
+    if let Some(ref risk) = item.risk() {
         lines.push(format!("- **Risk:** {}", risk));
     }
-    if let Some(ref impact) = item.impact {
+    if let Some(ref impact) = item.impact() {
         lines.push(format!("- **Impact:** {}", impact));
     }
 

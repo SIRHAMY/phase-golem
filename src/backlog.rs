@@ -2,14 +2,88 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
 use crate::config::load_config;
 use crate::log_warn;
 use crate::types::{
-    BacklogFile, BacklogItem, DimensionLevel, FollowUp, InboxItem, ItemStatus, SizeLevel,
-    StructuredDescription, UpdatedAssessments,
+    BlockType, DimensionLevel, FollowUp, ItemStatus, PhasePool, SizeLevel, StructuredDescription,
+    UpdatedAssessments,
 };
+
+// --- Legacy types (Phase 5: delete with backlog.rs) ---
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct BacklogItem {
+    pub id: String,
+    pub title: String,
+    pub status: ItemStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<SizeLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity: Option<DimensionLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<DimensionLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<DimensionLevel>,
+    #[serde(default)]
+    pub requires_human_review: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_from_status: Option<ItemStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_type: Option<BlockType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unblock_context: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<String>,
+    pub created: String,
+    pub updated: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<StructuredDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase_pool: Option<PhasePool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_phase_commit: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct BacklogFile {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub items: Vec<BacklogItem>,
+    #[serde(default)]
+    pub next_item_id: u32,
+}
+
+/// Simplified input schema for human-written inbox items.
+/// Deserialized from BACKLOG_INBOX.yaml.
+#[derive(Debug, Clone, Deserialize)]
+pub struct InboxItem {
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub size: Option<SizeLevel>,
+    #[serde(default)]
+    pub risk: Option<DimensionLevel>,
+    #[serde(default)]
+    pub impact: Option<DimensionLevel>,
+    #[serde(default)]
+    pub pipeline_type: Option<String>,
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+}
 
 const EXPECTED_SCHEMA_VERSION: u32 = 3;
 

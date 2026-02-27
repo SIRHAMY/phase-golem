@@ -9,66 +9,10 @@ use task_golem::store::Store;
 
 use phase_golem::config::{default_feature_pipeline, PhaseGolemConfig};
 use phase_golem::pg_item::{self, PgItem};
-use phase_golem::types::{BacklogFile, BacklogItem, ItemStatus, PhasePool};
-
-/// Creates a `BacklogItem` with minimal defaults.
-///
-/// All optional fields are set to `None`, collections to empty, and timestamps
-/// to `"2026-02-10T00:00:00+00:00"`. The title is auto-generated as
-/// `"Test item {id}"`.
-///
-/// # Parameters
-/// - `id`: The item identifier (e.g., `"WRK-001"`)
-/// - `status`: The initial `ItemStatus` for the item
-pub fn make_item(id: &str, status: ItemStatus) -> BacklogItem {
-    BacklogItem {
-        id: id.to_string(),
-        title: format!("Test item {}", id),
-        status,
-        created: "2026-02-10T00:00:00+00:00".to_string(),
-        updated: "2026-02-10T00:00:00+00:00".to_string(),
-        ..Default::default()
-    }
-}
-
-/// Creates an in-progress `BacklogItem` with the given phase.
-///
-/// Calls `make_item` with `ItemStatus::InProgress`, then sets `item.phase`.
-/// Uses minimal defaults: `phase_pool` is `None`. Callers that need a specific
-/// `PhasePool` should set it explicitly after calling this function.
-///
-/// # Parameters
-/// - `id`: The item identifier
-/// - `phase`: The phase name (e.g., `"build"`, `"prd"`)
-pub fn make_in_progress_item(id: &str, phase: &str) -> BacklogItem {
-    let mut item = make_item(id, ItemStatus::InProgress);
-    item.phase = Some(phase.to_string());
-    item
-}
-
-/// Creates a `BacklogFile` containing the given items.
-///
-/// Sets `schema_version: 3` and `next_item_id: 0`.
-///
-/// # Parameters
-/// - `items`: The list of `BacklogItem`s to include
-pub fn make_backlog(items: Vec<BacklogItem>) -> BacklogFile {
-    BacklogFile {
-        schema_version: 3,
-        items,
-        next_item_id: 0,
-    }
-}
-
-/// Creates an empty `BacklogFile` with no items.
-///
-/// Equivalent to `make_backlog(vec![])`.
-pub fn empty_backlog() -> BacklogFile {
-    make_backlog(vec![])
-}
+use phase_golem::types::{ItemStatus, PhasePool};
 
 // =============================================================================
-// PgItem test helpers (Phase 3+)
+// PgItem test helpers
 // =============================================================================
 
 /// Creates a `PgItem` with minimal defaults via the adapter constructor.
