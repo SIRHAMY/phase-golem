@@ -49,7 +49,10 @@ fn parse_filter_risk() {
 fn parse_filter_complexity() {
     let f = parse_filter("complexity=medium").unwrap();
     assert_eq!(f.field, FilterField::Complexity);
-    assert_eq!(f.values, vec![FilterValue::Dimension(DimensionLevel::Medium)]);
+    assert_eq!(
+        f.values,
+        vec![FilterValue::Dimension(DimensionLevel::Medium)]
+    );
 }
 
 #[test]
@@ -63,7 +66,10 @@ fn parse_filter_tag() {
 fn parse_filter_pipeline_type() {
     let f = parse_filter("pipeline_type=feature").unwrap();
     assert_eq!(f.field, FilterField::PipelineType);
-    assert_eq!(f.values, vec![FilterValue::PipelineType("feature".to_string())]);
+    assert_eq!(
+        f.values,
+        vec![FilterValue::PipelineType("feature".to_string())]
+    );
 }
 
 // --- Invalid field name ---
@@ -176,7 +182,10 @@ fn parse_filter_tag_preserves_case() {
 #[test]
 fn parse_filter_pipeline_type_preserves_case() {
     let f = parse_filter("pipeline_type=Feature").unwrap();
-    assert_eq!(f.values, vec![FilterValue::PipelineType("Feature".to_string())]);
+    assert_eq!(
+        f.values,
+        vec![FilterValue::PipelineType("Feature".to_string())]
+    );
 }
 
 // --- status=in_progress parses and matches ItemStatus::InProgress ---

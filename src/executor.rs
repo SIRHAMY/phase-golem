@@ -269,7 +269,9 @@ pub fn passes_guardrails(item: &PgItem, guardrails: &GuardrailsConfig) -> bool {
     };
 
     let risk_ok = match item.risk() {
-        Some(ref risk) => dimension_level_value(risk) <= dimension_level_value(&guardrails.max_risk),
+        Some(ref risk) => {
+            dimension_level_value(risk) <= dimension_level_value(&guardrails.max_risk)
+        }
         None => true,
     };
 
@@ -346,11 +348,10 @@ pub async fn execute_phase(
 
     // 3. Build prompt and paths
     let result_path = result_file_path(root, item.id(), &phase_config.name);
-    let change_folder =
-        match resolve_or_find_change_folder(root, item.id(), item.title()).await {
-            Ok(path) => path,
-            Err(e) => return PhaseExecutionResult::Failed(e),
-        };
+    let change_folder = match resolve_or_find_change_folder(root, item.id(), item.title()).await {
+        Ok(path) => path,
+        Err(e) => return PhaseExecutionResult::Failed(e),
+    };
 
     let timeout = Duration::from_secs(config.execution.phase_timeout_minutes as u64 * 60);
     let max_attempts = config.execution.max_retries + 1;

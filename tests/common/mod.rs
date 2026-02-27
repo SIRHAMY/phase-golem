@@ -4,8 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tempfile::TempDir;
 use task_golem::store::Store;
+use tempfile::TempDir;
 
 use phase_golem::config::{default_feature_pipeline, PhaseGolemConfig};
 use phase_golem::pg_item::{self, PgItem};
@@ -90,7 +90,8 @@ pub struct LockGuard {
 
 impl Drop for LockGuard {
     fn drop(&mut self) {
-        self._keep_alive.store(false, std::sync::atomic::Ordering::SeqCst);
+        self._keep_alive
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         if let Some(handle) = self._thread.take() {
             let _ = handle.join();
         }

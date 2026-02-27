@@ -190,9 +190,7 @@ fn matches_single_value(field: &FilterField, value: &FilterValue, item: &PgItem)
             item.impact().as_ref() == Some(target)
         }
         (FilterField::Size, FilterValue::Size(target)) => item.size().as_ref() == Some(target),
-        (FilterField::Risk, FilterValue::Dimension(target)) => {
-            item.risk().as_ref() == Some(target)
-        }
+        (FilterField::Risk, FilterValue::Dimension(target)) => item.risk().as_ref() == Some(target),
         (FilterField::Complexity, FilterValue::Dimension(target)) => {
             item.complexity().as_ref() == Some(target)
         }

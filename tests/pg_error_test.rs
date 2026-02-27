@@ -199,7 +199,9 @@ fn error_source_chain_preserved_for_storage_corruption() {
     use std::error::Error;
     let tg_err = TgError::StorageCorruption("bad".to_string());
     let pg_err = PgError::StorageCorruption(tg_err);
-    let source = pg_err.source().expect("StorageCorruption should have a source");
+    let source = pg_err
+        .source()
+        .expect("StorageCorruption should have a source");
     assert!(source.to_string().contains("bad"));
 }
 
@@ -211,7 +213,9 @@ fn error_source_chain_preserved_for_invalid_transition() {
         to: Status::Todo,
     };
     let pg_err = PgError::InvalidTransition(tg_err);
-    let source = pg_err.source().expect("InvalidTransition should have a source");
+    let source = pg_err
+        .source()
+        .expect("InvalidTransition should have a source");
     assert!(source.to_string().contains("cannot transition"));
 }
 

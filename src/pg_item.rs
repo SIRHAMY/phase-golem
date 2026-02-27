@@ -118,8 +118,8 @@ impl PgItem {
     }
 
     pub fn phase_pool(&self) -> Option<PhasePool> {
-        self.get_string_ext(X_PG_PHASE_POOL).and_then(|s| {
-            match s.as_str() {
+        self.get_string_ext(X_PG_PHASE_POOL)
+            .and_then(|s| match s.as_str() {
                 "pre" => Some(PhasePool::Pre),
                 "main" => Some(PhasePool::Main),
                 other => {
@@ -130,13 +130,12 @@ impl PgItem {
                     );
                     None
                 }
-            }
-        })
+            })
     }
 
     pub fn size(&self) -> Option<SizeLevel> {
-        self.get_string_ext(X_PG_SIZE).and_then(|s| {
-            match s.as_str() {
+        self.get_string_ext(X_PG_SIZE)
+            .and_then(|s| match s.as_str() {
                 "small" => Some(SizeLevel::Small),
                 "medium" => Some(SizeLevel::Medium),
                 "large" => Some(SizeLevel::Large),
@@ -148,8 +147,7 @@ impl PgItem {
                     );
                     None
                 }
-            }
-        })
+            })
     }
 
     pub fn complexity(&self) -> Option<DimensionLevel> {
@@ -182,8 +180,8 @@ impl PgItem {
     }
 
     pub fn blocked_type(&self) -> Option<BlockType> {
-        self.get_string_ext(X_PG_BLOCKED_TYPE).and_then(|s| {
-            match s.as_str() {
+        self.get_string_ext(X_PG_BLOCKED_TYPE)
+            .and_then(|s| match s.as_str() {
                 "clarification" => Some(BlockType::Clarification),
                 "decision" => Some(BlockType::Decision),
                 other => {
@@ -194,8 +192,7 @@ impl PgItem {
                     );
                     None
                 }
-            }
-        })
+            })
     }
 
     /// Returns the authoritative `blocked_from_status` from the `x-pg-blocked-from-status`
@@ -260,20 +257,18 @@ impl PgItem {
     }
 
     fn get_dimension_ext(&self, key: &str) -> Option<DimensionLevel> {
-        self.get_string_ext(key).and_then(|s| {
-            match s.as_str() {
-                "low" => Some(DimensionLevel::Low),
-                "medium" => Some(DimensionLevel::Medium),
-                "high" => Some(DimensionLevel::High),
-                other => {
-                    crate::log_warn!(
-                        "Item {}: invalid {} value '{}', treating as absent",
-                        self.0.id,
-                        key,
-                        other
-                    );
-                    None
-                }
+        self.get_string_ext(key).and_then(|s| match s.as_str() {
+            "low" => Some(DimensionLevel::Low),
+            "medium" => Some(DimensionLevel::Medium),
+            "high" => Some(DimensionLevel::High),
+            other => {
+                crate::log_warn!(
+                    "Item {}: invalid {} value '{}', treating as absent",
+                    self.0.id,
+                    key,
+                    other
+                );
+                None
             }
         })
     }
@@ -356,11 +351,15 @@ pub fn set_phase_pool(item: &mut Item, pool: Option<&PhasePool>) {
 
 /// Sets the `x-pg-size` extension field. Pass `None` to clear.
 pub fn set_size(item: &mut Item, size: Option<&SizeLevel>) {
-    set_enum_ext(item, X_PG_SIZE, size.map(|s| match s {
-        SizeLevel::Small => "small",
-        SizeLevel::Medium => "medium",
-        SizeLevel::Large => "large",
-    }));
+    set_enum_ext(
+        item,
+        X_PG_SIZE,
+        size.map(|s| match s {
+            SizeLevel::Small => "small",
+            SizeLevel::Medium => "medium",
+            SizeLevel::Large => "large",
+        }),
+    );
 }
 
 /// Sets the `x-pg-complexity` extension field. Pass `None` to clear.
@@ -390,10 +389,14 @@ pub fn set_last_phase_commit(item: &mut Item, sha: Option<&str>) {
 
 /// Sets the `x-pg-blocked-type` extension field. Pass `None` to clear.
 pub fn set_blocked_type(item: &mut Item, block_type: Option<&BlockType>) {
-    set_enum_ext(item, X_PG_BLOCKED_TYPE, block_type.map(|b| match b {
-        BlockType::Clarification => "clarification",
-        BlockType::Decision => "decision",
-    }));
+    set_enum_ext(
+        item,
+        X_PG_BLOCKED_TYPE,
+        block_type.map(|b| match b {
+            BlockType::Clarification => "clarification",
+            BlockType::Decision => "decision",
+        }),
+    );
 }
 
 /// Sets the `x-pg-blocked-from-status` extension field and the native
@@ -401,14 +404,18 @@ pub fn set_blocked_type(item: &mut Item, block_type: Option<&BlockType>) {
 /// `ItemStatus`; the native field stores a lossy 4-variant `Status` mapping.
 /// Pass `None` to clear both.
 pub fn set_blocked_from_status(item: &mut Item, status: Option<&ItemStatus>) {
-    set_enum_ext(item, X_PG_BLOCKED_FROM_STATUS, status.map(|s| match s {
-        ItemStatus::New => "new",
-        ItemStatus::Scoping => "scoping",
-        ItemStatus::Ready => "ready",
-        ItemStatus::InProgress => "in_progress",
-        ItemStatus::Done => "done",
-        ItemStatus::Blocked => "blocked",
-    }));
+    set_enum_ext(
+        item,
+        X_PG_BLOCKED_FROM_STATUS,
+        status.map(|s| match s {
+            ItemStatus::New => "new",
+            ItemStatus::Scoping => "scoping",
+            ItemStatus::Ready => "ready",
+            ItemStatus::InProgress => "in_progress",
+            ItemStatus::Done => "done",
+            ItemStatus::Blocked => "blocked",
+        }),
+    );
     // Keep native blocked_from_status in sync (lossy: New/Scoping/Ready -> Todo)
     item.blocked_from_status = status.map(|s| match s {
         ItemStatus::New | ItemStatus::Scoping | ItemStatus::Ready => Status::Todo,
@@ -426,8 +433,10 @@ pub fn set_unblock_context(item: &mut Item, context: Option<&str>) {
 /// Sets the `x-pg-requires-human-review` extension field.
 pub fn set_requires_human_review(item: &mut Item, value: bool) {
     if value {
-        item.extensions
-            .insert(X_PG_REQUIRES_HUMAN_REVIEW.to_string(), serde_json::json!(true));
+        item.extensions.insert(
+            X_PG_REQUIRES_HUMAN_REVIEW.to_string(),
+            serde_json::json!(true),
+        );
     } else {
         item.extensions.remove(X_PG_REQUIRES_HUMAN_REVIEW);
     }
@@ -444,9 +453,9 @@ pub fn set_origin(item: &mut Item, origin: Option<&str>) {
 pub fn set_structured_description(item: &mut Item, desc: Option<&StructuredDescription>) {
     match desc {
         Some(d) => {
-            let value = serde_json::to_value(d).expect("StructuredDescription is always serializable");
-            item.extensions
-                .insert(X_PG_DESCRIPTION.to_string(), value);
+            let value =
+                serde_json::to_value(d).expect("StructuredDescription is always serializable");
+            item.extensions.insert(X_PG_DESCRIPTION.to_string(), value);
             // Populate native description with context field for tg show
             if d.context.is_empty() {
                 item.description = None;
@@ -633,11 +642,15 @@ fn set_enum_ext(item: &mut Item, key: &str, value: Option<&str>) {
 }
 
 fn set_dimension_ext(item: &mut Item, key: &str, level: Option<&DimensionLevel>) {
-    set_enum_ext(item, key, level.map(|l| match l {
-        DimensionLevel::Low => "low",
-        DimensionLevel::Medium => "medium",
-        DimensionLevel::High => "high",
-    }));
+    set_enum_ext(
+        item,
+        key,
+        level.map(|l| match l {
+            DimensionLevel::Low => "low",
+            DimensionLevel::Medium => "medium",
+            DimensionLevel::High => "high",
+        }),
+    );
 }
 
 fn apply_assessments(item: &mut Item, assessments: &UpdatedAssessments) {

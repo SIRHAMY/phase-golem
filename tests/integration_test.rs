@@ -22,15 +22,16 @@ async fn coordinator_snapshot_feeds_scheduler_select_actions() {
     let in_progress_item = common::make_in_progress_pg_item("WRK-003", "build");
 
     store
-        .save_active(&[ready_item.0.clone(), new_item.0.clone(), in_progress_item.0.clone()])
+        .save_active(&[
+            ready_item.0.clone(),
+            new_item.0.clone(),
+            in_progress_item.0.clone(),
+        ])
         .expect("save items");
 
     // Spawn coordinator and get snapshot
-    let (handle, _task) = coordinator::spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        coordinator::spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let snapshot = handle.get_snapshot().await.expect("get_snapshot");
     assert_eq!(snapshot.len(), 3);
@@ -108,11 +109,8 @@ async fn tg_add_item_defaults_to_new_and_is_triageable() {
     store.save_active(&[bare_item]).expect("save bare item");
 
     // Spawn coordinator
-    let (handle, _task) = coordinator::spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        coordinator::spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let snapshot = handle.get_snapshot().await.expect("get_snapshot");
     assert_eq!(snapshot.len(), 1);
@@ -139,9 +137,9 @@ async fn tg_add_item_defaults_to_new_and_is_triageable() {
     let actions = scheduler::select_actions(&snapshot, &running, &exec_config, &pipelines);
 
     // The scheduler should produce a Triage action for the new item
-    let has_triage = actions.iter().any(|a| {
-        matches!(a, SchedulerAction::Triage(item_id) if item_id == "WRK-abc12")
-    });
+    let has_triage = actions
+        .iter()
+        .any(|a| matches!(a, SchedulerAction::Triage(item_id) if item_id == "WRK-abc12"));
     assert!(
         has_triage,
         "Scheduler should produce Triage action for new item from tg add; actions: {:?}",
@@ -262,7 +260,9 @@ async fn shutdown_no_pending_phases_no_empty_commit() {
         .current_dir(dir.path())
         .output()
         .expect("git rev-parse");
-    let sha_before = String::from_utf8_lossy(&head_before.stdout).trim().to_string();
+    let sha_before = String::from_utf8_lossy(&head_before.stdout)
+        .trim()
+        .to_string();
 
     // Verify tasks.jsonl is NOT dirty (nothing to commit)
     let status_output = std::process::Command::new("git")
@@ -283,6 +283,8 @@ async fn shutdown_no_pending_phases_no_empty_commit() {
         .current_dir(dir.path())
         .output()
         .expect("git rev-parse");
-    let sha_after = String::from_utf8_lossy(&head_after.stdout).trim().to_string();
+    let sha_after = String::from_utf8_lossy(&head_after.stdout)
+        .trim()
+        .to_string();
     assert_eq!(sha_before, sha_after, "No commit should have been created");
 }

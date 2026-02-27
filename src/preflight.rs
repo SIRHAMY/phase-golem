@@ -247,7 +247,9 @@ fn validate_items(config: &PhaseGolemConfig, items: &[PgItem]) -> Vec<PreflightE
         }
 
         // Check pipeline_type references a valid pipeline
-        let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+        let pipeline_type_owned = item
+            .pipeline_type()
+            .unwrap_or_else(|| "feature".to_string());
         let pipeline_type = pipeline_type_owned.as_str();
         let pipeline = match config.pipelines.get(pipeline_type) {
             Some(p) => p,
@@ -276,7 +278,9 @@ fn validate_items(config: &PhaseGolemConfig, items: &[PgItem]) -> Vec<PreflightE
                 errors.push(PreflightError {
                     condition: format!(
                         "Item {} references unknown phase \"{}\" in pipeline \"{}\"",
-                        item.id(), phase_name, pipeline_type
+                        item.id(),
+                        phase_name,
+                        pipeline_type
                     ),
                     config_location: format!("items → {} → phase", item.id()),
                     suggested_fix: format!(

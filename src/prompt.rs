@@ -396,7 +396,9 @@ pub fn build_context_preamble(
     unblock_notes: Option<&str>,
     failure_context: Option<&str>,
 ) -> String {
-    let pipeline_type = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+    let pipeline_type = item
+        .pipeline_type()
+        .unwrap_or_else(|| "feature".to_string());
     let phase_position = format_phase_position(item, pipeline);
 
     let mut sections = vec![format!(
@@ -405,7 +407,10 @@ pub fn build_context_preamble(
         **Item:** {} — {}\n\
         **Pipeline:** {}\n\
         **Phase:** {}",
-        item.id(), item.title(), pipeline_type, phase_position
+        item.id(),
+        item.title(),
+        pipeline_type,
+        phase_position
     )];
 
     if let Some(desc) = item.structured_description() {

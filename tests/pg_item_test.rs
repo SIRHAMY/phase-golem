@@ -253,7 +253,10 @@ fn complexity_round_trip() {
     assert_eq!(PgItem(item.clone()).complexity(), Some(DimensionLevel::Low));
 
     pg_item::set_complexity(&mut item, Some(&DimensionLevel::High));
-    assert_eq!(PgItem(item.clone()).complexity(), Some(DimensionLevel::High));
+    assert_eq!(
+        PgItem(item.clone()).complexity(),
+        Some(DimensionLevel::High)
+    );
 
     pg_item::set_complexity(&mut item, None);
     assert!(PgItem(item).complexity().is_none());
@@ -295,7 +298,10 @@ fn requires_human_review_round_trip() {
 fn pipeline_type_round_trip() {
     let mut item = make_test_item();
     pg_item::set_pipeline_type(&mut item, Some("feature"));
-    assert_eq!(PgItem(item.clone()).pipeline_type().as_deref(), Some("feature"));
+    assert_eq!(
+        PgItem(item.clone()).pipeline_type().as_deref(),
+        Some("feature")
+    );
 
     pg_item::set_pipeline_type(&mut item, None);
     assert!(PgItem(item).pipeline_type().is_none());
@@ -315,10 +321,16 @@ fn origin_round_trip() {
 fn blocked_type_round_trip() {
     let mut item = make_test_item();
     pg_item::set_blocked_type(&mut item, Some(&BlockType::Clarification));
-    assert_eq!(PgItem(item.clone()).blocked_type(), Some(BlockType::Clarification));
+    assert_eq!(
+        PgItem(item.clone()).blocked_type(),
+        Some(BlockType::Clarification)
+    );
 
     pg_item::set_blocked_type(&mut item, Some(&BlockType::Decision));
-    assert_eq!(PgItem(item.clone()).blocked_type(), Some(BlockType::Decision));
+    assert_eq!(
+        PgItem(item.clone()).blocked_type(),
+        Some(BlockType::Decision)
+    );
 
     pg_item::set_blocked_type(&mut item, None);
     assert!(PgItem(item).blocked_type().is_none());
@@ -341,7 +353,10 @@ fn unblock_context_round_trip() {
 fn last_phase_commit_round_trip() {
     let mut item = make_test_item();
     pg_item::set_last_phase_commit(&mut item, Some("abc123"));
-    assert_eq!(PgItem(item.clone()).last_phase_commit().as_deref(), Some("abc123"));
+    assert_eq!(
+        PgItem(item.clone()).last_phase_commit().as_deref(),
+        Some("abc123")
+    );
 
     pg_item::set_last_phase_commit(&mut item, None);
     assert!(PgItem(item).last_phase_commit().is_none());
@@ -365,7 +380,9 @@ fn structured_description_round_trip() {
     pg_item::set_structured_description(&mut item, Some(&desc));
 
     let pg = PgItem(item.clone());
-    let retrieved = pg.structured_description().expect("should have description");
+    let retrieved = pg
+        .structured_description()
+        .expect("should have description");
     assert_eq!(retrieved, desc);
 }
 
@@ -628,7 +645,10 @@ fn apply_update_transition_status_forward() {
     pg_item::apply_update(&mut item, ItemUpdate::TransitionStatus(ItemStatus::Ready));
     assert_eq!(PgItem(item.clone()).pg_status(), ItemStatus::Ready);
 
-    pg_item::apply_update(&mut item, ItemUpdate::TransitionStatus(ItemStatus::InProgress));
+    pg_item::apply_update(
+        &mut item,
+        ItemUpdate::TransitionStatus(ItemStatus::InProgress),
+    );
     assert_eq!(PgItem(item.clone()).pg_status(), ItemStatus::InProgress);
 
     pg_item::apply_update(&mut item, ItemUpdate::TransitionStatus(ItemStatus::Done));
@@ -712,7 +732,10 @@ fn apply_update_set_blocked() {
     let mut item = make_test_item();
     pg_item::set_pg_status(&mut item, ItemStatus::InProgress);
 
-    pg_item::apply_update(&mut item, ItemUpdate::SetBlocked("need API key".to_string()));
+    pg_item::apply_update(
+        &mut item,
+        ItemUpdate::SetBlocked("need API key".to_string()),
+    );
 
     let pg = PgItem(item);
     assert_eq!(pg.pg_status(), ItemStatus::Blocked);
@@ -797,10 +820,10 @@ fn apply_update_update_assessments_partial() {
     pg_item::set_risk(&mut item, Some(&DimensionLevel::Low));
 
     let assessments = UpdatedAssessments {
-        size: None,         // keep existing
-        complexity: None,   // keep absent
+        size: None,                       // keep existing
+        complexity: None,                 // keep absent
         risk: Some(DimensionLevel::High), // override
-        impact: None,       // keep absent
+        impact: None,                     // keep absent
     };
 
     pg_item::apply_update(&mut item, ItemUpdate::UpdateAssessments(assessments));
@@ -815,15 +838,24 @@ fn apply_update_update_assessments_partial() {
 #[test]
 fn apply_update_set_pipeline_type() {
     let mut item = make_test_item();
-    pg_item::apply_update(&mut item, ItemUpdate::SetPipelineType("feature".to_string()));
+    pg_item::apply_update(
+        &mut item,
+        ItemUpdate::SetPipelineType("feature".to_string()),
+    );
     assert_eq!(PgItem(item).pipeline_type().as_deref(), Some("feature"));
 }
 
 #[test]
 fn apply_update_set_last_phase_commit() {
     let mut item = make_test_item();
-    pg_item::apply_update(&mut item, ItemUpdate::SetLastPhaseCommit("abc123def".to_string()));
-    assert_eq!(PgItem(item).last_phase_commit().as_deref(), Some("abc123def"));
+    pg_item::apply_update(
+        &mut item,
+        ItemUpdate::SetLastPhaseCommit("abc123def".to_string()),
+    );
+    assert_eq!(
+        PgItem(item).last_phase_commit().as_deref(),
+        Some("abc123def")
+    );
 }
 
 #[test]
@@ -936,11 +968,19 @@ fn jsonl_round_trip_all_extensions() {
     assert_eq!(loaded_pg.blocked_type(), Some(BlockType::Decision));
     // Note: blocked_from_status needs native field to also be set for divergence check
     // Just verify the extension value is present in the raw map
-    assert!(loaded_pg.0.extensions.contains_key("x-pg-blocked-from-status"));
-    assert_eq!(loaded_pg.unblock_context().as_deref(), Some("discussed in standup"));
+    assert!(loaded_pg
+        .0
+        .extensions
+        .contains_key("x-pg-blocked-from-status"));
+    assert_eq!(
+        loaded_pg.unblock_context().as_deref(),
+        Some("discussed in standup")
+    );
     assert_eq!(loaded_pg.last_phase_commit().as_deref(), Some("abc123"));
 
-    let desc = loaded_pg.structured_description().expect("should have description");
+    let desc = loaded_pg
+        .structured_description()
+        .expect("should have description");
     assert_eq!(desc.context, "Round-trip context");
     assert_eq!(desc.problem, "Round-trip problem");
     assert_eq!(desc.solution, "Round-trip solution");
@@ -948,7 +988,10 @@ fn jsonl_round_trip_all_extensions() {
     assert_eq!(desc.sizing_rationale, "Round-trip rationale");
 
     // Also verify native description was populated
-    assert_eq!(loaded_pg.0.description.as_deref(), Some("Round-trip context"));
+    assert_eq!(
+        loaded_pg.0.description.as_deref(),
+        Some("Round-trip context")
+    );
 }
 
 // =====================================================================

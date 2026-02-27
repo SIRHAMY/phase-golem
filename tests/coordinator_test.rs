@@ -66,11 +66,8 @@ fn setup_coordinator_with_items(
     let raw_items: Vec<Item> = items.into_iter().map(|pg| pg.0).collect();
     save_and_commit_store(dir.path(), &store, &raw_items);
 
-    let (handle, coord_task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, coord_task) =
+        spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     (handle, coord_task, dir)
 }
@@ -96,9 +93,8 @@ async fn get_snapshot_returns_current_state() {
 
 #[tokio::test]
 async fn get_snapshot_reflects_updates() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     handle
         .update_item("WRK-001", ItemUpdate::TransitionStatus(ItemStatus::Scoping))
@@ -123,11 +119,7 @@ async fn get_snapshot_returns_pg_items_with_extension_fields() {
 
     save_and_commit_store(dir.path(), &store, &[pg.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let snapshot = handle.get_snapshot().await.unwrap();
     assert_eq!(snapshot.len(), 1);
@@ -150,11 +142,8 @@ async fn get_snapshot_after_external_store_modification() {
     let pg1 = common::make_pg_item("WRK-001", ItemStatus::New);
     save_and_commit_store(dir.path(), &store, &[pg1.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store.clone(),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        spawn_coordinator(store.clone(), dir.path().to_path_buf(), "WRK".to_string());
 
     // Verify initial state
     let snapshot = handle.get_snapshot().await.unwrap();
@@ -162,9 +151,7 @@ async fn get_snapshot_after_external_store_modification() {
 
     // Externally add another item (simulating `tg add`)
     let pg2 = common::make_pg_item("WRK-002", ItemStatus::New);
-    let mut current_items: Vec<Item> = store
-        .with_lock(|s| s.load_active())
-        .expect("load active");
+    let mut current_items: Vec<Item> = store.with_lock(|s| s.load_active()).expect("load active");
     current_items.push(pg2.0);
     store.save_active(&current_items).expect("save active");
 
@@ -180,9 +167,8 @@ async fn get_snapshot_after_external_store_modification() {
 
 #[tokio::test]
 async fn update_item_transition_status() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     handle
         .update_item("WRK-001", ItemUpdate::TransitionStatus(ItemStatus::Scoping))
@@ -195,9 +181,8 @@ async fn update_item_transition_status() {
 
 #[tokio::test]
 async fn update_item_invalid_transition_logged_and_skipped() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     // New -> Done is invalid (skips Scoping/Ready/InProgress)
     // The adapter logs a warning and skips the transition
@@ -213,9 +198,8 @@ async fn update_item_invalid_transition_logged_and_skipped() {
 
 #[tokio::test]
 async fn update_item_set_phase() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_in_progress_pg_item("WRK-001", "prd"),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_in_progress_pg_item("WRK-001", "prd")]);
 
     handle
         .update_item("WRK-001", ItemUpdate::SetPhase("build".to_string()))
@@ -228,9 +212,8 @@ async fn update_item_set_phase() {
 
 #[tokio::test]
 async fn update_item_clear_phase() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_in_progress_pg_item("WRK-001", "build"),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_in_progress_pg_item("WRK-001", "build")]);
 
     handle
         .update_item("WRK-001", ItemUpdate::ClearPhase)
@@ -243,9 +226,8 @@ async fn update_item_clear_phase() {
 
 #[tokio::test]
 async fn update_item_set_blocked() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_in_progress_pg_item("WRK-001", "build"),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_in_progress_pg_item("WRK-001", "build")]);
 
     handle
         .update_item(
@@ -270,9 +252,10 @@ async fn update_item_set_blocked() {
 
 #[tokio::test]
 async fn update_item_unblock() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_blocked_pg_item("WRK-001", ItemStatus::InProgress),
-    ]);
+    let (handle, _task, _dir) = setup_coordinator_with_items(vec![common::make_blocked_pg_item(
+        "WRK-001",
+        ItemStatus::InProgress,
+    )]);
 
     handle
         .unblock_item("WRK-001", Some("resolved".to_string()))
@@ -286,9 +269,8 @@ async fn update_item_unblock() {
 
 #[tokio::test]
 async fn update_item_unblock_non_blocked_skipped() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     // Unblock on non-blocked item via update_item should be skipped (adapter logs warning)
     handle
@@ -303,9 +285,8 @@ async fn update_item_unblock_non_blocked_skipped() {
 
 #[tokio::test]
 async fn update_item_update_assessments() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let assessments = UpdatedAssessments {
         size: Some(SizeLevel::Large),
@@ -328,9 +309,8 @@ async fn update_item_update_assessments() {
 
 #[tokio::test]
 async fn update_item_set_pipeline_type() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     handle
         .update_item(
@@ -346,9 +326,8 @@ async fn update_item_set_pipeline_type() {
 
 #[tokio::test]
 async fn update_item_set_last_phase_commit() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_in_progress_pg_item("WRK-001", "build"),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_in_progress_pg_item("WRK-001", "build")]);
 
     handle
         .update_item(
@@ -359,17 +338,13 @@ async fn update_item_set_last_phase_commit() {
         .unwrap();
 
     let snapshot = handle.get_snapshot().await.unwrap();
-    assert_eq!(
-        snapshot[0].last_phase_commit(),
-        Some("abc123".to_string())
-    );
+    assert_eq!(snapshot[0].last_phase_commit(), Some("abc123".to_string()));
 }
 
 #[tokio::test]
 async fn update_item_set_description() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let desc = StructuredDescription {
         context: "test context".to_string(),
@@ -390,15 +365,11 @@ async fn update_item_set_description() {
 
 #[tokio::test]
 async fn update_item_nonexistent_returns_error() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let result = handle
-        .update_item(
-            "WRK-999",
-            ItemUpdate::TransitionStatus(ItemStatus::Scoping),
-        )
+        .update_item("WRK-999", ItemUpdate::TransitionStatus(ItemStatus::Scoping))
         .await;
 
     assert!(result.is_err());
@@ -417,11 +388,8 @@ async fn update_item_persists_to_disk() {
     let pg = common::make_pg_item("WRK-001", ItemStatus::New);
     save_and_commit_store(dir.path(), &store, &[pg.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store.clone(),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        spawn_coordinator(store.clone(), dir.path().to_path_buf(), "WRK".to_string());
 
     handle
         .update_item("WRK-001", ItemUpdate::TransitionStatus(ItemStatus::Scoping))
@@ -467,11 +435,7 @@ async fn complete_phase_destructive_commits_immediately() {
         .trim()
         .to_string();
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let phase_result = make_phase_result("WRK-001", "build", "Build complete");
 
@@ -489,7 +453,10 @@ async fn complete_phase_destructive_commits_immediately() {
     let sha_after = String::from_utf8_lossy(&head_after.stdout)
         .trim()
         .to_string();
-    assert_ne!(sha_before, sha_after, "Destructive phase should create a commit");
+    assert_ne!(
+        sha_before, sha_after,
+        "Destructive phase should create a commit"
+    );
 
     // Verify commit message format
     let log = Command::new("git")
@@ -534,11 +501,7 @@ async fn complete_phase_non_destructive_stages_only() {
         .trim()
         .to_string();
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let phase_result = make_phase_result("WRK-001", "prd", "PRD complete");
 
@@ -556,7 +519,10 @@ async fn complete_phase_non_destructive_stages_only() {
     let sha_after = String::from_utf8_lossy(&head_after.stdout)
         .trim()
         .to_string();
-    assert_eq!(sha_before, sha_after, "Non-destructive phase should not commit");
+    assert_eq!(
+        sha_before, sha_after,
+        "Non-destructive phase should not commit"
+    );
 }
 
 #[tokio::test]
@@ -567,11 +533,8 @@ async fn complete_phase_destructive_git_failure_preserves_jsonl() {
     let pg = common::make_in_progress_pg_item("WRK-001", "build");
     save_and_commit_store(dir.path(), &store, std::slice::from_ref(&pg.0));
 
-    let (handle, _task) = spawn_coordinator(
-        store.clone(),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        spawn_coordinator(store.clone(), dir.path().to_path_buf(), "WRK".to_string());
 
     // Break git by renaming .git directory
     let git_dir = dir.path().join(".git");
@@ -628,11 +591,7 @@ async fn batch_commit_commits_staged_phases() {
         .trim()
         .to_string();
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     // Complete a non-destructive phase (stages but doesn't commit)
     let phase_result = make_phase_result("WRK-001", "prd", "PRD done");
@@ -673,11 +632,7 @@ async fn batch_commit_noop_when_nothing_staged() {
         .trim()
         .to_string();
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     // Batch commit with nothing pending should be a no-op
     handle.batch_commit().await.unwrap();
@@ -699,13 +654,15 @@ async fn batch_commit_noop_when_nothing_staged() {
 
 #[tokio::test]
 async fn get_head_sha_returns_valid_sha() {
-    let (handle, _task, dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let sha = handle.get_head_sha().await.unwrap();
     assert_eq!(sha.len(), 40, "SHA should be 40 hex chars");
-    assert!(sha.chars().all(|c| c.is_ascii_hexdigit()), "SHA should be hex");
+    assert!(
+        sha.chars().all(|c| c.is_ascii_hexdigit()),
+        "SHA should be hex"
+    );
 
     // Cross-check with git
     let git_sha = Command::new("git")
@@ -735,11 +692,7 @@ async fn is_ancestor_returns_true_for_ancestor() {
         .trim()
         .to_string();
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let result = handle.is_ancestor(&ancestor_sha).await.unwrap();
     assert!(result, "Initial commit should be ancestor of HEAD");
@@ -791,11 +744,7 @@ async fn is_ancestor_returns_false_for_non_ancestor() {
         .output()
         .ok();
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let result = handle.is_ancestor(&orphan_sha).await.unwrap();
     assert!(!result, "Orphan commit should not be ancestor of HEAD");
@@ -807,12 +756,14 @@ async fn is_ancestor_returns_false_for_non_ancestor() {
 
 #[tokio::test]
 async fn record_phase_start_sets_last_phase_commit() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_in_progress_pg_item("WRK-001", "build"),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_in_progress_pg_item("WRK-001", "build")]);
 
     let head_sha = handle.get_head_sha().await.unwrap();
-    handle.record_phase_start("WRK-001", &head_sha).await.unwrap();
+    handle
+        .record_phase_start("WRK-001", &head_sha)
+        .await
+        .unwrap();
 
     let snapshot = handle.get_snapshot().await.unwrap();
     assert_eq!(snapshot[0].last_phase_commit(), Some(head_sha));
@@ -826,14 +777,14 @@ async fn record_phase_start_persists_to_disk() {
     let pg = common::make_in_progress_pg_item("WRK-001", "build");
     save_and_commit_store(dir.path(), &store, &[pg.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store.clone(),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        spawn_coordinator(store.clone(), dir.path().to_path_buf(), "WRK".to_string());
 
     let head_sha = handle.get_head_sha().await.unwrap();
-    handle.record_phase_start("WRK-001", &head_sha).await.unwrap();
+    handle
+        .record_phase_start("WRK-001", &head_sha)
+        .await
+        .unwrap();
 
     // Verify persisted
     let items = store.with_lock(|s| s.load_active()).unwrap();
@@ -853,14 +804,16 @@ async fn write_worklog_creates_entry() {
     let pg = common::make_in_progress_pg_item("WRK-001", "build");
     save_and_commit_store(dir.path(), &store, &[pg.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     handle
-        .write_worklog("WRK-001", "Test item WRK-001", "build", "Complete", "All done")
+        .write_worklog(
+            "WRK-001",
+            "Test item WRK-001",
+            "build",
+            "Complete",
+            "All done",
+        )
         .await
         .unwrap();
 
@@ -873,10 +826,19 @@ async fn write_worklog_creates_entry() {
     assert_eq!(entries.len(), 1, "Should have one worklog file");
 
     let content = fs::read_to_string(entries[0].path()).unwrap();
-    assert!(content.contains("WRK-001"), "Worklog should contain item ID");
+    assert!(
+        content.contains("WRK-001"),
+        "Worklog should contain item ID"
+    );
     assert!(content.contains("build"), "Worklog should contain phase");
-    assert!(content.contains("Complete"), "Worklog should contain outcome");
-    assert!(content.contains("All done"), "Worklog should contain summary");
+    assert!(
+        content.contains("Complete"),
+        "Worklog should contain outcome"
+    );
+    assert!(
+        content.contains("All done"),
+        "Worklog should contain summary"
+    );
 }
 
 // =============================================================================
@@ -905,11 +867,7 @@ async fn archive_item_writes_worklog_entry() {
     let pg = common::make_pg_item("WRK-001", ItemStatus::New);
     save_and_commit_store(dir.path(), &store, &[pg.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     handle.archive_item("WRK-001").await.unwrap();
 
@@ -919,17 +877,22 @@ async fn archive_item_writes_worklog_entry() {
         .expect("read worklog dir")
         .filter_map(|e| e.ok())
         .collect();
-    assert!(!entries.is_empty(), "Should have worklog entry from archive");
+    assert!(
+        !entries.is_empty(),
+        "Should have worklog entry from archive"
+    );
 
     let content = fs::read_to_string(entries[0].path()).unwrap();
-    assert!(content.contains("WRK-001"), "Worklog should mention archived item");
+    assert!(
+        content.contains("WRK-001"),
+        "Worklog should mention archived item"
+    );
 }
 
 #[tokio::test]
 async fn archive_nonexistent_item_returns_error() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let result = handle.archive_item("WRK-999").await;
     assert!(result.is_err());
@@ -946,9 +909,8 @@ async fn archive_nonexistent_item_returns_error() {
 
 #[tokio::test]
 async fn ingest_follow_ups_creates_new_items() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let follow_ups = vec![
         FollowUp {
@@ -974,7 +936,11 @@ async fn ingest_follow_ups_creates_new_items() {
 
     // All IDs should start with WRK-
     for id in &new_ids {
-        assert!(id.starts_with("WRK-"), "ID should start with prefix: {}", id);
+        assert!(
+            id.starts_with("WRK-"),
+            "ID should start with prefix: {}",
+            id
+        );
     }
 
     // Verify items exist in snapshot
@@ -989,9 +955,8 @@ async fn ingest_follow_ups_creates_new_items() {
 
 #[tokio::test]
 async fn ingest_follow_ups_empty_list_returns_empty() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let new_ids = handle
         .ingest_follow_ups(vec![], "WRK-001/build")
@@ -1007,9 +972,8 @@ async fn ingest_follow_ups_empty_list_returns_empty() {
 
 #[tokio::test]
 async fn ingest_follow_ups_batch_generates_unique_ids() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let follow_ups: Vec<FollowUp> = (0..6)
         .map(|i| FollowUp {
@@ -1033,7 +997,11 @@ async fn ingest_follow_ups_batch_generates_unique_ids() {
 
     // All should start with WRK-
     for id in &new_ids {
-        assert!(id.starts_with("WRK-"), "ID should start with prefix: {}", id);
+        assert!(
+            id.starts_with("WRK-"),
+            "ID should start with prefix: {}",
+            id
+        );
     }
 }
 
@@ -1045,11 +1013,8 @@ async fn ingest_follow_ups_persists_to_disk() {
     let pg = common::make_pg_item("WRK-001", ItemStatus::New);
     save_and_commit_store(dir.path(), &store, &[pg.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store.clone(),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        spawn_coordinator(store.clone(), dir.path().to_path_buf(), "WRK".to_string());
 
     let follow_ups = vec![FollowUp {
         title: "Persisted follow-up".to_string(),
@@ -1099,26 +1064,32 @@ async fn merge_item_removes_source_and_updates_target() {
 
 #[tokio::test]
 async fn merge_item_nonexistent_source_returns_error() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let result = handle.merge_item("WRK-999", "WRK-001").await;
     assert!(result.is_err());
     let err_str = result.unwrap_err().to_string();
-    assert!(err_str.contains("not found"), "Error should mention 'not found': {}", err_str);
+    assert!(
+        err_str.contains("not found"),
+        "Error should mention 'not found': {}",
+        err_str
+    );
 }
 
 #[tokio::test]
 async fn merge_item_self_merge_returns_error() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let result = handle.merge_item("WRK-001", "WRK-001").await;
     assert!(result.is_err());
     let err_str = result.unwrap_err().to_string();
-    assert!(err_str.contains("into itself"), "Error should mention self-merge: {}", err_str);
+    assert!(
+        err_str.contains("into itself"),
+        "Error should mention self-merge: {}",
+        err_str
+    );
 }
 
 // =============================================================================
@@ -1127,11 +1098,15 @@ async fn merge_item_self_merge_returns_error() {
 
 #[tokio::test]
 async fn unblock_item_restores_previous_status() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_blocked_pg_item("WRK-001", ItemStatus::InProgress),
-    ]);
+    let (handle, _task, _dir) = setup_coordinator_with_items(vec![common::make_blocked_pg_item(
+        "WRK-001",
+        ItemStatus::InProgress,
+    )]);
 
-    handle.unblock_item("WRK-001", Some("resolved".to_string())).await.unwrap();
+    handle
+        .unblock_item("WRK-001", Some("resolved".to_string()))
+        .await
+        .unwrap();
 
     let snapshot = handle.get_snapshot().await.unwrap();
     assert_eq!(snapshot[0].pg_status(), ItemStatus::InProgress);
@@ -1141,9 +1116,10 @@ async fn unblock_item_restores_previous_status() {
 
 #[tokio::test]
 async fn unblock_item_without_context() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_blocked_pg_item("WRK-001", ItemStatus::InProgress),
-    ]);
+    let (handle, _task, _dir) = setup_coordinator_with_items(vec![common::make_blocked_pg_item(
+        "WRK-001",
+        ItemStatus::InProgress,
+    )]);
 
     handle.unblock_item("WRK-001", None).await.unwrap();
 
@@ -1153,11 +1129,12 @@ async fn unblock_item_without_context() {
 
 #[tokio::test]
 async fn unblock_non_blocked_item_returns_error() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
-    let result = handle.unblock_item("WRK-001", Some("context".to_string())).await;
+    let result = handle
+        .unblock_item("WRK-001", Some("context".to_string()))
+        .await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     match err {
@@ -1176,13 +1153,12 @@ async fn unblock_item_resets_last_phase_commit() {
     pg_item::set_last_phase_commit(&mut pg.0, Some("abc123"));
     save_and_commit_store(dir.path(), &store, &[pg.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
-    handle.unblock_item("WRK-001", Some("resolved".to_string())).await.unwrap();
+    handle
+        .unblock_item("WRK-001", Some("resolved".to_string()))
+        .await
+        .unwrap();
 
     let snapshot = handle.get_snapshot().await.unwrap();
     assert_eq!(snapshot[0].last_phase_commit(), None);
@@ -1194,9 +1170,8 @@ async fn unblock_item_resets_last_phase_commit() {
 
 #[tokio::test]
 async fn handle_send_after_shutdown_returns_error() {
-    let (handle, coord_task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, coord_task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     // Drop all handles to trigger coordinator shutdown
     drop(handle);
@@ -1215,11 +1190,8 @@ async fn spawn_coordinator_returns_joinhandle() {
     let store = common::setup_task_golem_store(dir.path());
     save_and_commit_store(dir.path(), &store, &[]);
 
-    let (handle, coord_task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, coord_task) =
+        spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     // Verify handle works
     let snapshot = handle.get_snapshot().await.unwrap();
@@ -1289,9 +1261,8 @@ async fn multiple_sequential_operations_maintain_consistency() {
 
 #[tokio::test]
 async fn concurrent_handle_clones_work_correctly() {
-    let (handle, _task, _dir) = setup_coordinator_with_items(vec![
-        common::make_pg_item("WRK-001", ItemStatus::New),
-    ]);
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
 
     let h1 = handle.clone();
     let h2 = handle.clone();
@@ -1329,11 +1300,7 @@ async fn lock_timeout_retry_exhaustion_returns_error() {
     let tg_dir = dir.path().join(".task-golem");
     let _lock_guard = common::hold_store_lock(&tg_dir);
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     // Operations that go through with_store_retry should eventually fail with LockTimeout
     let result = handle
@@ -1342,7 +1309,11 @@ async fn lock_timeout_retry_exhaustion_returns_error() {
 
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.is_retryable(), "LockTimeout should be retryable: {:?}", err);
+    assert!(
+        err.is_retryable(),
+        "LockTimeout should be retryable: {:?}",
+        err
+    );
     match err {
         PgError::LockTimeout(_) => {} // expected
         other => panic!("Expected LockTimeout, got: {:?}", other),
@@ -1366,16 +1337,15 @@ async fn spawn_coordinator_with_missing_task_golem_dir_returns_empty_snapshot() 
         .output()
         .expect("commit");
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     // When tasks.jsonl doesn't exist, load_active returns Ok(vec![]) per task-golem
     let result = handle.get_snapshot().await;
     assert!(result.is_ok());
-    assert!(result.unwrap().is_empty(), "Missing store should return empty snapshot");
+    assert!(
+        result.unwrap().is_empty(),
+        "Missing store should return empty snapshot"
+    );
 }
 
 #[tokio::test]
@@ -1399,17 +1369,17 @@ async fn spawn_coordinator_with_corrupt_tasks_jsonl_returns_error() {
         .output()
         .expect("commit");
 
-    let (handle, _task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) = spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     // GetSnapshot should fail because tasks.jsonl is corrupt
     let result = handle.get_snapshot().await;
     assert!(result.is_err(), "Corrupt store should return error");
     let err = result.unwrap_err();
-    assert!(err.is_fatal(), "Storage corruption should be fatal: {:?}", err);
+    assert!(
+        err.is_fatal(),
+        "Storage corruption should be fatal: {:?}",
+        err
+    );
 }
 
 // =============================================================================
@@ -1499,11 +1469,8 @@ async fn persistence_round_trip_update_item() {
     let pg = common::make_pg_item("WRK-001", ItemStatus::New);
     save_and_commit_store(dir.path(), &store, &[pg.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store.clone(),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        spawn_coordinator(store.clone(), dir.path().to_path_buf(), "WRK".to_string());
 
     // Update via coordinator
     handle
@@ -1526,11 +1493,8 @@ async fn persistence_round_trip_archive_item() {
     let pg2 = common::make_pg_item("WRK-002", ItemStatus::New);
     save_and_commit_store(dir.path(), &store, &[pg1.0, pg2.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store.clone(),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        spawn_coordinator(store.clone(), dir.path().to_path_buf(), "WRK".to_string());
 
     handle.archive_item("WRK-001").await.unwrap();
 
@@ -1541,7 +1505,10 @@ async fn persistence_round_trip_archive_item() {
 
     // Check archive
     let archive_ids = store.all_known_ids().unwrap();
-    assert!(archive_ids.contains("WRK-001"), "Archived item should be in known IDs");
+    assert!(
+        archive_ids.contains("WRK-001"),
+        "Archived item should be in known IDs"
+    );
 }
 
 #[tokio::test]
@@ -1553,11 +1520,8 @@ async fn persistence_round_trip_merge_item() {
     let pg2 = common::make_pg_item("WRK-002", ItemStatus::New);
     save_and_commit_store(dir.path(), &store, &[pg1.0, pg2.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store.clone(),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        spawn_coordinator(store.clone(), dir.path().to_path_buf(), "WRK".to_string());
 
     handle.merge_item("WRK-002", "WRK-001").await.unwrap();
 
@@ -1568,7 +1532,10 @@ async fn persistence_round_trip_merge_item() {
 
     // Source should be in archive
     let archive_ids = store.all_known_ids().unwrap();
-    assert!(archive_ids.contains("WRK-002"), "Merged source should be in known IDs");
+    assert!(
+        archive_ids.contains("WRK-002"),
+        "Merged source should be in known IDs"
+    );
 }
 
 #[tokio::test]
@@ -1579,11 +1546,8 @@ async fn persistence_round_trip_ingest_follow_ups() {
     let pg = common::make_pg_item("WRK-001", ItemStatus::New);
     save_and_commit_store(dir.path(), &store, &[pg.0]);
 
-    let (handle, _task) = spawn_coordinator(
-        store.clone(),
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _task) =
+        spawn_coordinator(store.clone(), dir.path().to_path_buf(), "WRK".to_string());
 
     let follow_ups = vec![FollowUp {
         title: "Follow-up".to_string(),

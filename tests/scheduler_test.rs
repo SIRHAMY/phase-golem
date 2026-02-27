@@ -26,13 +26,7 @@ use phase_golem::types::{
 // --- Test helpers ---
 
 fn make_item(id: &str, title: &str, status: ItemStatus) -> PgItem {
-    pg_item::new_from_parts(
-        id.to_string(),
-        title.to_string(),
-        status,
-        vec![],
-        vec![],
-    )
+    pg_item::new_from_parts(id.to_string(), title.to_string(), status, vec![], vec![])
 }
 
 fn make_in_progress_item(id: &str, title: &str, phase: &str) -> PgItem {
@@ -200,11 +194,7 @@ fn run_params(root: &Path, target: Option<&str>, cap: u32) -> RunParams {
 }
 
 /// Helper to save PgItems to the store and spawn a coordinator.
-fn save_and_commit_store(
-    root: &Path,
-    store: &task_golem::store::Store,
-    items: &[Item],
-) {
+fn save_and_commit_store(root: &Path, store: &task_golem::store::Store, items: &[Item]) {
     store.save_active(items).expect("save items to store");
 
     Command::new("git")
@@ -233,11 +223,8 @@ fn setup_coordinator_with_items(
     let raw_items: Vec<Item> = items.into_iter().map(|pg| pg.0).collect();
     save_and_commit_store(dir.path(), &store, &raw_items);
 
-    let (handle, coord_task) = coordinator::spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, coord_task) =
+        coordinator::spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     (handle, coord_task, dir)
 }
@@ -586,11 +573,7 @@ fn select_actions_promotion_tiebreaks_by_impact() {
 #[test]
 fn select_actions_no_destructive_when_non_destructive_running() {
     // build (destructive) should NOT be scheduled if non-destructive tasks are already running
-    let snapshot = vec![make_in_progress_item(
-        "WRK-001",
-        "Build task",
-        "build",
-    )];
+    let snapshot = vec![make_in_progress_item("WRK-001", "Build task", "build")];
     let mut running = RunningTasks::new();
     running.insert_non_destructive("WRK-099", "prd"); // something else running
     let config = default_execution_config();
@@ -608,11 +591,7 @@ fn select_actions_no_destructive_when_non_destructive_running() {
 
 #[test]
 fn select_actions_scoping_items_with_pre_phases() {
-    let snapshot = vec![make_scoping_item(
-        "WRK-001",
-        "Scoping item",
-        "research",
-    )];
+    let snapshot = vec![make_scoping_item("WRK-001", "Scoping item", "research")];
     let running = RunningTasks::new();
     let config = default_execution_config();
     let pipelines = default_pipelines();
@@ -660,15 +639,10 @@ async fn scheduler_happy_path_single_item_all_phases() {
     let cancel = tokio_util::sync::CancellationToken::new();
     let params = run_params(dir.path(), None, 100);
 
-    let summary = scheduler::run_scheduler(
-        coordinator_handle,
-        Arc::new(runner),
-        config,
-        params,
-        cancel,
-    )
-    .await
-    .expect("Scheduler should succeed");
+    let summary =
+        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
+            .await
+            .expect("Scheduler should succeed");
 
     assert_eq!(summary.items_completed, vec!["WRK-001"]);
     assert!(summary.items_blocked.is_empty());
@@ -1149,8 +1123,7 @@ async fn scheduler_circuit_breaker_trips_after_consecutive_exhaustions() {
     // Two items that will both exhaust retries (0 retries = 1 attempt each)
     let item1 = make_in_progress_item("WRK-001", "Feature 1", "build");
     let item2 = make_in_progress_item("WRK-002", "Feature 2", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     // Both items fail — 2 consecutive exhaustions trips the breaker
     let runner = MockAgentRunner::new(vec![
@@ -1869,8 +1842,7 @@ fn test_advance_skips_items_in_completed_list() {
 async fn test_multi_target_processes_in_order() {
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -1906,8 +1878,7 @@ async fn test_multi_target_processes_in_order() {
 async fn test_multi_target_halts_on_block() {
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -1942,8 +1913,7 @@ async fn test_multi_target_halts_on_block() {
 async fn test_multi_target_all_done_at_startup() {
     let item1 = make_item("WRK-001", "Done 1", ItemStatus::Done);
     let item2 = make_item("WRK-002", "Done 2", ItemStatus::Done);
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![]);
 
@@ -1973,8 +1943,7 @@ async fn test_multi_target_all_done_at_startup() {
 async fn test_multi_target_skips_done_targets() {
     let item1 = make_item("WRK-001", "Already done", ItemStatus::Done);
     let item2 = make_in_progress_item("WRK-002", "Active", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-002", "build")),
@@ -2112,8 +2081,7 @@ async fn test_multi_target_skips_pre_blocked_targets() {
 async fn test_auto_advance_skips_blocked_target() {
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(blocked_result("WRK-001", "build")),
@@ -2150,8 +2118,7 @@ async fn test_auto_advance_skips_blocked_target() {
 async fn test_auto_advance_all_targets_blocked() {
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(blocked_result("WRK-001", "build")),
@@ -2188,9 +2155,7 @@ async fn test_auto_advance_single_target_blocked() {
     let item = make_in_progress_item("WRK-001", "Feature", "build");
     let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
 
-    let runner = MockAgentRunner::new(vec![
-        Ok(blocked_result("WRK-001", "build")),
-    ]);
+    let runner = MockAgentRunner::new(vec![Ok(blocked_result("WRK-001", "build"))]);
 
     let mut config = default_config();
     config.pipelines = simple_pipeline();
@@ -2220,8 +2185,7 @@ async fn test_auto_advance_single_target_blocked() {
 async fn test_auto_advance_circuit_breaker_not_tripped() {
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     // Each target: initial attempt fails, retry fails -> retries exhausted -> blocked
     let runner = MockAgentRunner::new(vec![
@@ -2263,8 +2227,7 @@ async fn test_auto_advance_backward_compat() {
     // Without --auto-advance, first blocked target should halt the run
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(blocked_result("WRK-001", "build")),
@@ -2343,8 +2306,7 @@ async fn test_filter_restricts_scheduler_to_matching_items() {
 async fn test_filter_no_matching_items_halts() {
     let mut low_item = make_in_progress_item("WRK-001", "Low impact", "build");
     pg_item::set_impact(&mut low_item.0, Some(&DimensionLevel::Low));
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![low_item]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![low_item]);
 
     let runner = MockAgentRunner::new(vec![]);
 
@@ -2374,8 +2336,7 @@ async fn test_filter_no_matching_items_halts() {
 async fn test_filter_all_exhausted_halts() {
     let mut done_item = make_item("WRK-001", "Done high impact", ItemStatus::Done);
     pg_item::set_impact(&mut done_item.0, Some(&DimensionLevel::High));
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![done_item]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![done_item]);
 
     let runner = MockAgentRunner::new(vec![]);
 
@@ -2495,8 +2456,7 @@ async fn test_integration_multi_target_sequential() {
 async fn test_integration_multi_target_with_block() {
     let item1 = make_in_progress_item("WRK-001", "First", "build");
     let item2 = make_in_progress_item("WRK-002", "Second (will block)", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![
         Ok(phase_complete_result("WRK-001", "build")),
@@ -2578,8 +2538,7 @@ async fn test_integration_filter_no_matches() {
     pg_item::set_impact(&mut item1.0, Some(&DimensionLevel::Medium));
     let mut item2 = make_in_progress_item("WRK-002", "Low impact", "build");
     pg_item::set_impact(&mut item2.0, Some(&DimensionLevel::Low));
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2]);
+    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
 
     let runner = MockAgentRunner::new(vec![]);
 

@@ -618,11 +618,8 @@ async fn handle_run(
 
     let runner = Arc::new(runner);
     log_info!("");
-    let (coord_handle, coord_task) = coordinator::spawn_coordinator(
-        store,
-        root.to_path_buf(),
-        config.project.prefix.clone(),
-    );
+    let (coord_handle, coord_task) =
+        coordinator::spawn_coordinator(store, root.to_path_buf(), config.project.prefix.clone());
 
     // Set up cancellation for graceful shutdown
     let cancel = CancellationToken::new();
@@ -972,9 +969,7 @@ fn handle_advance(
             let idx = items
                 .iter()
                 .position(|i| i.id == item_id)
-                .ok_or_else(|| {
-                    task_golem::errors::TgError::ItemNotFound(item_id.to_string())
-                })?;
+                .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(item_id.to_string()))?;
 
             let pg = PgItem(items[idx].clone());
             if pg.pg_status() != ItemStatus::InProgress {
@@ -986,15 +981,12 @@ fn handle_advance(
             }
 
             let pipeline_type = pg.pipeline_type().unwrap_or_else(|| "feature".to_string());
-            let pipeline = config
-                .pipelines
-                .get(&pipeline_type)
-                .ok_or_else(|| {
-                    task_golem::errors::TgError::InvalidInput(format!(
-                        "Pipeline type '{}' not found in config",
-                        pipeline_type
-                    ))
-                })?;
+            let pipeline = config.pipelines.get(&pipeline_type).ok_or_else(|| {
+                task_golem::errors::TgError::InvalidInput(format!(
+                    "Pipeline type '{}' not found in config",
+                    pipeline_type
+                ))
+            })?;
 
             match to {
                 Some(target_phase) => {
@@ -1026,16 +1018,15 @@ fn handle_advance(
                     })?;
                     let main_phases: Vec<&str> =
                         pipeline.phases.iter().map(|p| p.name.as_str()).collect();
-                    let current_idx =
-                        main_phases
-                            .iter()
-                            .position(|&p| p == current_phase)
-                            .ok_or_else(|| {
-                                task_golem::errors::TgError::InvalidInput(format!(
-                                    "Current phase '{}' not found in pipeline",
-                                    current_phase
-                                ))
-                            })?;
+                    let current_idx = main_phases
+                        .iter()
+                        .position(|&p| p == current_phase)
+                        .ok_or_else(|| {
+                            task_golem::errors::TgError::InvalidInput(format!(
+                                "Current phase '{}' not found in pipeline",
+                                current_phase
+                            ))
+                        })?;
                     let next = main_phases.get(current_idx + 1).ok_or_else(|| {
                         task_golem::errors::TgError::InvalidInput(format!(
                             "Cannot advance {}: '{}' is the final phase",
@@ -1078,9 +1069,7 @@ fn handle_unblock(
             let idx = items
                 .iter()
                 .position(|i| i.id == item_id)
-                .ok_or_else(|| {
-                    task_golem::errors::TgError::ItemNotFound(item_id.to_string())
-                })?;
+                .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(item_id.to_string()))?;
 
             let pg = PgItem(items[idx].clone());
             if pg.pg_status() != ItemStatus::Blocked {
@@ -1220,16 +1209,8 @@ mod tests {
     #[tokio::test]
     async fn cleanup_deletes_matching_files() {
         let dir = tempfile::tempdir().unwrap();
-        std_fs::write(
-            dir.path().join("phase_result_WRK-001_build.json"),
-            "{}",
-        )
-        .unwrap();
-        std_fs::write(
-            dir.path().join("phase_result_WRK-002_prd.json"),
-            "{}",
-        )
-        .unwrap();
+        std_fs::write(dir.path().join("phase_result_WRK-001_build.json"), "{}").unwrap();
+        std_fs::write(dir.path().join("phase_result_WRK-002_prd.json"), "{}").unwrap();
 
         cleanup_stale_result_files(dir.path(), "test").await;
 
@@ -1242,11 +1223,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std_fs::write(dir.path().join("phase-golem.lock"), "lock").unwrap();
         std_fs::write(dir.path().join("other.json"), "{}").unwrap();
-        std_fs::write(
-            dir.path().join("phase_result_WRK-001_build.txt"),
-            "{}",
-        )
-        .unwrap();
+        std_fs::write(dir.path().join("phase_result_WRK-001_build.txt"), "{}").unwrap();
 
         cleanup_stale_result_files(dir.path(), "test").await;
 
@@ -1277,21 +1254,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         // Regular file that should be deleted
-        std_fs::write(
-            dir.path().join("phase_result_WRK-001_build.json"),
-            "{}",
-        )
-        .unwrap();
+        std_fs::write(dir.path().join("phase_result_WRK-001_build.json"), "{}").unwrap();
 
         // Subdirectory with matching name — remove_file will fail with EISDIR
         std_fs::create_dir(dir.path().join("phase_result_stuck.json")).unwrap();
 
         // Another regular file that should be deleted
-        std_fs::write(
-            dir.path().join("phase_result_WRK-002_prd.json"),
-            "{}",
-        )
-        .unwrap();
+        std_fs::write(dir.path().join("phase_result_WRK-002_prd.json"), "{}").unwrap();
 
         cleanup_stale_result_files(dir.path(), "test").await;
 
@@ -1309,11 +1278,7 @@ mod tests {
         std_fs::create_dir(dir.path().join("phase_result_WRK-003_test.json")).unwrap();
 
         // Regular matching file
-        std_fs::write(
-            dir.path().join("phase_result_WRK-001_build.json"),
-            "{}",
-        )
-        .unwrap();
+        std_fs::write(dir.path().join("phase_result_WRK-001_build.json"), "{}").unwrap();
 
         cleanup_stale_result_files(dir.path(), "test").await;
 

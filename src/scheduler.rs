@@ -14,8 +14,8 @@ use crate::filter;
 use crate::pg_item::PgItem;
 use crate::prompt;
 use crate::types::{
-    DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult,
-    PhasePool, PhaseResult, ResultCode, SchedulerAction, SizeLevel,
+    DimensionLevel, ItemStatus, ItemUpdate, PhaseExecutionResult, PhasePool, PhaseResult,
+    ResultCode, SchedulerAction, SizeLevel,
 };
 use crate::{log_debug, log_info, log_warn};
 
@@ -331,7 +331,9 @@ fn sorted_scoping_items<'a>(
     scoping.sort_by(|a, b| {
         let idx_a = phase_index(a, pipelines);
         let idx_b = phase_index(b, pipelines);
-        idx_b.cmp(&idx_a).then_with(|| a.created_at().cmp(&b.created_at()))
+        idx_b
+            .cmp(&idx_a)
+            .then_with(|| a.created_at().cmp(&b.created_at()))
     });
     scoping
 }
@@ -381,7 +383,11 @@ pub fn unmet_dep_summary(item: &PgItem, all_items: &[PgItem]) -> Option<String> 
 /// Check and log if item has unmet dependencies. Returns true if unmet deps exist.
 fn skip_for_unmet_deps(item: &PgItem, all_items: &[PgItem]) -> bool {
     if let Some(summary) = unmet_dep_summary(item, all_items) {
-        log_debug!("Item {} skipped: unmet dependencies: {}", item.id(), summary);
+        log_debug!(
+            "Item {} skipped: unmet dependencies: {}",
+            item.id(),
+            summary
+        );
         return true;
     }
     false
@@ -392,7 +398,9 @@ fn skip_for_unmet_deps(item: &PgItem, all_items: &[PgItem]) -> bool {
 /// InProgress items always sort ahead of Scoping items (higher base offset).
 /// Within each pool, higher phase index = further along.
 fn phase_index(item: &PgItem, pipelines: &HashMap<String, PipelineConfig>) -> usize {
-    let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+    let pipeline_type_owned = item
+        .pipeline_type()
+        .unwrap_or_else(|| "feature".to_string());
     let pipeline = match pipelines.get(&pipeline_type_owned) {
         Some(p) => p,
         None => return 0,
@@ -436,7 +444,11 @@ fn build_run_phase_action(
     item: &PgItem,
     pipelines: &HashMap<String, PipelineConfig>,
 ) -> Option<SchedulerAction> {
-    let pipeline_type = item.pipeline_type().as_deref().unwrap_or("feature").to_string();
+    let pipeline_type = item
+        .pipeline_type()
+        .as_deref()
+        .unwrap_or("feature")
+        .to_string();
     let pipeline = pipelines.get(&pipeline_type)?;
     let phase_name = item.phase()?;
 
@@ -486,7 +498,10 @@ pub fn advance_to_next_active_target(
                 );
                 index += 1;
             }
-            Some(item) if items_completed.contains(&item.id().to_string()) || item.pg_status() == ItemStatus::Done => {
+            Some(item)
+                if items_completed.contains(&item.id().to_string())
+                    || item.pg_status() == ItemStatus::Done =>
+            {
                 log_info!(
                     "[target] {} already done. Skipping ({}/{}).",
                     target,
@@ -876,7 +891,9 @@ pub async fn run_scheduler(
                             }
                         };
 
-                        let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+                        let pipeline_type_owned = item
+                            .pipeline_type()
+                            .unwrap_or_else(|| "feature".to_string());
                         let pipeline_type = pipeline_type_owned.as_str();
                         let pipeline = match cfg.pipelines.get(pipeline_type) {
                             Some(p) => p,
@@ -1093,8 +1110,15 @@ async fn handle_task_completion(
             .await
         }
         PhaseExecutionResult::Failed(reason) => {
-            handle_phase_failed(&snapshot, item_id, &reason, coordinator, state, previous_summaries)
-                .await
+            handle_phase_failed(
+                &snapshot,
+                item_id,
+                &reason,
+                coordinator,
+                state,
+                previous_summaries,
+            )
+            .await
         }
         PhaseExecutionResult::Blocked(reason) => {
             handle_phase_blocked(
@@ -1113,7 +1137,13 @@ async fn handle_task_completion(
             if let Some(item) = snapshot.iter().find(|i| i.id() == item_id) {
                 let phase = item.phase().unwrap_or_else(|| "unknown".to_string());
                 let _ = coordinator
-                    .write_worklog(item.id(), item.title(), &phase, "Cancelled", "Shutdown requested")
+                    .write_worklog(
+                        item.id(),
+                        item.title(),
+                        &phase,
+                        "Cancelled",
+                        "Shutdown requested",
+                    )
                     .await;
             }
             Ok(())
@@ -1168,7 +1198,9 @@ async fn handle_phase_success(
         .find(|i| i.id() == item_id)
         .ok_or_else(|| format!("Item {} not found after phase completion", item_id))?;
 
-    let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+    let pipeline_type_owned = item
+        .pipeline_type()
+        .unwrap_or_else(|| "feature".to_string());
     let pipeline_type = pipeline_type_owned.as_str();
     let pipeline = config
         .pipelines
@@ -1256,7 +1288,13 @@ async fn handle_subphase_complete(
     // Write worklog entry
     if let Some(item) = snapshot.iter().find(|i| i.id() == item_id) {
         let _ = coordinator
-            .write_worklog(item.id(), item.title(), &phase, "Subphase Complete", &summary)
+            .write_worklog(
+                item.id(),
+                item.title(),
+                &phase,
+                "Subphase Complete",
+                &summary,
+            )
             .await;
     }
 
@@ -1480,7 +1518,13 @@ async fn handle_triage_success(
             ResultCode::SubphaseComplete => "Subphase Complete",
         };
         let _ = coordinator
-            .write_worklog(item.id(), item.title(), "triage", outcome, &phase_result.summary)
+            .write_worklog(
+                item.id(),
+                item.title(),
+                "triage",
+                outcome,
+                &phase_result.summary,
+            )
             .await;
     }
 
@@ -1531,7 +1575,9 @@ async fn handle_promote(
         .find(|i| i.id() == item_id)
         .ok_or_else(|| format!("Item {} not found for promotion", item_id))?;
 
-    let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+    let pipeline_type_owned = item
+        .pipeline_type()
+        .unwrap_or_else(|| "feature".to_string());
     let pipeline_type = pipeline_type_owned.as_str();
     let pipeline = config
         .pipelines
@@ -1692,7 +1738,9 @@ pub async fn apply_triage_result(
             let is_small_low_risk = matches!(item.size(), Some(SizeLevel::Small))
                 && matches!(item.risk(), Some(DimensionLevel::Low) | None);
 
-            let pipeline_type_owned = item.pipeline_type().unwrap_or_else(|| "feature".to_string());
+            let pipeline_type_owned = item
+                .pipeline_type()
+                .unwrap_or_else(|| "feature".to_string());
             let pipeline_type = pipeline_type_owned.as_str();
             let pipeline = config.pipelines.get(pipeline_type);
             let has_pre_phases = pipeline.map(|p| !p.pre_phases.is_empty()).unwrap_or(false);

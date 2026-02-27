@@ -96,11 +96,7 @@ fn make_simple_pipeline() -> PipelineConfig {
 }
 
 /// Helper to save PgItems to the store and spawn a coordinator.
-fn save_and_commit_store(
-    root: &std::path::Path,
-    store: &task_golem::store::Store,
-    items: &[Item],
-) {
+fn save_and_commit_store(root: &std::path::Path, store: &task_golem::store::Store, items: &[Item]) {
     store.save_active(items).expect("save items to store");
 
     Command::new("git")
@@ -129,11 +125,8 @@ fn setup_coordinator_with_items(
     let raw_items: Vec<Item> = items.into_iter().map(|pg| pg.0).collect();
     save_and_commit_store(dir.path(), &store, &raw_items);
 
-    let (handle, coord_task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, coord_task) =
+        spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     (handle, coord_task, dir)
 }
@@ -440,11 +433,8 @@ async fn check_staleness_ancestor_commit_proceeds() {
     let store = common::setup_task_golem_store(dir.path());
     save_and_commit_store(dir.path(), &store, &[]);
 
-    let (handle, _coord_task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task) =
+        spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let mut item = make_in_progress_item("WRK-001", "build");
     pg_item::set_last_phase_commit(&mut item.0, Some(&head_sha));
@@ -497,11 +487,8 @@ async fn check_staleness_not_ancestor_with_warn_config_warns() {
     let store = common::setup_task_golem_store(dir.path());
     save_and_commit_store(dir.path(), &store, &[]);
 
-    let (handle, _coord_task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task) =
+        spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let mut item = make_in_progress_item("WRK-001", "build");
     pg_item::set_last_phase_commit(&mut item.0, Some(&head_sha));
@@ -552,11 +539,8 @@ async fn check_staleness_not_ancestor_with_block_config_blocks() {
     let store = common::setup_task_golem_store(dir.path());
     save_and_commit_store(dir.path(), &store, &[]);
 
-    let (handle, _coord_task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task) =
+        spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let mut item = make_in_progress_item("WRK-001", "build");
     pg_item::set_last_phase_commit(&mut item.0, Some(&head_sha));
@@ -613,11 +597,8 @@ async fn check_staleness_not_ancestor_with_ignore_config_proceeds() {
     let store = common::setup_task_golem_store(dir.path());
     save_and_commit_store(dir.path(), &store, &[]);
 
-    let (handle, _coord_task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task) =
+        spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let mut item = make_in_progress_item("WRK-001", "build");
     pg_item::set_last_phase_commit(&mut item.0, Some(&head_sha));
@@ -957,11 +938,8 @@ async fn execute_phase_staleness_blocks_destructive_phase() {
     let store = common::setup_task_golem_store(dir.path());
     save_and_commit_store(dir.path(), &store, &[item.clone().0]);
 
-    let (handle, _coord_task) = spawn_coordinator(
-        store,
-        dir.path().to_path_buf(),
-        "WRK".to_string(),
-    );
+    let (handle, _coord_task) =
+        spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
     let mock = MockAgentRunner::new(vec![]);
     let mut config = common::default_config();

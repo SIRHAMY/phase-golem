@@ -224,7 +224,11 @@ impl CoordinatorHandle {
         .await?
     }
 
-    pub async fn unblock_item(&self, item_id: &str, context: Option<String>) -> Result<(), PgError> {
+    pub async fn unblock_item(
+        &self,
+        item_id: &str,
+        context: Option<String>,
+    ) -> Result<(), PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(
             CoordinatorCommand::UnblockItem {
@@ -388,7 +392,8 @@ where
         }
     }
 
-    Err(last_error.unwrap_or_else(|| PgError::InternalPanic("retry exhausted with no error".to_string())))
+    Err(last_error
+        .unwrap_or_else(|| PgError::InternalPanic("retry exhausted with no error".to_string())))
 }
 
 // --- Actor implementation ---
@@ -455,9 +460,7 @@ async fn handle_record_phase_start(
                 let idx = items
                     .iter()
                     .position(|i| i.id == item_id)
-                    .ok_or_else(|| {
-                        task_golem::errors::TgError::ItemNotFound(item_id.clone())
-                    })?;
+                    .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(item_id.clone()))?;
                 pg_item::set_last_phase_commit(&mut items[idx], Some(&commit_sha));
                 s.save_active(&items)
             })
@@ -478,10 +481,7 @@ fn handle_write_worklog(
         .map_err(PgError::Git)
 }
 
-async fn handle_archive_item(
-    state: &CoordinatorState,
-    item_id: String,
-) -> Result<(), PgError> {
+async fn handle_archive_item(state: &CoordinatorState, item_id: String) -> Result<(), PgError> {
     let worklog_dir = state.worklog_dir();
 
     // Store operation: find item, archive it, remove from active, save
@@ -492,9 +492,7 @@ async fn handle_archive_item(
                 let idx = items
                     .iter()
                     .position(|i| i.id == item_id)
-                    .ok_or_else(|| {
-                        task_golem::errors::TgError::ItemNotFound(item_id.clone())
-                    })?;
+                    .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(item_id.clone()))?;
 
                 let item = items.remove(idx);
                 s.append_to_archive(&item)?;
@@ -584,8 +582,8 @@ async fn handle_ingest_follow_ups(
                 let mut current_known = known_ids;
 
                 for fu in &follow_ups {
-                    let id = generate_id_with_prefix(&current_known, &prefix)
-                        .map_err(|e| match e {
+                    let id =
+                        generate_id_with_prefix(&current_known, &prefix).map_err(|e| match e {
                             task_golem::errors::TgError::IdCollisionExhausted(n) => {
                                 task_golem::errors::TgError::IdCollisionExhausted(n)
                             }
@@ -649,9 +647,7 @@ async fn handle_unblock_item(
                 let idx = items
                     .iter()
                     .position(|i| i.id == item_id)
-                    .ok_or_else(|| {
-                        task_golem::errors::TgError::ItemNotFound(item_id.clone())
-                    })?;
+                    .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(item_id.clone()))?;
 
                 let pg = PgItem(items[idx].clone());
                 if pg.pg_status() != ItemStatus::Blocked {
@@ -716,15 +712,16 @@ async fn handle_merge_item(
                         ))
                     })?;
 
-                let _target_idx = items
-                    .iter()
-                    .position(|i| i.id == target_id)
-                    .ok_or_else(|| {
-                        task_golem::errors::TgError::ItemNotFound(format!(
-                            "Target item {} not found",
-                            target_id
-                        ))
-                    })?;
+                let _target_idx =
+                    items
+                        .iter()
+                        .position(|i| i.id == target_id)
+                        .ok_or_else(|| {
+                            task_golem::errors::TgError::ItemNotFound(format!(
+                                "Target item {} not found",
+                                target_id
+                            ))
+                        })?;
 
                 // Remove source first
                 let source = items.remove(source_idx);
@@ -740,9 +737,7 @@ async fn handle_merge_item(
 
                 // Append merge context to target description
                 let pg_target = PgItem(target.clone());
-                let mut desc = pg_target
-                    .structured_description()
-                    .unwrap_or_default();
+                let mut desc = pg_target.structured_description().unwrap_or_default();
 
                 if desc.context.is_empty() {
                     desc.context = merge_text;
@@ -754,9 +749,7 @@ async fn handle_merge_item(
                 // Union-merge dependencies (dedup, no self-refs)
                 let source_deps = source.dependencies.clone();
                 for dep in &source_deps {
-                    if dep != &target_id
-                        && dep != &source_id
-                        && !target.dependencies.contains(dep)
+                    if dep != &target_id && dep != &source_id && !target.dependencies.contains(dep)
                     {
                         target.dependencies.push(dep.clone());
                     }
@@ -809,7 +802,13 @@ async fn run_coordinator(
             log_error!("Store not initialized: {}. Run `tg init` first.", e);
             // The coordinator will still start but GetSnapshot etc. will fail
         }
-        Err(ref e) if matches!(e, task_golem::errors::TgError::StorageCorruption(_) | task_golem::errors::TgError::SchemaVersionUnsupported { .. }) => {
+        Err(ref e)
+            if matches!(
+                e,
+                task_golem::errors::TgError::StorageCorruption(_)
+                    | task_golem::errors::TgError::SchemaVersionUnsupported { .. }
+            ) =>
+        {
             log_error!("Storage corruption detected on startup: {}. Recovery: `git checkout .task-golem/tasks.jsonl`", e);
             // Coordinator starts but operations will fail
         }
@@ -928,14 +927,12 @@ async fn run_coordinator(
                                 phase_result.commit_summary.as_deref(),
                             );
 
-                            let post_status =
-                                crate::git::get_status(Some(&project_root_clone))
-                                    .map_err(PgError::Git)?;
+                            let post_status = crate::git::get_status(Some(&project_root_clone))
+                                .map_err(PgError::Git)?;
 
                             if has_staged_changes(&post_status) {
-                                tg_git::commit(&message, &project_root_clone).map_err(|e| {
-                                    PgError::Git(format!("commit failed: {}", e))
-                                })?;
+                                tg_git::commit(&message, &project_root_clone)
+                                    .map_err(|e| PgError::Git(format!("commit failed: {}", e)))?;
                             }
 
                             Ok(())
@@ -995,8 +992,8 @@ async fn run_coordinator(
                         tg_git::stage_self(&project_root)
                             .map_err(|e| PgError::Git(format!("stage_self failed: {}", e)))?;
 
-                        let status = crate::git::get_status(Some(&project_root))
-                            .map_err(PgError::Git)?;
+                        let status =
+                            crate::git::get_status(Some(&project_root)).map_err(PgError::Git)?;
 
                         if has_staged_changes(&status) {
                             let message = build_batch_commit_message(&pending_batch_phases);
@@ -1022,30 +1019,27 @@ async fn run_coordinator(
             }
             CoordinatorCommand::GetHeadSha { reply } => {
                 let project_root = state.project_root.clone();
-                let result: Result<String, PgError> =
-                    match tokio::task::spawn_blocking(move || {
-                        crate::git::get_head_sha(&project_root).map_err(PgError::Git)
-                    })
-                    .await
-                    {
-                        Ok(r) => r,
-                        Err(e) => Err(PgError::InternalPanic(format!("{e:?}"))),
-                    };
+                let result: Result<String, PgError> = match tokio::task::spawn_blocking(move || {
+                    crate::git::get_head_sha(&project_root).map_err(PgError::Git)
+                })
+                .await
+                {
+                    Ok(r) => r,
+                    Err(e) => Err(PgError::InternalPanic(format!("{e:?}"))),
+                };
                 is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
             CoordinatorCommand::IsAncestor { sha, reply } => {
                 let project_root = state.project_root.clone();
-                let result: Result<bool, PgError> =
-                    match tokio::task::spawn_blocking(move || {
-                        crate::git::is_ancestor(&sha, &project_root)
-                            .map_err(PgError::Git)
-                    })
-                    .await
-                    {
-                        Ok(r) => r,
-                        Err(e) => Err(PgError::InternalPanic(format!("{e:?}"))),
-                    };
+                let result: Result<bool, PgError> = match tokio::task::spawn_blocking(move || {
+                    crate::git::is_ancestor(&sha, &project_root).map_err(PgError::Git)
+                })
+                .await
+                {
+                    Ok(r) => r,
+                    Err(e) => Err(PgError::InternalPanic(format!("{e:?}"))),
+                };
                 is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
@@ -1080,13 +1074,9 @@ async fn run_coordinator(
                 origin,
                 reply,
             } => {
-                let result = handle_ingest_follow_ups(
-                    &state,
-                    follow_ups,
-                    origin,
-                    state.prefix.clone(),
-                )
-                .await;
+                let result =
+                    handle_ingest_follow_ups(&state, follow_ups, origin, state.prefix.clone())
+                        .await;
                 is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
@@ -1235,14 +1225,14 @@ mod tests {
         std::fs::create_dir_all(&tg_dir).expect("create .task-golem");
         let store = Store::new(tg_dir);
         store.save_active(&[]).expect("init store");
-        std::fs::write(dir.path().join(".task-golem/archive.jsonl"), "{\"schema_version\":1}\n")
-            .expect("init archive");
+        std::fs::write(
+            dir.path().join(".task-golem/archive.jsonl"),
+            "{\"schema_version\":1}\n",
+        )
+        .expect("init archive");
 
-        let (handle, task_handle) = spawn_coordinator(
-            store,
-            dir.path().to_path_buf(),
-            "WRK".to_string(),
-        );
+        let (handle, task_handle) =
+            spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
 
         // Drop the handle to close the channel, which causes the coordinator to exit
         drop(handle);
