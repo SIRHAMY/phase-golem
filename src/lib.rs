@@ -8,6 +8,8 @@ pub mod git;
 pub mod lock;
 pub mod log;
 pub mod migration;
+pub mod pg_error;
+pub mod pg_item;
 pub mod preflight;
 pub mod prompt;
 pub mod scheduler;

@@ -146,7 +146,7 @@ The scheduler's pure-function architecture is preserved — only parameter types
 
 > Create PgItem newtype adapter and PgError error enum with comprehensive tests
 
-**Phase Status:** not_started
+**Phase Status:** done
 
 **Complexity:** High
 
@@ -174,63 +174,63 @@ The scheduler's pure-function architecture is preserved — only parameter types
 
 Branch setup:
 
-- [ ] Create feature branch `wrk-076-tg-storage` from `main`: `git checkout -b wrk-076-tg-storage`
-- [ ] All Phase 2-5 commits land on this branch
+- [x] Create feature branch `wrk-076-tg-storage` from `main`: `git checkout -b wrk-076-tg-storage`
+- [x] All Phase 2-5 commits land on this branch
 
 Source code:
 
-- [ ] Add `task_golem = { path = "../task-golem" }` to `[dependencies]` in `Cargo.toml`
-- [ ] Add `thiserror = "2"` to `[dependencies]` in `Cargo.toml`
-- [ ] Create `src/pg_error.rs`:
-  - [ ] Define `PgError` enum with variants: `LockTimeout(Duration)`, `StorageCorruption(#[source] TgError)`, `NotInitialized(String)`, `IdCollisionExhausted(u32)`, `InternalPanic(String)`, `ItemNotFound(String)`, `InvalidTransition(#[source] TgError)`, `CycleDetected(String)`, `Git(String)`, `Unexpected(#[source] TgError)`
-  - [ ] Implement `From<TgError>` with exhaustive match (every `TgError` variant mapped explicitly, no catch-all `_` arm)
-  - [ ] Implement `is_retryable(&self) -> bool` (true for `LockTimeout` only)
-  - [ ] Implement `is_fatal(&self) -> bool` (true for `StorageCorruption`, `NotInitialized`, `IdCollisionExhausted`, `InternalPanic`)
-  - [ ] On `StorageCorruption`, include recovery guidance in the Display message: "Recovery: `git checkout .task-golem/tasks.jsonl`"
-- [ ] Create `src/pg_item.rs`:
-  - [ ] Define extension key constants: `X_PG_STATUS`, `X_PG_PHASE`, `X_PG_PHASE_POOL`, `X_PG_SIZE`, `X_PG_COMPLEXITY`, `X_PG_RISK`, `X_PG_IMPACT`, `X_PG_REQUIRES_HUMAN_REVIEW`, `X_PG_PIPELINE_TYPE`, `X_PG_ORIGIN`, `X_PG_BLOCKED_TYPE`, `X_PG_BLOCKED_FROM_STATUS`, `X_PG_UNBLOCK_CONTEXT`, `X_PG_LAST_PHASE_COMMIT`, `X_PG_DESCRIPTION`
-  - [ ] Define `pub struct PgItem(pub Item);`
-  - [ ] Implement delegating accessors for native fields: `id() -> &str`, `title() -> &str`, `status() -> Status`, `dependencies() -> &[String]`, `tags() -> &[String]`, `created_at() -> DateTime<Utc>`, `updated_at() -> DateTime<Utc>`
-  - [ ] Implement typed getters for all 15 `x-pg-*` extension fields (each returns `Option<T>`, parsing from `serde_json::Value`)
-  - [ ] Implement `pg_status() -> ItemStatus` — bidirectional status mapping per Design doc table (if `Todo`, check `x-pg-status`; absent defaults to `New`; if `Doing`/`Done`/`Blocked`, map directly)
-  - [ ] Implement `set_pg_status(item: &mut Item, status: ItemStatus)` free function — sets both `Item.status` and `x-pg-status` extension (clears extension for `InProgress`/`Done`/`Blocked`)
-  - [ ] Implement `pg_blocked_from_status() -> Option<ItemStatus>` with divergence detection (if native `blocked_from_status` is `None` but extension is present → stale, return `None` with `log_warn!`)
-  - [ ] Implement `structured_description() -> Option<StructuredDescription>` — deserializes `x-pg-description` JSON object; treats deserialization failure as absent with `log_warn!`
-  - [ ] Implement `set_structured_description(item: &mut Item, desc: Option<StructuredDescription>)` — also populates `Item.description` with `context` field
-  - [ ] Implement `new_from_parts(id, title, status, ...)` → `PgItem` — constructs `Item` with correct extension defaults
-  - [ ] Implement `apply_update(item: &mut Item, update: ItemUpdate)` free function — dispatches each `ItemUpdate` variant to the appropriate field mutation
-  - [ ] Implement typed setters for extension fields that need write access: `set_phase`, `set_phase_pool`, `set_size`, `set_complexity`, `set_risk`, `set_impact`, `set_pipeline_type`, `set_last_phase_commit`, `set_blocked_type`, `set_blocked_from_status`, `set_unblock_context`, `set_requires_human_review`, `set_origin`
-- [ ] Update `src/lib.rs`: add `pub mod pg_item; pub mod pg_error;`
-- [ ] Create `tests/pg_error_test.rs`:
-  - [ ] Test `From<TgError>` for every `TgError` variant
-  - [ ] Test `is_retryable()` and `is_fatal()` for every `PgError` variant
-- [ ] Create `tests/pg_item_test.rs`:
-  - [ ] Test bidirectional status mapping for all 6 `ItemStatus` variants
-  - [ ] Test reverse mapping: `Todo` with absent `x-pg-status` → `New` (default)
-  - [ ] Test reverse mapping: `Doing`/`Done`/`Blocked` ignore stale `x-pg-status`
-  - [ ] Test each extension field getter/setter round-trip
-  - [ ] Test `StructuredDescription` JSON serialization/deserialization via `x-pg-description`
-  - [ ] Test invalid extension value handling (e.g., `x-pg-status: "running"` → `None` with warning)
-  - [ ] Test `pg_blocked_from_status` divergence detection
-  - [ ] Test `new_from_parts` constructor sets correct defaults
-  - [ ] Test `apply_update` for each `ItemUpdate` variant
-  - [ ] Test native `description` populated with `context` field from `StructuredDescription`
-  - [ ] **JSONL round-trip integration test:** Write a fully-populated `PgItem` (all 15 extension fields set) to a real JSONL file via `Store::save_active`, read it back via `Store::load_active`, wrap as `PgItem`, and verify all extension values survive the round-trip
-  - [ ] **`spawn_blocking` + `with_lock` smoke test:** In a `#[tokio::test]`, verify `spawn_blocking(move || store.with_lock(|s| { let items = s.load_active()?; s.save_active(&items) })).await` succeeds. This validates the async-to-sync bridge pattern that Phase 3 depends on entirely.
-- [ ] Verify `cargo build` succeeds (new modules compile alongside existing code)
-- [ ] Verify `cargo test` passes (all old tests + new adapter tests)
+- [x] Add `task_golem = { path = "../task-golem" }` to `[dependencies]` in `Cargo.toml`
+- [x] Add `thiserror = "2"` to `[dependencies]` in `Cargo.toml`
+- [x] Create `src/pg_error.rs`:
+  - [x] Define `PgError` enum with variants: `LockTimeout(Duration)`, `StorageCorruption(#[source] TgError)`, `NotInitialized(String)`, `IdCollisionExhausted(u32)`, `InternalPanic(String)`, `ItemNotFound(String)`, `InvalidTransition(#[source] TgError)`, `CycleDetected(String)`, `Git(String)`, `Unexpected(#[source] TgError)`
+  - [x] Implement `From<TgError>` with exhaustive match (every `TgError` variant mapped explicitly, no catch-all `_` arm)
+  - [x] Implement `is_retryable(&self) -> bool` (true for `LockTimeout` only)
+  - [x] Implement `is_fatal(&self) -> bool` (true for `StorageCorruption`, `NotInitialized`, `IdCollisionExhausted`, `InternalPanic`)
+  - [x] On `StorageCorruption`, include recovery guidance in the Display message: "Recovery: `git checkout .task-golem/tasks.jsonl`"
+- [x] Create `src/pg_item.rs`:
+  - [x] Define extension key constants: `X_PG_STATUS`, `X_PG_PHASE`, `X_PG_PHASE_POOL`, `X_PG_SIZE`, `X_PG_COMPLEXITY`, `X_PG_RISK`, `X_PG_IMPACT`, `X_PG_REQUIRES_HUMAN_REVIEW`, `X_PG_PIPELINE_TYPE`, `X_PG_ORIGIN`, `X_PG_BLOCKED_TYPE`, `X_PG_BLOCKED_FROM_STATUS`, `X_PG_UNBLOCK_CONTEXT`, `X_PG_LAST_PHASE_COMMIT`, `X_PG_DESCRIPTION`
+  - [x] Define `pub struct PgItem(pub Item);`
+  - [x] Implement delegating accessors for native fields: `id() -> &str`, `title() -> &str`, `status() -> Status`, `dependencies() -> &[String]`, `tags() -> &[String]`, `created_at() -> DateTime<Utc>`, `updated_at() -> DateTime<Utc>`
+  - [x] Implement typed getters for all 15 `x-pg-*` extension fields (each returns `Option<T>`, parsing from `serde_json::Value`)
+  - [x] Implement `pg_status() -> ItemStatus` — bidirectional status mapping per Design doc table (if `Todo`, check `x-pg-status`; absent defaults to `New`; if `Doing`/`Done`/`Blocked`, map directly)
+  - [x] Implement `set_pg_status(item: &mut Item, status: ItemStatus)` free function — sets both `Item.status` and `x-pg-status` extension (clears extension for `InProgress`/`Done`/`Blocked`)
+  - [x] Implement `pg_blocked_from_status() -> Option<ItemStatus>` with divergence detection (if native `blocked_from_status` is `None` but extension is present → stale, return `None` with `log_warn!`)
+  - [x] Implement `structured_description() -> Option<StructuredDescription>` — deserializes `x-pg-description` JSON object; treats deserialization failure as absent with `log_warn!`
+  - [x] Implement `set_structured_description(item: &mut Item, desc: Option<StructuredDescription>)` — also populates `Item.description` with `context` field
+  - [x] Implement `new_from_parts(id, title, status, ...)` → `PgItem` — constructs `Item` with correct extension defaults
+  - [x] Implement `apply_update(item: &mut Item, update: ItemUpdate)` free function — dispatches each `ItemUpdate` variant to the appropriate field mutation
+  - [x] Implement typed setters for extension fields that need write access: `set_phase`, `set_phase_pool`, `set_size`, `set_complexity`, `set_risk`, `set_impact`, `set_pipeline_type`, `set_last_phase_commit`, `set_blocked_type`, `set_blocked_from_status`, `set_unblock_context`, `set_requires_human_review`, `set_origin`
+- [x] Update `src/lib.rs`: add `pub mod pg_item; pub mod pg_error;`
+- [x] Create `tests/pg_error_test.rs`:
+  - [x] Test `From<TgError>` for every `TgError` variant
+  - [x] Test `is_retryable()` and `is_fatal()` for every `PgError` variant
+- [x] Create `tests/pg_item_test.rs`:
+  - [x] Test bidirectional status mapping for all 6 `ItemStatus` variants
+  - [x] Test reverse mapping: `Todo` with absent `x-pg-status` → `New` (default)
+  - [x] Test reverse mapping: `Doing`/`Done`/`Blocked` ignore stale `x-pg-status`
+  - [x] Test each extension field getter/setter round-trip
+  - [x] Test `StructuredDescription` JSON serialization/deserialization via `x-pg-description`
+  - [x] Test invalid extension value handling (e.g., `x-pg-status: "running"` → `None` with warning)
+  - [x] Test `pg_blocked_from_status` divergence detection
+  - [x] Test `new_from_parts` constructor sets correct defaults
+  - [x] Test `apply_update` for each `ItemUpdate` variant
+  - [x] Test native `description` populated with `context` field from `StructuredDescription`
+  - [x] **JSONL round-trip integration test:** Write a fully-populated `PgItem` (all 15 extension fields set) to a real JSONL file via `Store::save_active`, read it back via `Store::load_active`, wrap as `PgItem`, and verify all extension values survive the round-trip
+  - [x] **`spawn_blocking` + `with_lock` smoke test:** In a `#[tokio::test]`, verify `spawn_blocking(move || store.with_lock(|s| { let items = s.load_active()?; s.save_active(&items) })).await` succeeds. This validates the async-to-sync bridge pattern that Phase 3 depends on entirely.
+- [x] Verify `cargo build` succeeds (new modules compile alongside existing code)
+- [x] Verify `cargo test` passes (all old tests + new adapter tests)
 
 **Verification:**
 
-- [ ] All 6 `ItemStatus` variants round-trip correctly through status mapping
-- [ ] All 15 extension field accessors return correct typed values
-- [ ] Invalid extension values produce `None` + warning (not panics)
-- [ ] `PgError::from(tg_error)` maps every `TgError` variant correctly
-- [ ] JSONL round-trip preserves all 15 extension fields through Store save/load cycle
-- [ ] Existing tests still pass (no breakage from new modules)
-- [ ] `cargo test` passes
-- [ ] `cargo clippy` passes
-- [ ] Code review passes
+- [x] All 6 `ItemStatus` variants round-trip correctly through status mapping
+- [x] All 15 extension field accessors return correct typed values
+- [x] Invalid extension values produce `None` + warning (not panics)
+- [x] `PgError::from(tg_error)` maps every `TgError` variant correctly
+- [x] JSONL round-trip preserves all 15 extension fields through Store save/load cycle
+- [x] Existing tests still pass (no breakage from new modules)
+- [x] `cargo test` passes
+- [x] `cargo clippy` passes
+- [x] Code review passes
 
 **Commit:** `[WRK-076][P2] Feature: Add PgItem adapter and PgError error enum`
 
@@ -240,6 +240,10 @@ Source code:
 - All extension field accessors return `Option<T>`. Items created via `tg add` (without phase-golem extensions) will have absent fields. The scheduler must handle `None` for all extension fields.
 - The adapter builds alongside existing `BacklogItem`/`BacklogFile` types — no existing code changes are needed for this phase.
 - The `task_golem = { path = "../task-golem" }` dependency assumes `Code/task-golem` is a sibling directory of `Code/phase-golem`. If the layout differs, override via `.cargo/config.toml` path patching.
+- Cargo dependency uses `task-golem` (hyphen) since that is the package name; the library crate name is `task_golem` (underscore), which is what Rust code imports.
+- `set_blocked_from_status` also sets the native `item.blocked_from_status` with a lossy 4-variant mapping (New/Scoping/Ready -> Todo). This keeps both fields in sync and prevents the divergence detector from triggering false positives when blocking/unblocking through the adapter.
+- `apply_update` for `Unblock` explicitly clears all blocked fields (extension and native) rather than calling `item.apply_unblock()`, since the adapter manages both extension and native fields and `apply_unblock()` would redundantly clear already-cleared fields and set the wrong status.
+- 21 PgError tests + 74 PgItem tests = 95 new tests total.
 
 **Followups:**
 
