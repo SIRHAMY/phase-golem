@@ -1,9 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-// Re-export legacy types from backlog.rs for binary-level backward compatibility.
-// These are defined in backlog.rs and deleted in Phase 5 along with backlog.rs itself.
-pub use crate::backlog::{BacklogFile, BacklogItem, InboxItem};
-
 // --- Enums ---
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]

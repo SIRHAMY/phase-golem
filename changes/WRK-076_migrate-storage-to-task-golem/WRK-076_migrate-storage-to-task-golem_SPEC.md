@@ -573,7 +573,7 @@ Tests:
 
 > Delete old storage code, remove stale module declarations, final verification
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -590,30 +590,30 @@ Tests:
 
 **Tasks:**
 
-- [ ] Delete `src/backlog.rs`
-- [ ] Delete `src/migration.rs`
-- [ ] Remove `pub mod backlog;` and `pub mod migration;` from `src/lib.rs`
-- [ ] Delete `tests/backlog_test.rs`
-- [ ] Delete `tests/migration_test.rs`
-- [ ] Delete `tests/fixtures/backlog_*.yaml` fixture files
-- [ ] Delete `.dev/BACKLOG_INBOX.example.yaml` if still present
-- [ ] Verify all `Cargo.toml` dependencies are still needed: check `serde_yaml_ng`, `tempfile`, and any other crates primarily used by deleted modules. Remove unused dependencies.
-- [ ] Verify `cargo build` succeeds
-- [ ] Verify `cargo test` passes
-- [ ] Verify `cargo clippy` passes
-- [ ] Grep for any remaining references to `backlog::`, `migration::`, `BacklogItem`, `BacklogFile`, `InboxItem` — should be zero
+- [x] Delete `src/backlog.rs`
+- [x] Delete `src/migration.rs`
+- [x] Remove `pub mod backlog;` and `pub mod migration;` from `src/lib.rs`
+- [x] Delete `tests/backlog_test.rs`
+- [x] Delete `tests/migration_test.rs`
+- [x] Delete `tests/fixtures/backlog_*.yaml` fixture files
+- [x] Delete `.dev/BACKLOG_INBOX.example.yaml` if still present
+- [x] Verify all `Cargo.toml` dependencies are still needed: check `serde_yaml_ng`, `tempfile`, and any other crates primarily used by deleted modules. Remove unused dependencies.
+- [x] Verify `cargo build` succeeds
+- [x] Verify `cargo test` passes
+- [x] Verify `cargo clippy` passes
+- [x] Grep for any remaining references to `backlog::`, `migration::`, `BacklogItem`, `BacklogFile`, `InboxItem` — should be zero
 
 Merge:
 
-- [ ] Merge `wrk-076-tg-storage` branch to `main` (after human confirms task-golem library API is stable)
+- [ ] Merge `wrk-076-tg-storage` branch to `main` — SKIPPED: orchestrator handles merge decision with human
 
 **Verification:**
 
-- [ ] `cargo build` succeeds
-- [ ] `cargo test` passes (all)
-- [ ] `cargo clippy` passes
-- [ ] `grep -r "backlog::\|migration::\|BacklogItem\|BacklogFile\|InboxItem" src/ tests/` returns no results
-- [ ] Code review passes (full branch diff against `main`)
+- [x] `cargo build` succeeds
+- [x] `cargo test` passes (all)
+- [x] `cargo clippy` passes
+- [x] `grep -r "backlog::\|migration::\|BacklogItem\|BacklogFile\|InboxItem" src/ tests/` returns no results
+- [x] Code review passes (full branch diff against `main`)
 
 **Commit:** `[WRK-076][P5] Clean: Delete backlog.rs, migration.rs, and old storage tests`
 
@@ -622,6 +622,9 @@ Merge:
 - The merge to `main` is a human decision gate — only merge once task-golem's library API has been exercised enough to be confident in its stability. All Phase 2-5 commits live on `wrk-076-tg-storage` until then.
 
 **Followups:**
+
+- [ ] [Low] `serde_yaml_ng` moved to dev-dependencies but still used for enum YAML round-trip tests in `types_test.rs` — these tests could be converted to JSON-based or removed if YAML serialization of enums is no longer needed in production
+- [ ] [Low] `tempfile` moved to dev-dependencies — was previously in `[dependencies]` despite only being used in `#[cfg(test)]` blocks
 
 ---
 
