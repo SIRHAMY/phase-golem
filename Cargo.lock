@@ -863,6 +863,7 @@ dependencies = [
 [[package]]
 name = "task-golem"
 version = "0.1.0"
+source = "git+https://github.com/SIRHAMY/task-golem?branch=main#3be292d8957ec983d60715dcc56df4426a7b9846"
 dependencies = [
  "anyhow",
  "chrono",
