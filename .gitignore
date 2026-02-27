@@ -3,6 +3,7 @@
 *.rlib
 phase-golem.toml
 
-# Claude Code custom workflows
-.claude/commands/changes/
-.claude/skills/changes/
+# Claude Code custom workflows (symlinked from ai-dotfiles)
+.claude/commands/changes
+.claude/skills/changes
+.claude/skills/coding-style
