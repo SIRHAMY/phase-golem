@@ -150,10 +150,16 @@ project-root/
 │       ├── WRK-001_auth_PRD.md
 │       ├── WRK-001_auth_SPEC.md
 │       └── ...
+├── docs/                # Project documentation (not created by init)
+│   └── tg-cli-safety.md # tg CLI safety guide for phase-golem stores
 ├── _ideas/              # Early-stage idea files for larger items
 ├── _worklog/            # Monthly archives of completed items
 └── .phase-golem/       # Lock file and PID (git-ignored)
 ```
+
+## Documentation
+
+- [tg CLI Safety Guide](docs/tg-cli-safety.md) — Which `tg` commands are safe to run against a phase-golem-managed store
 
 ## Configuration
 

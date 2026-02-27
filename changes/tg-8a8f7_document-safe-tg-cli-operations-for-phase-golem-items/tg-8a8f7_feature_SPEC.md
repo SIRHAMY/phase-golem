@@ -49,7 +49,7 @@ None — the scope, structure, and content are fully defined by the PRD, Design,
 
 > Write `docs/tg-cli-safety.md` with all 8 sections and add README discoverability link
 
-**Phase Status:** not_started
+**Phase Status:** complete
 
 **Complexity:** Low
 
@@ -62,33 +62,33 @@ None — the scope, structure, and content are fully defined by the PRD, Design,
 
 **Tasks:**
 
-- [ ] Create `docs/` directory
-- [ ] Gather current metadata for "last verified against" marker: date, phase-golem HEAD commit SHA, task-golem version (from `Cargo.toml` dependency declaration or `Cargo.lock`; fall back to `../task-golem/Cargo.toml` if needed), `src/pg_item.rs` line reference for extension field constants
-- [ ] Write Section 1: Header & Introduction — title, framing paragraph, "safe relative to phase-golem" statement, "last verified against" marker with all 4 fields (date, commit SHA, task-golem version, pg_item.rs line reference). Include a note for commands not listed: "If you encounter a command not listed here, consult `tg --help` or the task-golem CLI source."
-- [ ] Write Section 2: Quick-Reference Summary Table — 21 entries (19 unique subcommands, with `doctor`/`doctor --fix` and `init`/`init --force` as separate rows) with columns: Command | Tier | Description | Recommendation
-- [ ] Write Section 3: Dual-Status Mapping Table — narrative paragraph explaining the reading rule with concrete example, then 6-row mapping table (Phase-Golem Status | Task-Golem Status | x-pg-status Value | Notes)
-- [ ] Write Section 4: Safe Tier — 7 commands (`list`, `show`, `dump`, `next`, `ready`, `doctor`, `completions`), each with: name, what it does, why it's safe (1-2 sentences per command). Include warning callout on `doctor`: "If `tg doctor` reports issues, do NOT run `tg doctor --fix` without reading the Dangerous tier section first." Include note that operators remain responsible for how they use information from safe commands.
-- [ ] Write Section 5: Caution Tier — 5 commands (`do`, `done`, `todo`, `block`, `unblock`), each with: name, what it does, which specific phase-golem logic is bypassed, phase-golem equivalent if one exists (2-4 sentences per command)
-- [ ] Write Section 6: Dangerous Tier — 9 entries (`add`, `edit`, `rm`, `init`, `init --force`, `doctor --fix`, `dep add`, `dep rm`, `archive`), each with: name, what it does, specific data integrity risk, phase-golem equivalent or "avoid" warning (2-4 sentences per command). Special callouts for `init --force` (destroys all items and extensions) and `rm` (orphans change folder artifacts). Note for `init`: safe when creating a new store on a fresh directory, but categorized as Dangerous because it writes store files.
-- [ ] Write Section 7: Extension Field Reference — table listing all `x-pg-*` fields from `src/pg_item.rs:14-28` (currently 15) with columns: Field | Type | Purpose | If Missing/Corrupted. Source reference to `src/pg_item.rs` as authoritative. Note on enum case-sensitivity. Verification hint for operators.
-- [ ] Write Section 8: Recovery Guidance — 2-3 brief recovery scenarios (heading + 1-2 sentence description + 1-3 step remediation each): git history recovery for `.task-golem/tasks.jsonl`, `tg doctor --fix` limitations (what it can/cannot repair)
-- [ ] Add a discoverability link to `README.md` — add a "Documentation" section after "Project Layout" containing a link to `docs/tg-cli-safety.md`. Also add `docs/` entry to the Project Layout directory tree.
+- [x] Create `docs/` directory
+- [x] Gather current metadata for "last verified against" marker: date, phase-golem HEAD commit SHA, task-golem version (from `Cargo.toml` dependency declaration or `Cargo.lock`; fall back to `../task-golem/Cargo.toml` if needed), `src/pg_item.rs` line reference for extension field constants
+- [x] Write Section 1: Header & Introduction — title, framing paragraph, "safe relative to phase-golem" statement, "last verified against" marker with all 4 fields (date, commit SHA, task-golem version, pg_item.rs line reference). Include a note for commands not listed: "If you encounter a command not listed here, consult `tg --help` or the task-golem CLI source."
+- [x] Write Section 2: Quick-Reference Summary Table — 21 entries (19 unique subcommands, with `doctor`/`doctor --fix` and `init`/`init --force` as separate rows) with columns: Command | Tier | Description | Recommendation
+- [x] Write Section 3: Dual-Status Mapping Table — narrative paragraph explaining the reading rule with concrete example, then 6-row mapping table (Phase-Golem Status | Task-Golem Status | x-pg-status Value | Notes)
+- [x] Write Section 4: Safe Tier — 7 commands (`list`, `show`, `dump`, `next`, `ready`, `doctor`, `completions`), each with: name, what it does, why it's safe (1-2 sentences per command). Include warning callout on `doctor`: "If `tg doctor` reports issues, do NOT run `tg doctor --fix` without reading the Dangerous tier section first." Include note that operators remain responsible for how they use information from safe commands.
+- [x] Write Section 5: Caution Tier — 5 commands (`do`, `done`, `todo`, `block`, `unblock`), each with: name, what it does, which specific phase-golem logic is bypassed, phase-golem equivalent if one exists (2-4 sentences per command)
+- [x] Write Section 6: Dangerous Tier — 9 entries (`add`, `edit`, `rm`, `init`, `init --force`, `doctor --fix`, `dep add`, `dep rm`, `archive`), each with: name, what it does, specific data integrity risk, phase-golem equivalent or "avoid" warning (2-4 sentences per command). Special callouts for `init --force` (destroys all items and extensions) and `rm` (orphans change folder artifacts). Note for `init`: safe when creating a new store on a fresh directory, but categorized as Dangerous because it writes store files.
+- [x] Write Section 7: Extension Field Reference — table listing all `x-pg-*` fields from `src/pg_item.rs:14-28` (currently 15) with columns: Field | Type | Purpose | If Missing/Corrupted. Source reference to `src/pg_item.rs` as authoritative. Note on enum case-sensitivity. Verification hint for operators.
+- [x] Write Section 8: Recovery Guidance — 2-3 brief recovery scenarios (heading + 1-2 sentence description + 1-3 step remediation each): git history recovery for `.task-golem/tasks.jsonl`, `tg doctor --fix` limitations (what it can/cannot repair)
+- [x] Add a discoverability link to `README.md` — add a "Documentation" section after "Project Layout" containing a link to `docs/tg-cli-safety.md`. Also add `docs/` entry to the Project Layout directory tree.
 
 **Verification:**
 
-- [ ] All tg CLI subcommands are listed and classified into correct tiers per PRD categorization rules (Safe = no writes, Caution = status-only writes, Dangerous = create/modify/delete). Tier counts: Safe=7, Caution=5, Dangerous=9, total=21 entries covering 19 unique subcommands.
-- [ ] All `x-pg-*` extension fields from `src/pg_item.rs:14-28` are listed with name, type, purpose, and consequence if missing (verify count matches source)
-- [ ] Dual-status mapping table has 6 rows matching the mapping in `src/pg_item.rs:79-114`
-- [ ] Quick-reference summary table has 21 entries matching the tier detail sections
-- [ ] Caution and Dangerous commands explain which specific phase-golem logic is bypassed
-- [ ] `doctor` (Safe) and `doctor --fix` (Dangerous) are separate entries; Safe-tier `doctor` includes warning callout directing readers to Dangerous tier for `--fix`
-- [ ] `init` and `init --force` are separate entries with appropriate risk levels
-- [ ] Safe tier includes note that operators remain responsible for how they use information from safe commands
-- [ ] "Last verified against" marker includes all 4 fields: date, commit SHA, task-golem version, `src/pg_item.rs` line reference
-- [ ] Recovery Guidance section exists with at least 2 recovery scenarios
-- [ ] Introduction includes a note about commands not listed in the table
-- [ ] `docs/tg-cli-safety.md` exists at the correct path and README.md link resolves to it
-- [ ] Code review passes (`/code-review` → fix issues → repeat until pass)
+- [x] All tg CLI subcommands are listed and classified into correct tiers per PRD categorization rules (Safe = no writes, Caution = status-only writes, Dangerous = create/modify/delete). Tier counts: Safe=7, Caution=5, Dangerous=9, total=21 entries covering 19 unique subcommands.
+- [x] All `x-pg-*` extension fields from `src/pg_item.rs:14-28` are listed with name, type, purpose, and consequence if missing (verify count matches source)
+- [x] Dual-status mapping table has 6 rows matching the mapping in `src/pg_item.rs:79-114`
+- [x] Quick-reference summary table has 21 entries matching the tier detail sections
+- [x] Caution and Dangerous commands explain which specific phase-golem logic is bypassed
+- [x] `doctor` (Safe) and `doctor --fix` (Dangerous) are separate entries; Safe-tier `doctor` includes warning callout directing readers to Dangerous tier for `--fix`
+- [x] `init` and `init --force` are separate entries with appropriate risk levels
+- [x] Safe tier includes note that operators remain responsible for how they use information from safe commands
+- [x] "Last verified against" marker includes all 4 fields: date, commit SHA, task-golem version, `src/pg_item.rs` line reference
+- [x] Recovery Guidance section exists with at least 2 recovery scenarios
+- [x] Introduction includes a note about commands not listed in the table
+- [x] `docs/tg-cli-safety.md` exists at the correct path and README.md link resolves to it
+- [x] Code review passes (`/code-review` → fix issues → repeat until pass)
 
 **Commit:** `[tg-8a8f7][P1] Docs: Create tg CLI safety guide for phase-golem stores`
 
@@ -98,19 +98,22 @@ Content for the command tables, extension field reference, and dual-status mappi
 
 **Followups:**
 
+- Code review H2: `tg archive` has dual behavior (recovery without flags, prune with `--before`). Current doc covers both modes but the Dangerous classification applies mainly to `--before`. A future refinement could split this into two entries (like `doctor`/`doctor --fix`) if the command set grows.
+
 ---
 
 ## Final Verification
 
-- [ ] All phases complete
-- [ ] All PRD success criteria met (must-have, should-have, nice-to-have)
-- [ ] No regressions introduced
-- [ ] Code reviewed (if applicable)
+- [x] All phases complete
+- [x] All PRD success criteria met (must-have, should-have, nice-to-have)
+- [x] No regressions introduced
+- [x] Code reviewed (if applicable)
 
 ## Execution Log
 
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
+| 1 | Complete | pending | All 8 sections written, all verification items pass. Code review found 2 High issues (archive behavior inaccuracy, archive dual-mode) and 1 Medium (README init tree accuracy) — all fixed. |
 
 ## Followups Summary
 
