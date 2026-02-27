@@ -177,18 +177,20 @@ fn log_agent_config(agent: &config::AgentConfig) {
     }
 }
 
-/// Validates an item ID format: must be `{prefix}-{suffix}` where suffix is
-/// either all-numeric (legacy WRK-001) or valid hex (WRK-a1b2c).
-fn is_valid_item_id(id: &str, prefix: &str) -> bool {
-    let pattern = format!("{}-", prefix);
-    if !id.starts_with(&pattern) {
+/// Validates an item ID format: must be `{prefix}-{suffix}` where prefix is
+/// alphanumeric and suffix is either all-numeric (legacy WRK-001) or valid hex
+/// (WRK-a1b2c). Accepts any prefix — the store can contain items with different
+/// prefixes (e.g., `tg-` from direct `tg add`, project prefix from phase-golem).
+fn is_valid_item_id(id: &str) -> bool {
+    let Some((prefix, suffix)) = id.split_once('-') else {
+        return false;
+    };
+    if prefix.is_empty() || suffix.is_empty() {
         return false;
     }
-    let suffix = &id[pattern.len()..];
-    if suffix.is_empty() {
+    if !prefix.chars().all(|c| c.is_ascii_alphanumeric()) {
         return false;
     }
-    // Accept numeric (legacy) or hex (new) suffixes
     suffix.chars().all(|c| c.is_ascii_hexdigit())
 }
 
@@ -419,12 +421,11 @@ async fn handle_run(
         let mut errors = Vec::new();
 
         // Format validation — accepts both numeric (WRK-001) and hex (WRK-a1b2c) IDs
-        let prefix = &config.project.prefix;
         for t in &target {
-            if !is_valid_item_id(t, prefix) {
+            if !is_valid_item_id(t) {
                 errors.push(format!(
-                    "Invalid target format '{}': expected {}-<id> (numeric or hex)",
-                    t, prefix
+                    "Invalid target format '{}': expected <prefix>-<id> (numeric or hex suffix)",
+                    t
                 ));
             }
         }
@@ -1190,23 +1191,30 @@ mod tests {
 
     #[test]
     fn is_valid_item_id_accepts_numeric() {
-        assert!(is_valid_item_id("WRK-001", "WRK"));
-        assert!(is_valid_item_id("WRK-42", "WRK"));
+        assert!(is_valid_item_id("WRK-001"));
+        assert!(is_valid_item_id("WRK-42"));
     }
 
     #[test]
     fn is_valid_item_id_accepts_hex() {
-        assert!(is_valid_item_id("WRK-a1b2c", "WRK"));
-        assert!(is_valid_item_id("WRK-deadbeef", "WRK"));
-        assert!(is_valid_item_id("WRK-ABC123", "WRK"));
+        assert!(is_valid_item_id("WRK-a1b2c"));
+        assert!(is_valid_item_id("WRK-deadbeef"));
+        assert!(is_valid_item_id("WRK-ABC123"));
+    }
+
+    #[test]
+    fn is_valid_item_id_accepts_any_prefix() {
+        assert!(is_valid_item_id("tg-a1b2c"));
+        assert!(is_valid_item_id("HAMY-5c0f8"));
+        assert!(is_valid_item_id("OTHER-001"));
     }
 
     #[test]
     fn is_valid_item_id_rejects_invalid() {
-        assert!(!is_valid_item_id("WRK-", "WRK"));
-        assert!(!is_valid_item_id("WRK", "WRK"));
-        assert!(!is_valid_item_id("OTHER-001", "WRK"));
-        assert!(!is_valid_item_id("WRK-g1h2", "WRK")); // 'g' and 'h' are not hex
+        assert!(!is_valid_item_id("WRK-"));
+        assert!(!is_valid_item_id("WRK"));
+        assert!(!is_valid_item_id("-001"));
+        assert!(!is_valid_item_id("WRK-g1h2")); // 'g' and 'h' are not hex
     }
 
     #[tokio::test]
