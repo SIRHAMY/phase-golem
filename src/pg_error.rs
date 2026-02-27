@@ -68,7 +68,7 @@ impl PgError {
 
 /// Transitional bridge: allows `?` to convert `PgError` to `String` in code
 /// that still uses `Result<T, String>` (scheduler, executor, etc.).
-/// This impl should be removed in Phase 4b when all consumers adopt `PgError`.
+/// TODO: Remove when all consumers adopt `PgError` directly.
 impl From<PgError> for String {
     fn from(err: PgError) -> String {
         err.to_string()

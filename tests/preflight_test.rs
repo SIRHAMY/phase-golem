@@ -319,6 +319,7 @@ fn preflight_error_display_format() {
 fn preflight_workflow_files_exist_passes() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
+    std::fs::create_dir_all(root.join(".task-golem")).unwrap();
 
     // Create a minimal config with workflow files that we'll create on disk
     let mut config = PhaseGolemConfig::default();
@@ -347,6 +348,7 @@ fn preflight_workflow_files_exist_passes() {
 fn preflight_missing_workflow_files_fails() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
+    std::fs::create_dir_all(root.join(".task-golem")).unwrap();
 
     let mut config = PhaseGolemConfig::default();
     config.pipelines.insert(
@@ -684,8 +686,8 @@ fn preflight_dangling_dependency_fails() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-999".to_string()],
+        vec![],
     );
 
     let items = vec![item];
@@ -710,16 +712,16 @@ fn preflight_multiple_dangling_references() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-888".to_string()],
+        vec![],
     );
 
     let item_b = pg_item::new_from_parts(
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-999".to_string()],
+        vec![],
     );
 
     let items = vec![item_a, item_b];
@@ -747,8 +749,8 @@ fn preflight_valid_dependencies_passes() {
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-001".to_string()],
+        vec![],
     );
 
     let items = vec![item_a, item_b];
@@ -772,8 +774,8 @@ fn preflight_self_dependency_fails() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-001".to_string()],
+        vec![],
     );
 
     let items = vec![item];
@@ -801,16 +803,16 @@ fn preflight_two_node_cycle_fails() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-002".to_string()],
+        vec![],
     );
 
     let item_b = pg_item::new_from_parts(
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-001".to_string()],
+        vec![],
     );
 
     let items = vec![item_a, item_b];
@@ -842,24 +844,24 @@ fn preflight_three_node_cycle_fails() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-002".to_string()],
+        vec![],
     );
 
     let item_b = pg_item::new_from_parts(
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-003".to_string()],
+        vec![],
     );
 
     let item_c = pg_item::new_from_parts(
         "WRK-003".to_string(),
         "Test item WRK-003".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-001".to_string()],
+        vec![],
     );
 
     let items = vec![item_a, item_b, item_c];
@@ -894,16 +896,16 @@ fn preflight_multiple_independent_cycles() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-002".to_string()],
+        vec![],
     );
 
     let item_b = pg_item::new_from_parts(
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-001".to_string()],
+        vec![],
     );
 
     // Cycle 2: C <-> D
@@ -911,16 +913,16 @@ fn preflight_multiple_independent_cycles() {
         "WRK-003".to_string(),
         "Test item WRK-003".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-004".to_string()],
+        vec![],
     );
 
     let item_d = pg_item::new_from_parts(
         "WRK-004".to_string(),
         "Test item WRK-004".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-003".to_string()],
+        vec![],
     );
 
     let items = vec![item_a, item_b, item_c, item_d];
@@ -955,8 +957,8 @@ fn preflight_cycle_with_blocked_item_detected() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-002".to_string()],
+        vec![],
     );
 
     let mut item_b = common::make_blocked_pg_item("WRK-002", ItemStatus::Ready);
@@ -985,16 +987,16 @@ fn preflight_done_items_excluded_from_cycle_detection() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-002".to_string()],
+        vec![],
     );
 
     let item_b = pg_item::new_from_parts(
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Done,
-        vec![],
         vec!["WRK-001".to_string()],
+        vec![],
     );
 
     let items = vec![item_a, item_b];
@@ -1017,24 +1019,24 @@ fn preflight_diamond_dag_no_false_positive() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-002".to_string(), "WRK-003".to_string()],
+        vec![],
     );
 
     let item_b = pg_item::new_from_parts(
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-004".to_string()],
+        vec![],
     );
 
     let item_c = pg_item::new_from_parts(
         "WRK-003".to_string(),
         "Test item WRK-003".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-004".to_string()],
+        vec![],
     );
 
     let item_d = make_feature_item("WRK-004", ItemStatus::Ready);
@@ -1061,16 +1063,16 @@ fn preflight_transitive_chain_no_cycle() {
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-001".to_string()],
+        vec![],
     );
 
     let item_c = pg_item::new_from_parts(
         "WRK-003".to_string(),
         "Test item WRK-003".to_string(),
         ItemStatus::Ready,
-        vec![],
         vec!["WRK-002".to_string()],
+        vec![],
     );
 
     let items = vec![item_a, item_b, item_c];
@@ -1150,6 +1152,7 @@ fn preflight_phase3_skipped_when_phase1_fails() {
 fn preflight_phase3_runs_when_phase1_passes_but_phase2_fails() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
+    std::fs::create_dir_all(root.join(".task-golem")).unwrap();
 
     // Structurally valid config with a workflow file that doesn't exist on disk
     let mut config = PhaseGolemConfig::default();
@@ -1226,6 +1229,7 @@ fn preflight_phase4_and_phase5_run_when_phase1_fails() {
 fn preflight_config_base_differs_from_project_root() {
     let dir = tempfile::tempdir().unwrap();
     let project_root = dir.path();
+    std::fs::create_dir_all(project_root.join(".task-golem")).unwrap();
 
     // Create a subdirectory to serve as config_base
     let config_base = project_root.join("subdir");

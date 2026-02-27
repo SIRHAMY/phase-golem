@@ -218,8 +218,8 @@ fn tag_filter_case_sensitive() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec!["V1".to_string()],
         vec![],
+        vec!["V1".to_string()],
     );
 
     let snapshot = vec![item];
@@ -235,8 +235,8 @@ fn tag_filter_exact_match() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec!["v1".to_string(), "other".to_string()],
         vec![],
+        vec!["v1".to_string(), "other".to_string()],
     );
 
     let snapshot = vec![item];
@@ -550,24 +550,24 @@ fn apply_filters_multi_tag_and() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec!["backend".to_string(), "sprint-1".to_string()],
         vec![],
+        vec!["backend".to_string(), "sprint-1".to_string()],
     );
 
     let item2 = pg_item::new_from_parts(
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Ready,
-        vec!["backend".to_string()],
         vec![],
+        vec!["backend".to_string()],
     );
 
     let item3 = pg_item::new_from_parts(
         "WRK-003".to_string(),
         "Test item WRK-003".to_string(),
         ItemStatus::Ready,
-        vec!["sprint-1".to_string()],
         vec![],
+        vec!["sprint-1".to_string()],
     );
 
     let snapshot = vec![item1, item2, item3];
@@ -646,8 +646,8 @@ fn apply_filters_three_heterogeneous_criteria() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec!["backend".to_string()],
         vec![],
+        vec!["backend".to_string()],
     );
     pg_item::set_impact(&mut item1.0, Some(&DimensionLevel::High));
 
@@ -659,8 +659,8 @@ fn apply_filters_three_heterogeneous_criteria() {
         "WRK-003".to_string(),
         "Test item WRK-003".to_string(),
         ItemStatus::InProgress,
-        vec!["backend".to_string()],
         vec![],
+        vec!["backend".to_string()],
     );
     pg_item::set_impact(&mut item3.0, Some(&DimensionLevel::High));
 
@@ -668,8 +668,8 @@ fn apply_filters_three_heterogeneous_criteria() {
         "WRK-004".to_string(),
         "Test item WRK-004".to_string(),
         ItemStatus::Ready,
-        vec!["backend".to_string()],
         vec![],
+        vec!["backend".to_string()],
     );
     pg_item::set_impact(&mut item4.0, Some(&DimensionLevel::Low));
 
@@ -924,24 +924,24 @@ fn tag_or_matches_either() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec!["a".to_string()],
         vec![],
+        vec!["a".to_string()],
     );
 
     let item2 = pg_item::new_from_parts(
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Ready,
-        vec!["b".to_string()],
         vec![],
+        vec!["b".to_string()],
     );
 
     let item3 = pg_item::new_from_parts(
         "WRK-003".to_string(),
         "Test item WRK-003".to_string(),
         ItemStatus::Ready,
-        vec!["c".to_string()],
         vec![],
+        vec!["c".to_string()],
     );
 
     let snapshot = vec![item1, item2, item3];
@@ -962,32 +962,32 @@ fn tag_or_and_composition() {
         "WRK-001".to_string(),
         "Test item WRK-001".to_string(),
         ItemStatus::Ready,
-        vec!["a".to_string(), "c".to_string()],
         vec![],
+        vec!["a".to_string(), "c".to_string()],
     );
 
     let item2 = pg_item::new_from_parts(
         "WRK-002".to_string(),
         "Test item WRK-002".to_string(),
         ItemStatus::Ready,
-        vec!["b".to_string(), "c".to_string()],
         vec![],
+        vec!["b".to_string(), "c".to_string()],
     );
 
     let item3 = pg_item::new_from_parts(
         "WRK-003".to_string(),
         "Test item WRK-003".to_string(),
         ItemStatus::Ready,
-        vec!["a".to_string(), "b".to_string()],
         vec![],
+        vec!["a".to_string(), "b".to_string()],
     );
 
     let item4 = pg_item::new_from_parts(
         "WRK-004".to_string(),
         "Test item WRK-004".to_string(),
         ItemStatus::Ready,
-        vec!["c".to_string()],
         vec![],
+        vec!["c".to_string()],
     );
 
     let snapshot = vec![item1, item2, item3, item4];
