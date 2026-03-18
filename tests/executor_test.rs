@@ -62,6 +62,7 @@ fn default_guardrails() -> GuardrailsConfig {
         max_size: SizeLevel::Medium,
         max_complexity: DimensionLevel::Medium,
         max_risk: DimensionLevel::Low,
+        min_impact: None,
     }
 }
 

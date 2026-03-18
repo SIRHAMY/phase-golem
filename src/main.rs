@@ -239,6 +239,7 @@ prefix = "{prefix}"
 max_size = "medium"
 max_complexity = "medium"
 max_risk = "low"
+# min_impact = "medium"
 
 [execution]
 phase_timeout_minutes = 30

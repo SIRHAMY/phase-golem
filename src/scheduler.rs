@@ -441,6 +441,23 @@ fn impact_sort_value(impact: &Option<DimensionLevel>) -> u8 {
     }
 }
 
+fn is_below_min_impact(impact: Option<DimensionLevel>, min_impact: Option<DimensionLevel>) -> bool {
+    match (impact, min_impact) {
+        (Some(actual), Some(minimum)) => {
+            dimension_level_value(&actual) < dimension_level_value(&minimum)
+        }
+        _ => false,
+    }
+}
+
+fn dimension_level_value(level: &DimensionLevel) -> u8 {
+    match level {
+        DimensionLevel::Low => 1,
+        DimensionLevel::Medium => 2,
+        DimensionLevel::High => 3,
+    }
+}
+
 /// Build a RunPhase action for an item based on its current phase.
 fn build_run_phase_action(
     item: &PgItem,
@@ -726,14 +743,12 @@ pub async fn run_scheduler(
                 }
             }
             // Check if all remaining filtered items are Done, Parked, or Blocked
-            let all_done_or_blocked = filtered
-                .iter()
-                .all(|i| {
-                    matches!(
-                        i.pg_status(),
-                        ItemStatus::Done | ItemStatus::Parked | ItemStatus::Blocked
-                    )
-                });
+            let all_done_or_blocked = filtered.iter().all(|i| {
+                matches!(
+                    i.pg_status(),
+                    ItemStatus::Done | ItemStatus::Parked | ItemStatus::Blocked
+                )
+            });
             if all_done_or_blocked {
                 log_info!(
                     "[filter] All items matching {} are done, parked, or blocked.",
@@ -1026,8 +1041,7 @@ pub fn select_targeted_actions(
     if matches!(
         target.pg_status(),
         ItemStatus::Done | ItemStatus::Parked | ItemStatus::Blocked
-    )
-        && !running.is_item_running(target_id)
+    ) && !running.is_item_running(target_id)
     {
         return Vec::new();
     }
@@ -1754,6 +1768,13 @@ pub async fn apply_triage_result(
             let pipeline_type = pipeline_type_owned.as_str();
             let pipeline = config.pipelines.get(pipeline_type);
             let has_pre_phases = pipeline.map(|p| !p.pre_phases.is_empty()).unwrap_or(false);
+
+            if is_below_min_impact(item.impact(), config.guardrails.min_impact.clone()) {
+                coordinator
+                    .update_item(item_id, ItemUpdate::TransitionStatus(ItemStatus::Parked))
+                    .await?;
+                return Ok(());
+            }
 
             if is_small_low_risk || !has_pre_phases {
                 // Small+low-risk or no pre_phases: promote to Scoping then Ready

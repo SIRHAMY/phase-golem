@@ -1087,10 +1087,18 @@ async fn ingest_follow_ups_skips_duplicates_within_same_batch() {
         .await
         .unwrap();
 
-    assert_eq!(new_ids.len(), 1, "only one normalized title should be created");
+    assert_eq!(
+        new_ids.len(),
+        1,
+        "only one normalized title should be created"
+    );
 
     let snapshot = handle.get_snapshot().await.unwrap();
-    assert_eq!(snapshot.len(), 2, "original item plus one deduped follow-up");
+    assert_eq!(
+        snapshot.len(),
+        2,
+        "original item plus one deduped follow-up"
+    );
 }
 
 // =============================================================================

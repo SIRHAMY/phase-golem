@@ -48,6 +48,7 @@ fn load_config_defaults_when_file_missing() {
     assert_eq!(config.guardrails.max_size, SizeLevel::Medium);
     assert_eq!(config.guardrails.max_complexity, DimensionLevel::Medium);
     assert_eq!(config.guardrails.max_risk, DimensionLevel::Low);
+    assert_eq!(config.guardrails.min_impact, None);
     assert_eq!(config.execution.phase_timeout_minutes, 30);
     assert_eq!(config.execution.max_retries, 2);
     assert_eq!(config.execution.default_phase_cap, 100);
@@ -67,6 +68,7 @@ prefix = "APP"
 max_size = "large"
 max_complexity = "high"
 max_risk = "medium"
+min_impact = "medium"
 
 [execution]
 phase_timeout_minutes = 60
@@ -82,6 +84,7 @@ default_phase_cap = 50
     assert_eq!(config.guardrails.max_size, SizeLevel::Large);
     assert_eq!(config.guardrails.max_complexity, DimensionLevel::High);
     assert_eq!(config.guardrails.max_risk, DimensionLevel::Medium);
+    assert_eq!(config.guardrails.min_impact, Some(DimensionLevel::Medium));
     assert_eq!(config.execution.phase_timeout_minutes, 60);
     assert_eq!(config.execution.max_retries, 5);
     assert_eq!(config.execution.default_phase_cap, 50);
@@ -106,6 +109,7 @@ prefix = "CUSTOM"
     // Guardrails and execution should use defaults
     assert_eq!(config.guardrails.max_size, SizeLevel::Medium);
     assert_eq!(config.guardrails.max_risk, DimensionLevel::Low);
+    assert_eq!(config.guardrails.min_impact, None);
     assert_eq!(config.execution.phase_timeout_minutes, 30);
     assert_eq!(config.execution.max_retries, 2);
 }
@@ -496,6 +500,7 @@ fn load_config_from_none_delegates_to_load_config() {
     assert_eq!(config.guardrails.max_size, SizeLevel::Medium);
     assert_eq!(config.guardrails.max_complexity, DimensionLevel::Medium);
     assert_eq!(config.guardrails.max_risk, DimensionLevel::Low);
+    assert_eq!(config.guardrails.min_impact, None);
     assert_eq!(config.execution.phase_timeout_minutes, 30);
     assert_eq!(config.execution.max_retries, 2);
     assert_eq!(config.execution.default_phase_cap, 100);
@@ -515,6 +520,7 @@ prefix = "CUSTOM"
 max_size = "large"
 max_complexity = "high"
 max_risk = "medium"
+min_impact = "high"
 
 [execution]
 phase_timeout_minutes = 45
@@ -530,6 +536,7 @@ default_phase_cap = 75
     assert_eq!(config.guardrails.max_size, SizeLevel::Large);
     assert_eq!(config.guardrails.max_complexity, DimensionLevel::High);
     assert_eq!(config.guardrails.max_risk, DimensionLevel::Medium);
+    assert_eq!(config.guardrails.min_impact, Some(DimensionLevel::High));
     assert_eq!(config.execution.phase_timeout_minutes, 45);
     assert_eq!(config.execution.max_retries, 3);
     assert_eq!(config.execution.default_phase_cap, 75);
@@ -963,6 +970,7 @@ prefix = "WRK"
 max_size = "medium"
 max_complexity = "medium"
 max_risk = "low"
+# min_impact = "medium"
 
 [execution]
 phase_timeout_minutes = 30

@@ -12,6 +12,8 @@ prefix = "WRK"
 max_size = "medium"         # small, medium, large
 max_complexity = "medium"   # low, medium, high
 max_risk = "low"            # low, medium, high
+# Optional: park items below this impact threshold during triage
+# min_impact = "medium"      # low, medium, high
 
 [execution]
 phase_timeout_minutes = 30  # Kill a phase after this many minutes

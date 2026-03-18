@@ -882,6 +882,72 @@ async fn triage_small_low_risk_promotes_to_ready() {
 }
 
 #[tokio::test]
+async fn triage_below_min_impact_parks_item() {
+    let item = make_item("WRK-001", "Low-value polish", ItemStatus::New);
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
+
+    let mut config = default_config();
+    config.guardrails.min_impact = Some(DimensionLevel::High);
+
+    let triage_result = triage_result_with_assessments("WRK-001");
+    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
+        .await
+        .expect("apply_triage_result should succeed");
+
+    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
+
+    assert_eq!(item.pg_status(), ItemStatus::Parked);
+    assert_eq!(item.impact(), Some(DimensionLevel::Medium));
+}
+
+#[tokio::test]
+async fn triage_at_min_impact_does_not_park_item() {
+    let item = make_item("WRK-001", "Medium-value work", ItemStatus::New);
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
+
+    let mut config = default_config();
+    config.guardrails.min_impact = Some(DimensionLevel::Medium);
+
+    let triage_result = triage_result_with_assessments("WRK-001");
+    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
+        .await
+        .expect("apply_triage_result should succeed");
+
+    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
+
+    assert_eq!(item.pg_status(), ItemStatus::Ready);
+}
+
+#[tokio::test]
+async fn triage_missing_impact_does_not_park_item() {
+    let item = make_item("WRK-001", "Missing impact", ItemStatus::New);
+    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
+
+    let mut config = default_config();
+    config.guardrails.min_impact = Some(DimensionLevel::Medium);
+
+    let mut triage_result = triage_result_with_assessments("WRK-001");
+    triage_result.updated_assessments = Some(UpdatedAssessments {
+        size: Some(SizeLevel::Small),
+        complexity: Some(DimensionLevel::Low),
+        risk: Some(DimensionLevel::Low),
+        impact: None,
+    });
+
+    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
+        .await
+        .expect("apply_triage_result should succeed");
+
+    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
+    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
+
+    assert_eq!(item.pg_status(), ItemStatus::Ready);
+    assert_eq!(item.impact(), None);
+}
+
+#[tokio::test]
 async fn triage_large_item_goes_to_scoping_with_pre_phase() {
     let item = make_item("WRK-001", "Big feature", ItemStatus::New);
     let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);

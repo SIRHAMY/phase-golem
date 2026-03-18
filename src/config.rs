@@ -27,6 +27,7 @@ pub struct GuardrailsConfig {
     pub max_size: SizeLevel,
     pub max_complexity: DimensionLevel,
     pub max_risk: DimensionLevel,
+    pub min_impact: Option<DimensionLevel>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -168,6 +169,7 @@ impl Default for GuardrailsConfig {
             max_size: SizeLevel::Medium,
             max_complexity: DimensionLevel::Medium,
             max_risk: DimensionLevel::Low,
+            min_impact: None,
         }
     }
 }
