@@ -358,7 +358,7 @@ fn validate_duplicate_ids(items: &[PgItem]) -> Vec<PreflightError> {
 /// Validate that the dependency graph has no dangling references or cycles.
 ///
 /// Dangling references: an item depends on an ID that doesn't exist in the backlog.
-/// Cycles: a set of non-Done items form a circular dependency chain.
+/// Cycles: a set of non-terminal items form a circular dependency chain.
 pub fn validate_dependency_graph(items: &[PgItem]) -> Vec<PreflightError> {
     let mut errors = Vec::new();
 
@@ -387,10 +387,10 @@ pub fn validate_dependency_graph(items: &[PgItem]) -> Vec<PreflightError> {
         }
     }
 
-    // Filter to non-Done items for cycle detection
+    // Filter to non-terminal items for cycle detection
     let non_done_items: Vec<&PgItem> = items
         .iter()
-        .filter(|item| item.pg_status() != ItemStatus::Done)
+        .filter(|item| !matches!(item.pg_status(), ItemStatus::Done | ItemStatus::Parked))
         .collect();
 
     for cycle in detect_cycles(&non_done_items) {

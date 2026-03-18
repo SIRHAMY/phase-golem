@@ -544,19 +544,24 @@ async fn handle_run(
         .iter()
         .filter(|i| i.pg_status() == ItemStatus::Blocked)
         .count();
+    let parked_count = items
+        .iter()
+        .filter(|i| i.pg_status() == ItemStatus::Parked)
+        .count();
     let done_count = items
         .iter()
         .filter(|i| i.pg_status() == ItemStatus::Done)
         .count();
     log_info!("");
     log_info!(
-        "[backlog] {} items: {} new, {} scoping, {} ready, {} in-progress, {} blocked, {} done",
+        "[backlog] {} items: {} new, {} scoping, {} ready, {} in-progress, {} blocked, {} parked, {} done",
         items.len(),
         new_count,
         scoping_count,
         ready_count,
         in_progress_count,
         blocked_count,
+        parked_count,
         done_count,
     );
 
@@ -746,7 +751,7 @@ async fn handle_run(
         scheduler::HaltReason::FilterExhausted => {
             if let Some(ref filter_str) = filter_display {
                 log_info!(
-                    "Filter: all items matching {} are done or blocked",
+                    "Filter: all items matching {} are done, parked, or blocked",
                     filter_str
                 );
             }
@@ -1129,7 +1134,8 @@ fn status_sort_priority(status: &ItemStatus) -> u8 {
         ItemStatus::Ready => 2,
         ItemStatus::Scoping => 3,
         ItemStatus::New => 4,
-        ItemStatus::Done => 5,
+        ItemStatus::Parked => 5,
+        ItemStatus::Done => 6,
     }
 }
 

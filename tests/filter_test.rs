@@ -25,6 +25,13 @@ fn parse_filter_status() {
 }
 
 #[test]
+fn parse_filter_status_parked() {
+    let f = parse_filter("status=parked").unwrap();
+    assert_eq!(f.field, FilterField::Status);
+    assert_eq!(f.values, vec![FilterValue::Status(ItemStatus::Parked)]);
+}
+
+#[test]
 fn parse_filter_impact() {
     let f = parse_filter("impact=high").unwrap();
     assert_eq!(f.field, FilterField::Impact);

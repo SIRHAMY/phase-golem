@@ -1646,6 +1646,16 @@ fn test_unmet_dep_summary_no_unmet_deps() {
 }
 
 #[test]
+fn test_unmet_dep_summary_parked_dep_is_met() {
+    let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
+    item.0.dependencies = vec!["WRK-002".to_string()];
+    let dep = make_item("WRK-002", "Parked dep", ItemStatus::Parked);
+
+    let result = unmet_dep_summary(&item, &[item.clone(), dep]);
+    assert_eq!(result, None, "Parked deps should count as met");
+}
+
+#[test]
 fn test_unmet_dep_summary_single_unmet_dep() {
     let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
     item.0.dependencies = vec!["WRK-002".to_string()];
@@ -1815,6 +1825,24 @@ fn test_advance_skips_pre_blocked_targets() {
     assert_eq!(
         result, 1,
         "Should skip pre-Blocked WRK-001 and return index 1 for active WRK-002"
+    );
+}
+
+#[test]
+fn test_advance_skips_parked_targets() {
+    let parked_item = make_item("WRK-001", "Parked target", ItemStatus::Parked);
+    let active_item = make_in_progress_item("WRK-002", "Active target", "build");
+    let snapshot = vec![parked_item, active_item];
+
+    let result = advance_to_next_active_target(
+        &["WRK-001".to_string(), "WRK-002".to_string()],
+        0,
+        &[],
+        &snapshot,
+    );
+    assert_eq!(
+        result, 1,
+        "Should skip Parked WRK-001 and return index 1 for active WRK-002"
     );
 }
 

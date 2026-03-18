@@ -10,6 +10,7 @@ pub enum ItemStatus {
     Scoping,
     Ready,
     InProgress,
+    Parked,
     Done,
     Blocked,
 }
@@ -26,12 +27,17 @@ impl ItemStatus {
         use ItemStatus::*;
 
         // Any non-terminal, non-blocked status can transition to Blocked
-        if *to == Blocked && *self != Done && *self != Blocked {
+        if *to == Blocked && *self != Done && *self != Parked && *self != Blocked {
+            return true;
+        }
+
+        // Any active status can be parked as not worth pursuing further.
+        if *to == Parked && *self != Done && *self != Parked {
             return true;
         }
 
         // Blocked can return to any non-terminal status
-        if *self == Blocked && *to != Done && *to != Blocked {
+        if *self == Blocked && *to != Done && *to != Parked && *to != Blocked {
             return true;
         }
 
@@ -125,10 +131,11 @@ pub fn parse_item_status(s: &str) -> Result<ItemStatus, String> {
         "scoping" => Ok(ItemStatus::Scoping),
         "ready" => Ok(ItemStatus::Ready),
         "in_progress" => Ok(ItemStatus::InProgress),
+        "parked" => Ok(ItemStatus::Parked),
         "done" => Ok(ItemStatus::Done),
         "blocked" => Ok(ItemStatus::Blocked),
         _ => Err(format!(
-            "Invalid status '{}': expected new, scoping, ready, in_progress, done, or blocked",
+            "Invalid status '{}': expected new, scoping, ready, in_progress, parked, done, or blocked",
             s
         )),
     }

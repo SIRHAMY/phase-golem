@@ -55,6 +55,7 @@ impl std::fmt::Display for FilterValue {
                 ItemStatus::Scoping => write!(f, "scoping"),
                 ItemStatus::Ready => write!(f, "ready"),
                 ItemStatus::InProgress => write!(f, "in_progress"),
+                ItemStatus::Parked => write!(f, "parked"),
                 ItemStatus::Done => write!(f, "done"),
                 ItemStatus::Blocked => write!(f, "blocked"),
             },
@@ -78,7 +79,7 @@ fn parse_single_value(field: &FilterField, token: &str) -> Result<FilterValue, S
         FilterField::Status => {
             let status = parse_item_status(token).map_err(|_| {
                 format!(
-                    "Invalid value '{}' for field 'status'. Valid values: new, scoping, ready, in_progress, done, blocked",
+                    "Invalid value '{}' for field 'status'. Valid values: new, scoping, ready, in_progress, parked, done, blocked",
                     token
                 )
             })?;

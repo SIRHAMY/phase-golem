@@ -16,6 +16,7 @@ fn yaml_round_trip_item_status_all_variants() {
         ItemStatus::Scoping,
         ItemStatus::Ready,
         ItemStatus::InProgress,
+        ItemStatus::Parked,
         ItemStatus::Done,
         ItemStatus::Blocked,
     ];
@@ -198,6 +199,15 @@ fn valid_transitions_workflow() {
 }
 
 #[test]
+fn valid_transitions_to_parked() {
+    assert!(ItemStatus::New.is_valid_transition(&ItemStatus::Parked));
+    assert!(ItemStatus::Scoping.is_valid_transition(&ItemStatus::Parked));
+    assert!(ItemStatus::Ready.is_valid_transition(&ItemStatus::Parked));
+    assert!(ItemStatus::InProgress.is_valid_transition(&ItemStatus::Parked));
+    assert!(ItemStatus::Blocked.is_valid_transition(&ItemStatus::Parked));
+}
+
+#[test]
 fn valid_transitions_to_blocked() {
     assert!(ItemStatus::New.is_valid_transition(&ItemStatus::Blocked));
     assert!(ItemStatus::Scoping.is_valid_transition(&ItemStatus::Blocked));
@@ -228,7 +238,12 @@ fn invalid_transitions() {
 
     // Done is terminal (except for blocking, which is already excluded)
     assert!(!ItemStatus::Done.is_valid_transition(&ItemStatus::New));
+    assert!(!ItemStatus::Done.is_valid_transition(&ItemStatus::Parked));
     assert!(!ItemStatus::Done.is_valid_transition(&ItemStatus::Blocked));
+
+    // Parked is terminal
+    assert!(!ItemStatus::Parked.is_valid_transition(&ItemStatus::New));
+    assert!(!ItemStatus::Parked.is_valid_transition(&ItemStatus::Blocked));
 
     // Can't go from blocked to done
     assert!(!ItemStatus::Blocked.is_valid_transition(&ItemStatus::Done));

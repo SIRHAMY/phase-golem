@@ -75,6 +75,13 @@ fn pg_status_todo_with_ready() {
 }
 
 #[test]
+fn pg_status_todo_with_parked() {
+    let item = make_item_with_ext("x-pg-status", serde_json::json!("parked"));
+    let pg = PgItem(item);
+    assert_eq!(pg.pg_status(), ItemStatus::Parked);
+}
+
+#[test]
 fn pg_status_doing_maps_to_in_progress() {
     let mut item = make_test_item();
     item.status = Status::Doing;
@@ -166,6 +173,15 @@ fn set_pg_status_round_trip_in_progress() {
     let pg = PgItem(item);
     assert_eq!(pg.pg_status(), ItemStatus::InProgress);
     assert_eq!(pg.status(), Status::Doing);
+}
+
+#[test]
+fn set_pg_status_round_trip_parked() {
+    let mut item = make_test_item();
+    pg_item::set_pg_status(&mut item, ItemStatus::Parked);
+    let pg = PgItem(item);
+    assert_eq!(pg.pg_status(), ItemStatus::Parked);
+    assert_eq!(pg.status(), Status::Todo);
 }
 
 #[test]

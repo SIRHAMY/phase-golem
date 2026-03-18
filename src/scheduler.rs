@@ -356,7 +356,7 @@ fn sorted_new_items(items: &[PgItem]) -> Vec<&PgItem> {
 ///
 /// A dependency is met if:
 /// - The dep ID is not found in `all_items` (absent = archived = met)
-/// - The dep ID is found with status `Done`
+/// - The dep ID is found with status `Done` or `Parked`
 pub fn unmet_dep_summary(item: &PgItem, all_items: &[PgItem]) -> Option<String> {
     if item.dependencies().is_empty() {
         return None;
@@ -366,10 +366,12 @@ pub fn unmet_dep_summary(item: &PgItem, all_items: &[PgItem]) -> Option<String> 
         .iter()
         .filter_map(|dep_id| {
             match all_items.iter().find(|i| i.id() == dep_id) {
-                Some(dep_item) if dep_item.pg_status() != ItemStatus::Done => {
+                Some(dep_item)
+                    if !matches!(dep_item.pg_status(), ItemStatus::Done | ItemStatus::Parked) =>
+                {
                     Some(format!("{} ({:?})", dep_id, dep_item.pg_status()))
                 }
-                _ => None, // Done or absent = met
+                _ => None, // Done, parked, or absent = met
             }
         })
         .collect();
@@ -470,10 +472,10 @@ fn build_run_phase_action(
 
 // --- Multi-target advancement ---
 
-/// Advance past Done/Blocked/archived targets to find the next active target.
+/// Advance past Done/Parked/Blocked/archived targets to find the next active target.
 ///
 /// Returns the index of the next active target, or an index >= `targets.len()`
-/// if all targets are exhausted (Done, Blocked, or archived).
+/// if all targets are exhausted (Done, Parked, Blocked, or archived).
 ///
 /// Note: This skips targets with `ItemStatus::Blocked` in the snapshot (pre-existing
 /// blocked state) but does NOT check `items_blocked` (run-time blocked tracking).
@@ -500,10 +502,10 @@ pub fn advance_to_next_active_target(
             }
             Some(item)
                 if items_completed.contains(&item.id().to_string())
-                    || item.pg_status() == ItemStatus::Done =>
+                    || matches!(item.pg_status(), ItemStatus::Done | ItemStatus::Parked) =>
             {
                 log_info!(
-                    "[target] {} already done. Skipping ({}/{}).",
+                    "[target] {} already inactive. Skipping ({}/{}).",
                     target,
                     index + 1,
                     targets.len()
@@ -723,13 +725,18 @@ pub async fn run_scheduler(
                     return Ok(build_summary(state, HaltReason::FilterExhausted));
                 }
             }
-            // Check if all remaining filtered items are Done or Blocked
+            // Check if all remaining filtered items are Done, Parked, or Blocked
             let all_done_or_blocked = filtered
                 .iter()
-                .all(|i| matches!(i.pg_status(), ItemStatus::Done | ItemStatus::Blocked));
+                .all(|i| {
+                    matches!(
+                        i.pg_status(),
+                        ItemStatus::Done | ItemStatus::Parked | ItemStatus::Blocked
+                    )
+                });
             if all_done_or_blocked {
                 log_info!(
-                    "[filter] All items matching {} are done or blocked.",
+                    "[filter] All items matching {} are done, parked, or blocked.",
                     criteria_display
                 );
                 drain_join_set(
@@ -769,7 +776,7 @@ pub async fn run_scheduler(
             // Log items blocked by unmet dependencies for diagnostics
             let dep_blocked: Vec<String> = snapshot
                 .iter()
-                .filter(|i| i.pg_status() != ItemStatus::Done)
+                .filter(|i| !matches!(i.pg_status(), ItemStatus::Done | ItemStatus::Parked))
                 .filter_map(|i| {
                     unmet_dep_summary(i, &snapshot)
                         .map(|summary| format!("{} (waiting on: {})", i.id(), summary))
@@ -781,7 +788,7 @@ pub async fn run_scheduler(
                     dep_blocked.join("; ")
                 );
             }
-            log_info!("No actionable items — all done or blocked.");
+            log_info!("No actionable items — all done, parked, or blocked.");
             return Ok(build_summary(state, HaltReason::AllDoneOrBlocked));
         }
 
@@ -1015,8 +1022,11 @@ pub fn select_targeted_actions(
         return Vec::new();
     }
 
-    // If target is done or blocked and not running, nothing to do
-    if matches!(target.pg_status(), ItemStatus::Done | ItemStatus::Blocked)
+    // If target is done, parked, or blocked and not running, nothing to do
+    if matches!(
+        target.pg_status(),
+        ItemStatus::Done | ItemStatus::Parked | ItemStatus::Blocked
+    )
         && !running.is_item_running(target_id)
     {
         return Vec::new();
@@ -1045,7 +1055,7 @@ pub fn select_targeted_actions(
                 }
             }
         }
-        ItemStatus::Blocked | ItemStatus::Done => {
+        ItemStatus::Blocked | ItemStatus::Parked | ItemStatus::Done => {
             // Nothing to do
         }
     }
@@ -1407,12 +1417,12 @@ async fn process_merges(
     let current_num = parse_item_numeric_suffix(item_id);
 
     for dup_id in duplicates {
-        // Validate the duplicate exists and isn't Done
+        // Validate the duplicate exists and isn't terminal
         let snap = coordinator.get_snapshot().await?;
         let dup_item = match snap.iter().find(|i| i.id() == dup_id.as_str()) {
-            Some(item) if item.pg_status() == ItemStatus::Done => {
+            Some(item) if matches!(item.pg_status(), ItemStatus::Done | ItemStatus::Parked) => {
                 log_info!(
-                    "[{}] Skipping merge with {} (already done)",
+                    "[{}] Skipping merge with {} (already inactive)",
                     item_id,
                     dup_id
                 );

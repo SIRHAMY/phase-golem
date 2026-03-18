@@ -83,6 +83,7 @@ impl PgItem {
     /// - `Todo` + `x-pg-status: "new"` -> `New`
     /// - `Todo` + `x-pg-status: "scoping"` -> `Scoping`
     /// - `Todo` + `x-pg-status: "ready"` -> `Ready`
+    /// - `Todo` + `x-pg-status: "parked"` -> `Parked`
     /// - `Doing` -> `InProgress` (ignores stale `x-pg-status`)
     /// - `Done` -> `Done` (ignores stale `x-pg-status`)
     /// - `Blocked` -> `Blocked` (ignores stale `x-pg-status`)
@@ -94,6 +95,7 @@ impl PgItem {
                         "new" => ItemStatus::New,
                         "scoping" => ItemStatus::Scoping,
                         "ready" => ItemStatus::Ready,
+                        "parked" => ItemStatus::Parked,
                         other => {
                             crate::log_warn!(
                                 "Item {}: invalid x-pg-status value '{}', defaulting to New",
@@ -281,7 +283,7 @@ impl PgItem {
 /// For `InProgress`, `Done`, `Blocked`: sets the native status directly and clears
 /// the `x-pg-status` extension (it is only meaningful for `Todo` sub-states).
 ///
-/// For `New`, `Scoping`, `Ready`: sets native status to `Todo` and writes the
+/// For `New`, `Scoping`, `Ready`, `Parked`: sets native status to `Todo` and writes the
 /// sub-state string to `x-pg-status`.
 pub fn set_pg_status(item: &mut Item, status: ItemStatus) {
     let now = Utc::now();
@@ -300,6 +302,11 @@ pub fn set_pg_status(item: &mut Item, status: ItemStatus) {
             item.status = Status::Todo;
             item.extensions
                 .insert(X_PG_STATUS.to_string(), serde_json::json!("ready"));
+        }
+        ItemStatus::Parked => {
+            item.status = Status::Todo;
+            item.extensions
+                .insert(X_PG_STATUS.to_string(), serde_json::json!("parked"));
         }
         ItemStatus::InProgress => {
             item.status = Status::Doing;
@@ -411,6 +418,7 @@ pub fn set_blocked_from_status(item: &mut Item, status: Option<&ItemStatus>) {
             ItemStatus::New => "new",
             ItemStatus::Scoping => "scoping",
             ItemStatus::Ready => "ready",
+            ItemStatus::Parked => "parked",
             ItemStatus::InProgress => "in_progress",
             ItemStatus::Done => "done",
             ItemStatus::Blocked => "blocked",
@@ -418,7 +426,9 @@ pub fn set_blocked_from_status(item: &mut Item, status: Option<&ItemStatus>) {
     );
     // Keep native blocked_from_status in sync (lossy: New/Scoping/Ready -> Todo)
     item.blocked_from_status = status.map(|s| match s {
-        ItemStatus::New | ItemStatus::Scoping | ItemStatus::Ready => Status::Todo,
+        ItemStatus::New | ItemStatus::Scoping | ItemStatus::Ready | ItemStatus::Parked => {
+            Status::Todo
+        }
         ItemStatus::InProgress => Status::Doing,
         ItemStatus::Done => Status::Done,
         ItemStatus::Blocked => Status::Blocked,
@@ -601,6 +611,10 @@ pub fn new_from_parts(
             extensions.insert(X_PG_STATUS.to_string(), serde_json::json!("ready"));
             Status::Todo
         }
+        ItemStatus::Parked => {
+            extensions.insert(X_PG_STATUS.to_string(), serde_json::json!("parked"));
+            Status::Todo
+        }
         ItemStatus::InProgress => Status::Doing,
         ItemStatus::Done => Status::Done,
         ItemStatus::Blocked => Status::Blocked,
@@ -675,6 +689,7 @@ fn parse_blocked_from_status(item_id: &str, s: &str) -> Option<ItemStatus> {
         "scoping" => Some(ItemStatus::Scoping),
         "ready" => Some(ItemStatus::Ready),
         "in_progress" => Some(ItemStatus::InProgress),
+        "parked" => Some(ItemStatus::Parked),
         other => {
             crate::log_warn!(
                 "Item {}: invalid x-pg-blocked-from-status value '{}', treating as absent",
