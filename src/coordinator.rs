@@ -577,11 +577,20 @@ async fn handle_ingest_follow_ups(
             .with_lock(|s| {
                 let mut items = s.load_active()?;
                 let known_ids = s.all_known_ids()?;
+                let mut seen_follow_up_keys: std::collections::HashSet<String> = items
+                    .iter()
+                    .map(|item| normalized_follow_up_title(&item.title))
+                    .collect();
 
                 let mut new_ids = Vec::new();
                 let mut current_known = known_ids;
 
                 for fu in &follow_ups {
+                    let normalized_title = normalized_follow_up_title(&fu.title);
+                    if !seen_follow_up_keys.insert(normalized_title) {
+                        continue;
+                    }
+
                     let id =
                         generate_id_with_prefix(&current_known, &prefix).map_err(|e| match e {
                             task_golem::errors::TgError::IdCollisionExhausted(n) => {
@@ -633,6 +642,33 @@ async fn handle_ingest_follow_ups(
             .map_err(PgError::from)
     })
     .await
+}
+
+fn normalized_follow_up_title(title: &str) -> String {
+    let mut normalized = String::with_capacity(title.len());
+    let mut previous_was_separator = true;
+
+    for ch in title.chars() {
+        if ch.is_alphanumeric() {
+            for lower in ch.to_lowercase() {
+                normalized.push(lower);
+            }
+            previous_was_separator = false;
+        } else if !previous_was_separator {
+            normalized.push(' ');
+            previous_was_separator = true;
+        }
+    }
+
+    if normalized.ends_with(' ') {
+        normalized.pop();
+    }
+
+    if normalized.is_empty() {
+        title.trim().to_lowercase()
+    } else {
+        normalized
+    }
 }
 
 async fn handle_unblock_item(

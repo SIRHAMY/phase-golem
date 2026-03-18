@@ -1037,6 +1037,62 @@ async fn ingest_follow_ups_persists_to_disk() {
     assert_eq!(fu.title, "Persisted follow-up");
 }
 
+#[tokio::test]
+async fn ingest_follow_ups_skips_existing_titles_across_phases() {
+    let mut existing = common::make_pg_item("WRK-001", ItemStatus::New);
+    existing.0.title = "Multi-client SSE disconnect test".to_string();
+
+    let (handle, _task, _dir) = setup_coordinator_with_items(vec![existing]);
+
+    let follow_ups = vec![FollowUp {
+        title: "multi client sse disconnect test".to_string(),
+        context: Some("Raised again during review".to_string()),
+        suggested_size: Some(SizeLevel::Small),
+        suggested_risk: Some(DimensionLevel::Low),
+    }];
+
+    let new_ids = handle
+        .ingest_follow_ups(follow_ups, "WRK-099/review")
+        .await
+        .unwrap();
+
+    assert!(new_ids.is_empty(), "duplicate follow-up should be skipped");
+
+    let snapshot = handle.get_snapshot().await.unwrap();
+    assert_eq!(snapshot.len(), 1, "no duplicate item should be created");
+}
+
+#[tokio::test]
+async fn ingest_follow_ups_skips_duplicates_within_same_batch() {
+    let (handle, _task, _dir) =
+        setup_coordinator_with_items(vec![common::make_pg_item("WRK-001", ItemStatus::New)]);
+
+    let follow_ups = vec![
+        FollowUp {
+            title: "Add disconnect regression test".to_string(),
+            context: Some("From spec".to_string()),
+            suggested_size: None,
+            suggested_risk: None,
+        },
+        FollowUp {
+            title: "add disconnect regression test!!!".to_string(),
+            context: Some("From build".to_string()),
+            suggested_size: Some(SizeLevel::Small),
+            suggested_risk: Some(DimensionLevel::Low),
+        },
+    ];
+
+    let new_ids = handle
+        .ingest_follow_ups(follow_ups, "WRK-001/build")
+        .await
+        .unwrap();
+
+    assert_eq!(new_ids.len(), 1, "only one normalized title should be created");
+
+    let snapshot = handle.get_snapshot().await.unwrap();
+    assert_eq!(snapshot.len(), 2, "original item plus one deduped follow-up");
+}
+
 // =============================================================================
 // MergeItem tests
 // =============================================================================
