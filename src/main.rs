@@ -178,9 +178,10 @@ fn log_agent_config(agent: &config::AgentConfig) {
 }
 
 /// Validates an item ID format: must be `{prefix}-{suffix}` where prefix is
-/// alphanumeric and suffix is either all-numeric (legacy WRK-001) or valid hex
-/// (WRK-a1b2c). Accepts any prefix — the store can contain items with different
-/// prefixes (e.g., `tg-` from direct `tg add`, project prefix from phase-golem).
+/// alphanumeric and suffix is alphanumeric (Crockford Base32 from task-golem,
+/// numeric legacy IDs, or hex). Accepts any prefix — the store can contain items
+/// with different prefixes (e.g., `tg-` from direct `tg add`, project prefix
+/// from phase-golem).
 fn is_valid_item_id(id: &str) -> bool {
     let Some((prefix, suffix)) = id.split_once('-') else {
         return false;
@@ -191,7 +192,7 @@ fn is_valid_item_id(id: &str) -> bool {
     if !prefix.chars().all(|c| c.is_ascii_alphanumeric()) {
         return false;
     }
-    suffix.chars().all(|c| c.is_ascii_hexdigit())
+    suffix.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 fn handle_init(root: &Path, prefix: &str) -> Result<(), String> {
@@ -1199,6 +1200,13 @@ mod tests {
     }
 
     #[test]
+    fn is_valid_item_id_accepts_crockford_base32() {
+        assert!(is_valid_item_id("tg-edfay"));
+        assert!(is_valid_item_id("tg-k9m3v"));
+        assert!(is_valid_item_id("WRK-rstvw"));
+    }
+
+    #[test]
     fn is_valid_item_id_accepts_any_prefix() {
         assert!(is_valid_item_id("tg-a1b2c"));
         assert!(is_valid_item_id("HAMY-5c0f8"));
@@ -1210,7 +1218,7 @@ mod tests {
         assert!(!is_valid_item_id("WRK-"));
         assert!(!is_valid_item_id("WRK"));
         assert!(!is_valid_item_id("-001"));
-        assert!(!is_valid_item_id("WRK-g1h2")); // 'g' and 'h' are not hex
+        assert!(!is_valid_item_id("WRK-ab_cd")); // underscore not alphanumeric
     }
 
     #[tokio::test]
