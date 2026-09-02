@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use task_golem::model::status::Status;
 
 use crate::config::PhaseGolemConfig;
+use crate::coordinator::WorkSnapshot;
 use crate::pg_item::PgItem;
-use crate::types::{ItemStatus, PhasePool};
+use crate::types::PhasePool;
 
 /// A single preflight validation error with actionable context.
 #[derive(Debug, Clone, PartialEq)]
@@ -31,14 +33,14 @@ impl std::fmt::Display for PreflightError {
 /// Phases:
 /// 1. Structural validation — config correctness (fast, no I/O)
 /// 2. Workflow probe — verify referenced workflow files exist on disk
-/// 3. Item validation — in-progress items reference valid pipelines/phases (skipped when Phase 1 finds structural errors)
+/// 3. Item validation — claimed items reference valid pipelines/phases (skipped when Phase 1 finds structural errors)
 /// 4. Duplicate ID validation — ensure no two items share the same ID
-/// 5. Dependency graph validation — detect dangling references and circular dependencies
+/// 5. TG dependency integrity — report missing dependency references from the snapshot
 ///
 /// Returns `Ok(())` if all checks pass, or `Err(Vec<PreflightError>)` with all errors.
 pub fn run_preflight(
     config: &PhaseGolemConfig,
-    items: &[PgItem],
+    snapshot: &WorkSnapshot,
     project_root: &Path,
     config_base: &Path,
 ) -> Result<(), Vec<PreflightError>> {
@@ -68,14 +70,27 @@ pub fn run_preflight(
 
     // Phase 3: Item validation
     if structural_ok {
-        errors.extend(validate_items(config, items));
+        errors.extend(validate_items(config, snapshot));
     }
 
     // Phase 4: Duplicate ID validation
-    errors.extend(validate_duplicate_ids(items));
+    errors.extend(validate_duplicate_ids(snapshot));
 
-    // Phase 5: Dependency graph validation
-    errors.extend(validate_dependency_graph(items));
+    errors.extend(
+        snapshot
+            .dependency_evaluation
+            .integrity_issues
+            .iter()
+            .map(|issue| PreflightError {
+                condition: format!(
+                    "Item '{}' has missing dependency '{}'",
+                    issue.item_id, issue.dependency_id
+                ),
+                config_location: format!("task-golem item {} dependencies", issue.item_id),
+                suggested_fix: "Repair the dependency through Task Golem before running PG"
+                    .to_string(),
+            }),
+    );
 
     if errors.is_empty() {
         Ok(())
@@ -235,14 +250,13 @@ fn probe_workflows(config: &PhaseGolemConfig, project_root: &Path) -> Vec<Prefli
 
 // --- Phase 3: Item validation ---
 
-/// Validate that in-progress and scoping items reference valid pipeline/phase combos.
+/// Validate that claimed items reference valid pipeline and phase combinations.
 fn validate_items(config: &PhaseGolemConfig, items: &[PgItem]) -> Vec<PreflightError> {
     let mut errors = Vec::new();
 
     for item in items {
         // Only validate items that are actively being processed
-        let status = item.pg_status();
-        if status != ItemStatus::InProgress && status != ItemStatus::Scoping {
+        if item.status() != Status::Doing {
             continue;
         }
 
@@ -351,139 +365,4 @@ fn validate_duplicate_ids(items: &[PgItem]) -> Vec<PreflightError> {
             suggested_fix: "Remove or rename the duplicate item so each ID is unique".to_string(),
         })
         .collect()
-}
-
-// --- Phase 5: Dependency graph validation ---
-
-/// Validate that the dependency graph has no dangling references or cycles.
-///
-/// Dangling references: an item depends on an ID that doesn't exist in the backlog.
-/// Cycles: a set of non-terminal items form a circular dependency chain.
-pub fn validate_dependency_graph(items: &[PgItem]) -> Vec<PreflightError> {
-    let mut errors = Vec::new();
-
-    // Build set of all item IDs for dangling reference detection
-    let all_ids: HashSet<&str> = items.iter().map(|item| item.id()).collect();
-
-    // Check for dangling references
-    for item in items {
-        for dep_id in item.dependencies() {
-            if !all_ids.contains(dep_id.as_str()) {
-                errors.push(PreflightError {
-                    condition: format!(
-                        "Item '{}' depends on '{}' which does not exist in the backlog",
-                        item.id(), dep_id
-                    ),
-                    config_location: format!(
-                        "items → {} → dependencies",
-                        item.id()
-                    ),
-                    suggested_fix: format!(
-                        "Remove '{}' from {}'s dependencies, or add the missing item to the backlog",
-                        dep_id, item.id()
-                    ),
-                });
-            }
-        }
-    }
-
-    // Filter to non-terminal items for cycle detection
-    let non_done_items: Vec<&PgItem> = items
-        .iter()
-        .filter(|item| !matches!(item.pg_status(), ItemStatus::Done | ItemStatus::Parked))
-        .collect();
-
-    for cycle in detect_cycles(&non_done_items) {
-        let path = cycle.join(" → ");
-        let cycle_items = cycle[..cycle.len() - 1].join(", ");
-        errors.push(PreflightError {
-            condition: format!("Circular dependency detected: {}", path),
-            config_location: "BACKLOG.yaml → items → dependencies".to_string(),
-            suggested_fix: format!(
-                "Remove one dependency in the cycle to break it: {}",
-                cycle_items
-            ),
-        });
-    }
-
-    errors
-}
-
-/// DFS three-color cycle detection on non-Done items.
-///
-/// Returns each cycle as a path like `["A", "B", "C", "A"]`.
-fn detect_cycles(items: &[&PgItem]) -> Vec<Vec<String>> {
-    #[derive(Clone, Copy, PartialEq)]
-    enum VisitState {
-        Unvisited,
-        InStack,
-        Done,
-    }
-
-    let item_ids: HashSet<&str> = items.iter().map(|item| item.id()).collect();
-    let mut state: HashMap<&str, VisitState> = items
-        .iter()
-        .map(|item| (item.id(), VisitState::Unvisited))
-        .collect();
-    let mut cycles = Vec::new();
-
-    fn dfs<'a>(
-        item_id: &'a str,
-        items: &'a [&PgItem],
-        item_ids: &HashSet<&str>,
-        state: &mut HashMap<&'a str, VisitState>,
-        path: &mut Vec<&'a str>,
-        cycles: &mut Vec<Vec<String>>,
-    ) {
-        state.insert(item_id, VisitState::InStack);
-        path.push(item_id);
-
-        let item = items
-            .iter()
-            .find(|i| i.id() == item_id)
-            .expect("BUG: DFS called with item_id not in items slice");
-        for dep_id in item.dependencies() {
-            // Skip edges to IDs not in our non-Done item set (dangling refs caught separately)
-            if !item_ids.contains(dep_id.as_str()) {
-                continue;
-            }
-
-            match state.get(dep_id.as_str()) {
-                Some(VisitState::InStack) => {
-                    // Found a back-edge — extract cycle from path
-                    let cycle_start = path
-                        .iter()
-                        .position(|&id| id == dep_id.as_str())
-                        .expect("BUG: InStack node not found in path during cycle detection");
-                    let mut cycle: Vec<String> =
-                        path[cycle_start..].iter().map(|&s| s.to_string()).collect();
-                    cycle.push(dep_id.clone());
-                    cycles.push(cycle);
-                }
-                Some(VisitState::Unvisited) => {
-                    dfs(dep_id, items, item_ids, state, path, cycles);
-                }
-                _ => {} // Done — already fully explored
-            }
-        }
-
-        path.pop();
-        state.insert(item_id, VisitState::Done);
-    }
-
-    for item in items {
-        if state.get(item.id()) == Some(&VisitState::Unvisited) {
-            let mut path = Vec::new();
-            dfs(
-                item.id(),
-                items,
-                &item_ids,
-                &mut state,
-                &mut path,
-                &mut cycles,
-            );
-        }
-    }
-
-    cycles
 }

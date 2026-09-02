@@ -1,2922 +1,941 @@
 mod common;
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{BTreeMap, VecDeque};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use task_golem::model::item::Item;
-
-use phase_golem::agent::MockAgentRunner;
+use phase_golem::agent::{TrustedExecutionRequest, TrustedExecutorAdapter};
 use phase_golem::config::{
-    default_feature_pipeline, ExecutionConfig, PhaseConfig, PhaseGolemConfig, PipelineConfig,
+    PhaseGolemConfig, PublicExecutionPolicy, TrustedExecutorProfile, VerificationPlan,
 };
-use phase_golem::coordinator;
-use phase_golem::filter;
-use phase_golem::pg_item::{self, PgItem};
+use phase_golem::coordinator::spawn_coordinator;
+use phase_golem::executor::DeterministicVerifier;
+use phase_golem::pg_item::{
+    X_PG_EXECUTION_POLICY, X_PG_EXECUTOR_PROFILE, X_PG_HUMAN_DECISION, X_PG_OWNER,
+    X_PG_TEMPLATE_NODE_KEY, X_PG_VERIFICATION,
+};
 use phase_golem::scheduler::{
-    self, advance_to_next_active_target, select_actions, select_targeted_actions,
-    unmet_dep_summary, HaltReason, RunParams, RunningTasks,
+    run_foreground_supervisor, run_scheduled_wakeup, HaltReason, RunParams,
 };
-use phase_golem::types::{
-    DimensionLevel, FollowUp, ItemStatus, PhasePool, PhaseResult, ResultCode, SchedulerAction,
-    SizeLevel, StructuredDescription, UpdatedAssessments,
-};
+use phase_golem::types::TrustedResultCode;
+use task_golem::model::item::Item;
+use task_golem::model::status::Status;
+use tokio_util::sync::CancellationToken;
 
-// --- Test helpers ---
+const PROFILE: &str = "test-executor";
+const PHASE: &str = "build";
 
-fn make_item(id: &str, title: &str, status: ItemStatus) -> PgItem {
-    pg_item::new_from_parts(id.to_string(), title.to_string(), status, vec![], vec![])
+struct FakeAdapter {
+    responses: Mutex<VecDeque<Result<String, String>>>,
+    active_invocations: Arc<AtomicUsize>,
+    peak_invocations: Arc<AtomicUsize>,
+    invoked_item_ids: Arc<Mutex<Vec<String>>>,
+    execution_started: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    discovery_created: Mutex<Option<tokio::sync::oneshot::Receiver<String>>>,
+    discovered_item_id: Arc<Mutex<Option<String>>>,
 }
 
-fn make_in_progress_item(id: &str, title: &str, phase: &str) -> PgItem {
-    let mut pg = make_item(id, title, ItemStatus::InProgress);
-    pg_item::set_phase(&mut pg.0, Some(phase));
-    pg_item::set_phase_pool(&mut pg.0, Some(&PhasePool::Main));
-    pg
-}
-
-fn make_scoping_item(id: &str, title: &str, phase: &str) -> PgItem {
-    let mut pg = make_item(id, title, ItemStatus::Scoping);
-    pg_item::set_phase(&mut pg.0, Some(phase));
-    pg_item::set_phase_pool(&mut pg.0, Some(&PhasePool::Pre));
-    pg
-}
-
-fn make_ready_item(id: &str, title: &str, impact: Option<DimensionLevel>) -> PgItem {
-    let mut pg = make_item(id, title, ItemStatus::Ready);
-    if let Some(ref level) = impact {
-        pg_item::set_impact(&mut pg.0, Some(level));
+impl FakeAdapter {
+    fn new(responses: Vec<Result<String, String>>) -> Self {
+        Self {
+            responses: Mutex::new(responses.into()),
+            active_invocations: Arc::new(AtomicUsize::new(0)),
+            peak_invocations: Arc::new(AtomicUsize::new(0)),
+            invoked_item_ids: Arc::new(Mutex::new(Vec::new())),
+            execution_started: None,
+            discovery_created: Mutex::new(None),
+            discovered_item_id: Arc::new(Mutex::new(None)),
+        }
     }
-    pg
+
+    fn with_discovery_harness(
+        mut self,
+        execution_started: tokio::sync::mpsc::UnboundedSender<String>,
+        discovery_created: tokio::sync::oneshot::Receiver<String>,
+    ) -> Self {
+        self.execution_started = Some(execution_started);
+        self.discovery_created = Mutex::new(Some(discovery_created));
+        self
+    }
+
+    fn peak_invocations(&self) -> usize {
+        self.peak_invocations.load(Ordering::SeqCst)
+    }
+
+    fn invoked_item_ids(&self) -> Vec<String> {
+        self.invoked_item_ids
+            .lock()
+            .expect("invoked item IDs lock")
+            .clone()
+    }
 }
 
-fn default_config() -> PhaseGolemConfig {
+impl TrustedExecutorAdapter for FakeAdapter {
+    fn invoke(
+        &self,
+        _profile: &TrustedExecutorProfile,
+        request: &TrustedExecutionRequest,
+    ) -> impl std::future::Future<Output = Result<String, String>> + Send {
+        let discovery_created = self
+            .discovery_created
+            .lock()
+            .expect("discovery completion lock")
+            .take();
+        if discovery_created.is_some() {
+            let execution_started = self
+                .execution_started
+                .as_ref()
+                .expect("discovery harness is configured");
+            execution_started
+                .send(request.item_id.clone())
+                .expect("discovery harness receives execution start");
+        }
+
+        let response = if self.execution_started.is_some() {
+            Ok(result_payload(
+                &request.item_id,
+                TrustedResultCode::Complete,
+            ))
+        } else {
+            self.responses
+                .lock()
+                .expect("responses lock")
+                .pop_front()
+                .expect("configured executor response")
+        };
+        let active_invocations = self.active_invocations.clone();
+        let peak_invocations = self.peak_invocations.clone();
+        let invoked_item_ids = self.invoked_item_ids.clone();
+        let discovered_item_id = self.discovered_item_id.clone();
+        let request_id = request.item_id.clone();
+
+        async move {
+            let response = if let Some(discovery_created) = discovery_created {
+                let discovered_id = discovery_created
+                    .await
+                    .map_err(|_| "discovery harness stopped before creating work".to_string())?;
+                *discovered_item_id.lock().expect("discovered item ID lock") = Some(discovered_id);
+                response
+            } else if response
+                .as_ref()
+                .is_ok_and(|payload| payload.contains(common::ID_3))
+            {
+                let discovered_id = discovered_item_id
+                    .lock()
+                    .expect("discovered item ID lock")
+                    .clone()
+                    .expect("discovered item ID is available");
+                Ok(result_payload(&discovered_id, TrustedResultCode::Complete))
+            } else {
+                response
+            };
+            let executing = active_invocations.fetch_add(1, Ordering::SeqCst) + 1;
+            peak_invocations.fetch_max(executing, Ordering::SeqCst);
+            invoked_item_ids
+                .lock()
+                .expect("invoked item IDs lock")
+                .push(request_id);
+            tokio::task::yield_now().await;
+            active_invocations.fetch_sub(1, Ordering::SeqCst);
+            response
+        }
+    }
+}
+
+struct PassingVerifier;
+
+impl DeterministicVerifier for PassingVerifier {
+    async fn verify(
+        &self,
+        _plan: &VerificationPlan,
+        _request: &TrustedExecutionRequest,
+        _executor_evidence: &[String],
+    ) -> Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
+}
+
+struct BlockingAdapter {
+    execution_started: tokio::sync::mpsc::UnboundedSender<String>,
+}
+
+struct BlockingVerifier {
+    verification_started: tokio::sync::mpsc::UnboundedSender<String>,
+}
+
+struct CancelAfterVerification {
+    cancellation: CancellationToken,
+}
+
+impl DeterministicVerifier for BlockingVerifier {
+    fn verify(
+        &self,
+        _plan: &VerificationPlan,
+        request: &TrustedExecutionRequest,
+        _executor_evidence: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<String>, String>> + Send {
+        self.verification_started
+            .send(request.item_id.clone())
+            .expect("shutdown test receives verification start");
+        std::future::pending()
+    }
+}
+
+impl DeterministicVerifier for CancelAfterVerification {
+    async fn verify(
+        &self,
+        _plan: &VerificationPlan,
+        _request: &TrustedExecutionRequest,
+        _executor_evidence: &[String],
+    ) -> Result<Vec<String>, String> {
+        let cancellation = self.cancellation.clone();
+        tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            cancellation.cancel();
+        });
+        Ok(Vec::new())
+    }
+}
+
+impl TrustedExecutorAdapter for BlockingAdapter {
+    fn invoke(
+        &self,
+        _profile: &TrustedExecutorProfile,
+        request: &TrustedExecutionRequest,
+    ) -> impl std::future::Future<Output = Result<String, String>> + Send {
+        self.execution_started
+            .send(request.item_id.clone())
+            .expect("shutdown test receives execution start");
+        std::future::pending()
+    }
+}
+
+#[tokio::test]
+async fn foreground_loop_drains_ready_work_sequentially_and_discovers_new_work() {
+    // Arrange
+    let directory = common::setup_test_env();
+    initialize_task_golem_project(directory.path());
+    let store = common::setup_task_golem_store(directory.path());
+    let first = materialized_item(common::ID_1, Vec::new(), false);
+    let second = materialized_item(common::ID_2, vec![common::ID_1.to_string()], false);
+    store
+        .save_active(&[first, second])
+        .expect("seed workflow work");
+    commit_task_golem_seed(directory.path());
+    let (coordinator, _task) = spawn_coordinator(store.clone(), directory.path().to_path_buf());
+    let (execution_started, mut execution_starts) = tokio::sync::mpsc::unbounded_channel();
+    let (discovery_created, discovery_complete) = tokio::sync::oneshot::channel();
+    let adapter =
+        FakeAdapter::new(Vec::new()).with_discovery_harness(execution_started, discovery_complete);
+    let discovery_root = directory.path().to_path_buf();
+    let discovery_harness = tokio::spawn(async move {
+        execution_starts
+            .recv()
+            .await
+            .expect("trusted adapter starts first execution");
+        let discovered_id = tokio::task::spawn_blocking(move || {
+            create_discovered_item_through_tg_crud(&discovery_root)
+        })
+        .await
+        .expect("discovery harness task")
+        .expect("create discovered work through TG CRUD");
+        discovery_created
+            .send(discovered_id.clone())
+            .expect("trusted adapter waits for discovered work");
+        discovered_id
+    });
+
+    // Act
+    let summary = run_foreground_supervisor(
+        coordinator,
+        &config(),
+        &run_params(10),
+        &CancellationToken::new(),
+        &adapter,
+        &PassingVerifier,
+    )
+    .await
+    .expect("foreground supervisor result");
+    let discovered_id = discovery_harness
+        .await
+        .expect("discovery harness completes");
+
+    // Assert
+    assert_eq!(summary.halt_reason, HaltReason::SelectedScopeComplete);
+    assert_eq!(summary.tasks_executed, 3);
+    assert_eq!(adapter.peak_invocations(), 1);
+    assert_eq!(
+        adapter.invoked_item_ids(),
+        vec![common::ID_1, common::ID_2, discovered_id.as_str()]
+    );
+    assert!(store.load_active().expect("load active work").is_empty());
+    assert_eq!(
+        store.load_all_archive().expect("load completed work").len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn foreground_loop_stops_for_idle_human_gate_budget_and_shutdown() {
+    for (name, item, cap, cancelled, expected) in [
+        ("idle", None, 1, false, HaltReason::Idle),
+        (
+            "human gate",
+            Some(materialized_item(common::ID_1, Vec::new(), true)),
+            1,
+            false,
+            HaltReason::ReadyHumanGate,
+        ),
+        (
+            "budget",
+            Some(materialized_item(common::ID_1, Vec::new(), false)),
+            0,
+            false,
+            HaltReason::BudgetReached,
+        ),
+        (
+            "shutdown",
+            Some(materialized_item(common::ID_1, Vec::new(), false)),
+            1,
+            true,
+            HaltReason::ShutdownRequested,
+        ),
+    ] {
+        // Arrange
+        let directory = common::setup_test_env();
+        let store = common::setup_task_golem_store(directory.path());
+        if let Some(item) = item {
+            store.save_active(&[item]).expect("seed item");
+        }
+        let (coordinator, _task) = spawn_coordinator(store.clone(), directory.path().to_path_buf());
+        let cancellation = CancellationToken::new();
+        if cancelled {
+            cancellation.cancel();
+        }
+        let adapter = FakeAdapter::new(Vec::new());
+
+        // Act
+        let summary = run_foreground_supervisor(
+            coordinator,
+            &config(),
+            &run_params(cap),
+            &cancellation,
+            &adapter,
+            &PassingVerifier,
+        )
+        .await
+        .expect("foreground supervisor result");
+
+        // Assert
+        assert_eq!(summary.halt_reason, expected, "{name}");
+        assert_eq!(adapter.peak_invocations(), 0, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn foreground_selection_executes_before_a_later_ready_human_gate() {
+    // Arrange
+    let directory = common::setup_test_env();
+    let store = common::setup_task_golem_store(directory.path());
+    store
+        .save_active(&[
+            materialized_item(common::ID_1, Vec::new(), false),
+            materialized_item(common::ID_2, Vec::new(), true),
+        ])
+        .expect("seed executable work and a gate");
+    let (coordinator, _task) = spawn_coordinator(store.clone(), directory.path().to_path_buf());
+    let adapter = FakeAdapter::new(vec![Ok(result_payload(
+        common::ID_1,
+        TrustedResultCode::Complete,
+    ))]);
+
+    // Act
+    let summary = run_foreground_supervisor(
+        coordinator,
+        &config(),
+        &run_params(10),
+        &CancellationToken::new(),
+        &adapter,
+        &PassingVerifier,
+    )
+    .await
+    .expect("foreground supervisor result");
+
+    // Assert
+    assert_eq!(summary.halt_reason, HaltReason::ReadyHumanGate);
+    assert_eq!(summary.items_completed, vec![common::ID_1]);
+    let gate = store.load_active().expect("load gate").remove(0);
+    assert_eq!(gate.id, common::ID_2);
+    assert_eq!(gate.status, Status::Todo);
+    assert!(gate.claimed_by.is_none());
+}
+
+#[tokio::test]
+async fn unrecoverable_execution_failure_blocks_the_claimed_task_and_stops() {
+    // Arrange
+    let directory = common::setup_test_env();
+    let store = common::setup_task_golem_store(directory.path());
+    store
+        .save_active(&[materialized_item(common::ID_1, Vec::new(), false)])
+        .expect("seed work");
+    let (coordinator, _task) = spawn_coordinator(store.clone(), directory.path().to_path_buf());
+    let adapter = FakeAdapter::new(vec![Err("executor unavailable".to_string())]);
+
+    // Act
+    let summary = run_foreground_supervisor(
+        coordinator,
+        &config(),
+        &run_params(1),
+        &CancellationToken::new(),
+        &adapter,
+        &PassingVerifier,
+    )
+    .await
+    .expect("foreground supervisor result");
+
+    // Assert
+    assert_eq!(summary.halt_reason, HaltReason::UnrecoverableFailure);
+    assert_eq!(summary.items_blocked, vec![common::ID_1]);
+    let blocked = store.load_active().expect("load blocked work").remove(0);
+    assert_eq!(blocked.status, Status::Blocked);
+    assert!(blocked
+        .blocked_reason
+        .as_deref()
+        .is_some_and(|reason| reason.contains("Unrecoverable supervised execution failure")));
+}
+
+#[tokio::test]
+async fn preclaim_supervision_failure_leaves_the_task_unattempted_and_stops() {
+    // Arrange
+    let directory = common::setup_test_env();
+    let store = common::setup_task_golem_store(directory.path());
+    store
+        .save_active(&[materialized_item(common::ID_1, Vec::new(), false)])
+        .expect("seed work");
+    let (coordinator, _task) = spawn_coordinator(store.clone(), directory.path().to_path_buf());
+    let mut config = config();
+    config.executor_profiles.clear();
+    let adapter = FakeAdapter::new(Vec::new());
+
+    // Act
+    let summary = run_foreground_supervisor(
+        coordinator,
+        &config,
+        &run_params(1),
+        &CancellationToken::new(),
+        &adapter,
+        &PassingVerifier,
+    )
+    .await
+    .expect("foreground supervisor result");
+
+    // Assert
+    assert_eq!(summary.halt_reason, HaltReason::UnrecoverableFailure);
+    assert_eq!(summary.tasks_executed, 0);
+    assert!(summary.items_blocked.is_empty());
+    let item = store
+        .load_active()
+        .expect("load unattempted work")
+        .remove(0);
+    assert_eq!(item.status, Status::Todo);
+    assert!(item.claimed_by.is_none());
+    assert_eq!(adapter.peak_invocations(), 0);
+}
+
+#[tokio::test]
+async fn targeted_run_does_not_report_success_for_unselected_or_incomplete_targets() {
+    for (name, item, cap) in [
+        (
+            "non-PG target",
+            {
+                let mut item = materialized_item(common::ID_1, Vec::new(), false);
+                item.extensions.remove(X_PG_OWNER);
+                item
+            },
+            1,
+        ),
+        (
+            "preclaimed target",
+            {
+                let mut item = materialized_item(common::ID_1, Vec::new(), false);
+                item.status = Status::Doing;
+                item.claimed_by = Some("another-process".to_string());
+                item.claimed_at = Some(item.updated_at);
+                item
+            },
+            1,
+        ),
+        (
+            "budget-limited target",
+            materialized_item(common::ID_1, Vec::new(), false),
+            0,
+        ),
+    ] {
+        // Arrange
+        let directory = common::setup_test_env();
+        let store = common::setup_task_golem_store(directory.path());
+        store.save_active(&[item]).expect("seed targeted item");
+        let (coordinator, _task) = spawn_coordinator(store, directory.path().to_path_buf());
+        let adapter = FakeAdapter::new(Vec::new());
+
+        // Act
+        let summary = run_foreground_supervisor(
+            coordinator,
+            &config(),
+            &targeted_run_params(common::ID_1, cap),
+            &CancellationToken::new(),
+            &adapter,
+            &PassingVerifier,
+        )
+        .await
+        .expect("foreground supervisor result");
+
+        // Assert
+        assert_ne!(
+            summary.halt_reason,
+            HaltReason::SelectedScopeComplete,
+            "{name} must not be reported as complete"
+        );
+        assert_eq!(summary.tasks_executed, 0, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn targeted_scope_completes_a_child_without_rolling_up_or_touching_its_parent() {
+    // Arrange
+    let directory = common::setup_test_env();
+    let store = common::setup_task_golem_store(directory.path());
+    let parent = materialized_item(common::ID_2, Vec::new(), false);
+    let mut child = materialized_item(common::ID_1, Vec::new(), false);
+    child.parent = Some(common::ID_2.to_string());
+    store
+        .save_active(&[parent, child])
+        .expect("seed parent and child work");
+    let (coordinator, _task) = spawn_coordinator(store.clone(), directory.path().to_path_buf());
+    let adapter = FakeAdapter::new(vec![Ok(result_payload(
+        common::ID_1,
+        TrustedResultCode::Complete,
+    ))]);
+
+    // Act
+    let summary = run_foreground_supervisor(
+        coordinator,
+        &config(),
+        &targeted_run_params(common::ID_1, 10),
+        &CancellationToken::new(),
+        &adapter,
+        &PassingVerifier,
+    )
+    .await
+    .expect("foreground supervisor result");
+
+    // Assert
+    assert_eq!(summary.halt_reason, HaltReason::SelectedScopeComplete);
+    assert_eq!(summary.items_completed, vec![common::ID_1]);
+    let remaining = store.load_active().expect("load parent work");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, common::ID_2);
+    assert_eq!(remaining[0].status, Status::Todo);
+}
+
+#[tokio::test]
+async fn foreground_and_scheduled_wakeup_share_the_same_finite_loop() {
+    // Arrange
+    let directory = common::setup_test_env();
+    let store = common::setup_task_golem_store(directory.path());
+    store
+        .save_active(&[
+            materialized_item(common::ID_1, Vec::new(), false),
+            materialized_item(common::ID_2, vec![common::ID_1.to_string()], false),
+        ])
+        .expect("seed ordered work");
+    let adapter = FakeAdapter::new(vec![
+        Ok(result_payload(common::ID_1, TrustedResultCode::Complete)),
+        Ok(result_payload(common::ID_2, TrustedResultCode::Complete)),
+    ]);
+
+    // Act
+    let (first_coordinator, _task) =
+        spawn_coordinator(store.clone(), directory.path().to_path_buf());
+    let first = run_foreground_supervisor(
+        first_coordinator,
+        &config(),
+        &run_params(1),
+        &CancellationToken::new(),
+        &adapter,
+        &PassingVerifier,
+    )
+    .await
+    .expect("manual foreground result");
+    let (second_coordinator, _task) =
+        spawn_coordinator(store.clone(), directory.path().to_path_buf());
+    let second = run_scheduled_wakeup(
+        second_coordinator,
+        &config(),
+        &run_params(1),
+        &CancellationToken::new(),
+        &adapter,
+        &PassingVerifier,
+    )
+    .await
+    .expect("scheduled wakeup result");
+
+    // Assert
+    assert_eq!(first.halt_reason, HaltReason::BudgetReached);
+    assert_eq!(second.halt_reason, HaltReason::BudgetReached);
+    assert!(store.load_active().expect("load active work").is_empty());
+    assert_eq!(adapter.peak_invocations(), 1);
+}
+
+#[tokio::test]
+async fn shutdown_during_adapter_execution_stops_without_transitioning_the_task() {
+    // Arrange
+    let directory = common::setup_test_env();
+    let store = common::setup_task_golem_store(directory.path());
+    store
+        .save_active(&[materialized_item(common::ID_1, Vec::new(), false)])
+        .expect("seed work");
+    let (coordinator, _task) = spawn_coordinator(store.clone(), directory.path().to_path_buf());
+    let cancellation = CancellationToken::new();
+    let cancellation_for_supervisor = cancellation.clone();
+    let (execution_started, mut execution_starts) = tokio::sync::mpsc::unbounded_channel();
+    let config = config();
+    let supervisor = tokio::spawn(async move {
+        run_foreground_supervisor(
+            coordinator,
+            &config,
+            &run_params(1),
+            &cancellation_for_supervisor,
+            &BlockingAdapter { execution_started },
+            &PassingVerifier,
+        )
+        .await
+    });
+
+    let claimed_item_id = execution_starts
+        .recv()
+        .await
+        .expect("trusted adapter starts claimed execution");
+    let claimed = store
+        .load_active()
+        .expect("load claimed work")
+        .into_iter()
+        .find(|item| item.id == claimed_item_id)
+        .expect("claimed work remains active");
+    assert_eq!(claimed.status, Status::Doing);
+    assert_eq!(claimed.claimed_by.as_deref(), Some("phase-golem"));
+
+    // Act
+    cancellation.cancel();
+    let summary = tokio::time::timeout(Duration::from_secs(1), supervisor)
+        .await
+        .expect("supervisor stops promptly")
+        .expect("supervisor task")
+        .expect("foreground supervisor result");
+
+    // Assert
+    assert_eq!(summary.halt_reason, HaltReason::ShutdownRequested);
+    assert_eq!(summary.tasks_executed, 0);
+    assert!(summary.items_blocked.is_empty());
+    let claimed = store.load_active().expect("load claimed work").remove(0);
+    assert_eq!(claimed.status, Status::Doing);
+    assert_eq!(claimed.claimed_by.as_deref(), Some("phase-golem"));
+}
+
+#[tokio::test]
+async fn shutdown_during_verification_stops_without_transitioning_the_task() {
+    // Arrange
+    let directory = common::setup_test_env();
+    let store = common::setup_task_golem_store(directory.path());
+    store
+        .save_active(&[materialized_item(common::ID_1, Vec::new(), false)])
+        .expect("seed work");
+    let (coordinator, _task) = spawn_coordinator(store.clone(), directory.path().to_path_buf());
+    let cancellation = CancellationToken::new();
+    let cancellation_for_supervisor = cancellation.clone();
+    let (verification_started, mut verification_starts) = tokio::sync::mpsc::unbounded_channel();
+    let config = config();
+    let supervisor = tokio::spawn(async move {
+        run_foreground_supervisor(
+            coordinator,
+            &config,
+            &run_params(1),
+            &cancellation_for_supervisor,
+            &FakeAdapter::new(vec![Ok(result_payload(
+                common::ID_1,
+                TrustedResultCode::Complete,
+            ))]),
+            &BlockingVerifier {
+                verification_started,
+            },
+        )
+        .await
+    });
+
+    let claimed_item_id = verification_starts
+        .recv()
+        .await
+        .expect("deterministic verification starts");
+    assert_eq!(claimed_item_id, common::ID_1);
+
+    // Act
+    cancellation.cancel();
+    let summary = tokio::time::timeout(Duration::from_secs(1), supervisor)
+        .await
+        .expect("supervisor stops promptly")
+        .expect("supervisor task")
+        .expect("foreground supervisor result");
+
+    // Assert
+    assert_eq!(summary.halt_reason, HaltReason::ShutdownRequested);
+    assert_eq!(summary.tasks_executed, 0);
+    assert!(summary.items_blocked.is_empty());
+    let claimed = store.load_active().expect("load claimed work").remove(0);
+    assert_eq!(claimed.status, Status::Doing);
+    assert_eq!(claimed.claimed_by.as_deref(), Some("phase-golem"));
+}
+
+#[tokio::test]
+async fn shutdown_after_finalized_outcome_accounts_for_terminal_result() {
+    for result_code in [TrustedResultCode::Complete, TrustedResultCode::Blocked] {
+        // Arrange
+        let directory = common::setup_test_env();
+        let store = common::setup_task_golem_store(directory.path());
+        store
+            .save_active(&[materialized_item(common::ID_1, Vec::new(), false)])
+            .expect("seed work");
+        let (coordinator, _task) = spawn_coordinator(store.clone(), directory.path().to_path_buf());
+        let cancellation = CancellationToken::new();
+        let adapter = FakeAdapter::new(vec![Ok(result_payload(common::ID_1, result_code.clone()))]);
+        let verifier = CancelAfterVerification {
+            cancellation: cancellation.clone(),
+        };
+
+        // Act
+        let summary = run_foreground_supervisor(
+            coordinator,
+            &config(),
+            &run_params(1),
+            &cancellation,
+            &adapter,
+            &verifier,
+        )
+        .await
+        .expect("foreground supervisor result");
+
+        // Assert
+        assert_eq!(summary.halt_reason, HaltReason::ShutdownRequested);
+        assert_eq!(summary.tasks_executed, 1);
+        match result_code {
+            TrustedResultCode::Complete => {
+                assert_eq!(summary.items_completed, vec![common::ID_1]);
+                assert!(summary.items_blocked.is_empty());
+                assert!(store.load_active().expect("load active work").is_empty());
+                assert_eq!(
+                    store.load_all_archive().expect("load completed work")[0].status,
+                    Status::Done
+                );
+            }
+            TrustedResultCode::Blocked => {
+                assert!(summary.items_completed.is_empty());
+                assert_eq!(summary.items_blocked, vec![common::ID_1]);
+                assert_eq!(
+                    store.load_active().expect("load blocked work")[0].status,
+                    Status::Blocked
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn persisted_dangling_dependency_halts_without_execution_or_mutation() {
+    // Arrange
+    let directory = common::setup_test_env();
+    let store = common::setup_task_golem_store(directory.path());
+    store
+        .save_active(&[materialized_item(common::ID_1, Vec::new(), false)])
+        .expect("seed work");
+    let mut item = store.load_active().expect("load work").remove(0);
+    item.dependencies = vec![common::ID_2.to_string()];
+    std::fs::write(
+        store.tasks_path(),
+        format!(
+            "{{\"schema_version\":1}}\n{}\n",
+            serde_json::to_string(&item).expect("serialize dangling dependency fixture")
+        ),
+    )
+    .expect("persist dangling dependency fixture");
+    let (coordinator, _task) = spawn_coordinator(store.clone(), directory.path().to_path_buf());
+    let adapter = FakeAdapter::new(Vec::new());
+
+    // Act
+    let summary = run_foreground_supervisor(
+        coordinator,
+        &config(),
+        &run_params(1),
+        &CancellationToken::new(),
+        &adapter,
+        &PassingVerifier,
+    )
+    .await
+    .expect("foreground supervisor result");
+
+    // Assert
+    assert_eq!(summary.halt_reason, HaltReason::UnrecoverableFailure);
+    assert_eq!(summary.tasks_executed, 0);
+    assert!(summary.items_completed.is_empty());
+    assert!(summary.items_blocked.is_empty());
+    assert_eq!(adapter.peak_invocations(), 0);
+    let item = store.load_active().expect("load affected work").remove(0);
+    assert_eq!(item.status, Status::Todo);
+    assert!(item.claimed_by.is_none());
+    assert_eq!(item.dependencies, vec![common::ID_2]);
+    assert!(!store.events_path().exists());
+}
+
+fn materialized_item(id: &str, dependencies: Vec<String>, human_gate: bool) -> Item {
+    let mut item = common::make_pg_item(id, Status::Todo).0;
+    item.dependencies = dependencies;
+    item.extensions
+        .insert(X_PG_OWNER.to_string(), serde_json::json!("phase-golem"));
+    item.extensions
+        .insert(X_PG_TEMPLATE_NODE_KEY.to_string(), serde_json::json!(PHASE));
+    item.extensions.insert(
+        X_PG_EXECUTOR_PROFILE.to_string(),
+        serde_json::json!(PROFILE),
+    );
+    item.extensions.insert(
+        X_PG_EXECUTION_POLICY.to_string(),
+        serde_json::to_value(policy()).expect("serialize policy"),
+    );
+    item.extensions.insert(
+        X_PG_VERIFICATION.to_string(),
+        serde_json::to_value(VerificationPlan::default()).expect("serialize verification"),
+    );
+    if human_gate {
+        item.extensions
+            .insert(X_PG_HUMAN_DECISION.to_string(), serde_json::json!(true));
+    }
+    item
+}
+
+fn policy() -> PublicExecutionPolicy {
+    PublicExecutionPolicy {
+        timeout_minutes: 1,
+        max_retries: 0,
+        destructive: false,
+        workflows: Vec::new(),
+    }
+}
+
+fn config() -> PhaseGolemConfig {
     let mut config = PhaseGolemConfig::default();
-    if config.pipelines.is_empty() {
-        config
-            .pipelines
-            .insert("feature".to_string(), default_feature_pipeline());
-    }
+    config.executor_profiles.insert(
+        PROFILE.to_string(),
+        TrustedExecutorProfile {
+            command: "test-executor".to_string(),
+            args: Vec::new(),
+            environment: BTreeMap::new(),
+        },
+    );
     config
 }
 
-fn default_execution_config() -> ExecutionConfig {
-    ExecutionConfig {
-        phase_timeout_minutes: 30,
-        max_retries: 1,
-        default_phase_cap: 100,
-        max_wip: 2,
-        max_concurrent: 3,
-    }
-}
-
-fn default_pipelines() -> HashMap<String, PipelineConfig> {
-    let mut map = HashMap::new();
-    map.insert("feature".to_string(), default_feature_pipeline());
-    map
-}
-
-fn simple_pipeline() -> HashMap<String, PipelineConfig> {
-    let mut map = HashMap::new();
-    map.insert(
-        "feature".to_string(),
-        PipelineConfig {
-            pre_phases: vec![],
-            phases: vec![
-                PhaseConfig::new("build", true),
-                PhaseConfig::new("review", false),
-            ],
-        },
-    );
-    map
-}
-
-fn phase_complete_result(item_id: &str, phase: &str) -> PhaseResult {
-    PhaseResult {
-        item_id: item_id.to_string(),
-        phase: phase.to_string(),
-        result: ResultCode::PhaseComplete,
-        summary: "Phase completed successfully".to_string(),
-        context: None,
-        updated_assessments: None,
-        follow_ups: Vec::new(),
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
-    }
-}
-
-fn failed_result(item_id: &str, phase: &str) -> PhaseResult {
-    PhaseResult {
-        item_id: item_id.to_string(),
-        phase: phase.to_string(),
-        result: ResultCode::Failed,
-        summary: "Phase failed".to_string(),
-        context: Some("Something went wrong".to_string()),
-        updated_assessments: None,
-        follow_ups: Vec::new(),
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
-    }
-}
-
-fn blocked_result(item_id: &str, phase: &str) -> PhaseResult {
-    PhaseResult {
-        item_id: item_id.to_string(),
-        phase: phase.to_string(),
-        result: ResultCode::Blocked,
-        summary: "Need human input".to_string(),
-        context: Some("Need a decision on approach".to_string()),
-        updated_assessments: None,
-        follow_ups: Vec::new(),
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
-    }
-}
-
-fn subphase_complete_result(item_id: &str, phase: &str) -> PhaseResult {
-    PhaseResult {
-        item_id: item_id.to_string(),
-        phase: phase.to_string(),
-        result: ResultCode::SubphaseComplete,
-        summary: "Subphase done".to_string(),
-        context: None,
-        updated_assessments: None,
-        follow_ups: Vec::new(),
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
-    }
-}
-
-fn triage_result_with_assessments(item_id: &str) -> PhaseResult {
-    PhaseResult {
-        item_id: item_id.to_string(),
-        phase: "triage".to_string(),
-        result: ResultCode::PhaseComplete,
-        summary: "Item triaged".to_string(),
-        context: None,
-        updated_assessments: Some(UpdatedAssessments {
-            size: Some(SizeLevel::Small),
-            complexity: Some(DimensionLevel::Low),
-            risk: Some(DimensionLevel::Low),
-            impact: Some(DimensionLevel::Medium),
-        }),
-        follow_ups: Vec::new(),
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
-    }
-}
-
-fn run_params(root: &Path, target: Option<&str>, cap: u32) -> RunParams {
+fn run_params(cap: u32) -> RunParams {
     RunParams {
-        targets: target.map(|s| vec![s.to_string()]).unwrap_or_default(),
-        filter: vec![],
+        targets: Vec::new(),
+        filter: Vec::new(),
         cap,
-        root: root.to_path_buf(),
-        config_base: root.to_path_buf(),
-        auto_advance: false,
     }
 }
 
-/// Helper to save PgItems to the store and spawn a coordinator.
-fn save_and_commit_store(root: &Path, store: &task_golem::store::Store, items: &[Item]) {
-    store.save_active(items).expect("save items to store");
-
-    Command::new("git")
-        .args(["add", ".task-golem/"])
-        .current_dir(root)
-        .output()
-        .expect("stage .task-golem/");
-
-    Command::new("git")
-        .args(["commit", "-m", "Save store"])
-        .current_dir(root)
-        .output()
-        .expect("commit store");
-}
-
-fn setup_coordinator_with_items(
-    items: Vec<PgItem>,
-) -> (
-    phase_golem::coordinator::CoordinatorHandle,
-    tokio::task::JoinHandle<()>,
-    tempfile::TempDir,
-) {
-    let dir = common::setup_test_env();
-    let store = common::setup_task_golem_store(dir.path());
-
-    let raw_items: Vec<Item> = items.into_iter().map(|pg| pg.0).collect();
-    save_and_commit_store(dir.path(), &store, &raw_items);
-
-    let (handle, coord_task) =
-        coordinator::spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
-
-    (handle, coord_task, dir)
-}
-
-// ============================================================
-// select_actions() unit tests — pure function, no I/O
-// ============================================================
-
-#[test]
-fn select_actions_empty_backlog_returns_empty() {
-    let snapshot: Vec<PgItem> = vec![];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-    assert!(actions.is_empty());
-}
-
-#[test]
-fn select_actions_all_done_returns_empty() {
-    let snapshot = vec![make_item("WRK-001", "Done task", ItemStatus::Done)];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-    assert!(actions.is_empty());
-}
-
-#[test]
-fn select_actions_all_blocked_returns_empty() {
-    let mut item = common::make_blocked_pg_item("WRK-001", ItemStatus::InProgress);
-    item.0.blocked_reason = Some("needs input".to_string());
-
-    let snapshot = vec![item];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-    assert!(actions.is_empty());
-}
-
-#[test]
-fn select_actions_promotes_ready_items_when_under_max_wip() {
-    let snapshot = vec![
-        make_ready_item("WRK-001", "Task A", Some(DimensionLevel::High)),
-        make_ready_item("WRK-002", "Task B", Some(DimensionLevel::Low)),
-    ];
-    let running = RunningTasks::new();
-    let config = default_execution_config(); // max_wip=2
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    // Should promote both (max_wip=2, in_progress=0)
-    let promotions: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::Promote(_)))
-        .collect();
-    assert_eq!(promotions.len(), 2);
-
-    // Highest impact first
-    assert!(matches!(&actions[0], SchedulerAction::Promote(id) if id == "WRK-001"));
-}
-
-#[test]
-fn select_actions_respects_max_wip_limit() {
-    let snapshot = vec![
-        make_in_progress_item("WRK-001", "Running", "prd"),
-        make_in_progress_item("WRK-002", "Running 2", "build"),
-        make_ready_item(
-            "WRK-003",
-            "Ready but blocked by WIP",
-            Some(DimensionLevel::High),
-        ),
-    ];
-    let running = RunningTasks::new();
-    let config = default_execution_config(); // max_wip=2
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    // Should NOT promote WRK-003 — already at max_wip=2
-    let promotions: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::Promote(_)))
-        .collect();
-    assert_eq!(promotions.len(), 0);
-}
-
-#[test]
-fn select_actions_in_progress_advance_furthest_first() {
-    // WRK-001 at "prd" (index 0), WRK-002 at "spec" (index 3)
-    // Should pick WRK-002 first (furthest-first)
-    let snapshot = vec![
-        make_in_progress_item("WRK-001", "Early task", "prd"),
-        make_in_progress_item("WRK-002", "Late task", "spec"),
-    ];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    // Filter to RunPhase actions only
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. }))
-        .collect();
-
-    assert!(run_phases.len() >= 2);
-    // WRK-002 (spec, index 3) should come before WRK-001 (prd, index 0)
-    let first_id = match &run_phases[0] {
-        SchedulerAction::RunPhase { item_id, .. } => item_id.as_str(),
-        _ => "",
-    };
-    assert_eq!(first_id, "WRK-002");
-}
-
-#[test]
-fn select_actions_in_progress_before_scoping() {
-    // InProgress items should be scheduled before Scoping items
-    let snapshot = vec![
-        make_scoping_item("WRK-001", "Scoping task", "research"),
-        make_in_progress_item("WRK-002", "Active task", "prd"),
-    ];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. }))
-        .collect();
-
-    assert!(run_phases.len() >= 2);
-    // InProgress WRK-002 should come first
-    let first_id = match &run_phases[0] {
-        SchedulerAction::RunPhase { item_id, .. } => item_id.as_str(),
-        _ => "",
-    };
-    assert_eq!(first_id, "WRK-002");
-}
-
-#[test]
-fn select_actions_triage_after_phases() {
-    // Triage is lowest priority — should come after InProgress phases
-    let snapshot = vec![
-        make_item("WRK-001", "New item", ItemStatus::New),
-        make_in_progress_item("WRK-002", "Active task", "prd"),
-    ];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. }))
-        .collect();
-    let triages: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::Triage(_)))
-        .collect();
-
-    assert_eq!(run_phases.len(), 1); // WRK-002 phase
-    assert_eq!(triages.len(), 1); // WRK-001 triage
-
-    // RunPhase should appear before Triage
-    let first_phase_pos = actions
-        .iter()
-        .position(|a| matches!(a, SchedulerAction::RunPhase { .. }))
-        .unwrap();
-    let triage_pos = actions
-        .iter()
-        .position(|a| matches!(a, SchedulerAction::Triage(_)))
-        .unwrap();
-    assert!(first_phase_pos < triage_pos);
-}
-
-#[test]
-fn select_actions_destructive_phase_is_exclusive() {
-    // An item at "build" (destructive) should block all other phases
-    let snapshot = vec![
-        make_in_progress_item("WRK-001", "Build task", "build"),
-        make_in_progress_item("WRK-002", "Other task", "prd"),
-    ];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. }))
-        .collect();
-
-    // "build" (destructive, furthest-first at index 4) should be picked
-    // and it should be the ONLY phase action
-    assert_eq!(run_phases.len(), 1);
-    let phase_id = match &run_phases[0] {
-        SchedulerAction::RunPhase { item_id, .. } => item_id.as_str(),
-        _ => "",
-    };
-    assert_eq!(phase_id, "WRK-001");
-}
-
-#[test]
-fn select_actions_destructive_running_blocks_all() {
-    let snapshot = vec![
-        make_in_progress_item("WRK-001", "Build running", "build"),
-        make_in_progress_item("WRK-002", "Other task", "prd"),
-    ];
-    let mut running = RunningTasks::new();
-    running.insert_destructive("WRK-001", "build");
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    // Nothing should be scheduled while destructive is running
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| {
-            matches!(
-                a,
-                SchedulerAction::RunPhase { .. } | SchedulerAction::Triage(_)
-            )
-        })
-        .collect();
-    assert_eq!(run_phases.len(), 0);
-}
-
-#[test]
-fn select_actions_respects_max_concurrent() {
-    // With max_concurrent=1, only one phase action
-    let snapshot = vec![
-        make_in_progress_item("WRK-001", "Task A", "prd"),
-        make_in_progress_item("WRK-002", "Task B", "spec"),
-    ];
-    let running = RunningTasks::new();
-    let config = ExecutionConfig {
-        max_concurrent: 1,
-        max_wip: 5,
-        ..default_execution_config()
-    };
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let executor_actions: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| {
-            matches!(
-                a,
-                SchedulerAction::RunPhase { .. } | SchedulerAction::Triage(_)
-            )
-        })
-        .collect();
-    assert_eq!(executor_actions.len(), 1);
-}
-
-#[test]
-fn select_actions_skips_already_running_items() {
-    let snapshot = vec![
-        make_in_progress_item("WRK-001", "Running task", "prd"),
-        make_in_progress_item("WRK-002", "Idle task", "spec"),
-    ];
-    let mut running = RunningTasks::new();
-    running.insert_non_destructive("WRK-001", "prd");
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. }))
-        .collect();
-
-    // WRK-001 is already running, so only WRK-002 should be scheduled
-    assert_eq!(run_phases.len(), 1);
-    let scheduled_id = match &run_phases[0] {
-        SchedulerAction::RunPhase { item_id, .. } => item_id.as_str(),
-        _ => "",
-    };
-    assert_eq!(scheduled_id, "WRK-002");
-}
-
-#[test]
-fn select_actions_new_items_trigger_triage() {
-    let snapshot = vec![
-        make_item("WRK-001", "New task 1", ItemStatus::New),
-        make_item("WRK-002", "New task 2", ItemStatus::New),
-    ];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let triages: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::Triage(_)))
-        .collect();
-
-    assert_eq!(triages.len(), 2);
-}
-
-#[test]
-fn select_actions_promotion_tiebreaks_by_impact() {
-    let snapshot = vec![
-        make_ready_item("WRK-001", "Low impact", Some(DimensionLevel::Low)),
-        make_ready_item("WRK-002", "High impact", Some(DimensionLevel::High)),
-        make_ready_item("WRK-003", "Medium impact", Some(DimensionLevel::Medium)),
-    ];
-    let running = RunningTasks::new();
-    let config = ExecutionConfig {
-        max_wip: 3,
-        ..default_execution_config()
-    };
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
-    assert_eq!(promotions.len(), 3);
-    assert_eq!(promotions[0], "WRK-002"); // High
-    assert_eq!(promotions[1], "WRK-003"); // Medium
-    assert_eq!(promotions[2], "WRK-001"); // Low
-}
-
-#[test]
-fn select_actions_no_destructive_when_non_destructive_running() {
-    // build (destructive) should NOT be scheduled if non-destructive tasks are already running
-    let snapshot = vec![make_in_progress_item("WRK-001", "Build task", "build")];
-    let mut running = RunningTasks::new();
-    running.insert_non_destructive("WRK-099", "prd"); // something else running
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    // Destructive can't run while non-destructive is active
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. }))
-        .collect();
-    assert_eq!(run_phases.len(), 0);
-}
-
-#[test]
-fn select_actions_scoping_items_with_pre_phases() {
-    let snapshot = vec![make_scoping_item("WRK-001", "Scoping item", "research")];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. }))
-        .collect();
-
-    assert_eq!(run_phases.len(), 1);
-    match &run_phases[0] {
-        SchedulerAction::RunPhase {
-            item_id,
-            phase,
-            phase_pool,
-            ..
-        } => {
-            assert_eq!(item_id, "WRK-001");
-            assert_eq!(phase, "research");
-            assert_eq!(phase_pool, &PhasePool::Pre);
-        }
-        _ => panic!("Expected RunPhase"),
+fn targeted_run_params(target: &str, cap: u32) -> RunParams {
+    RunParams {
+        targets: vec![target.to_string()],
+        filter: Vec::new(),
+        cap,
     }
 }
 
-// ============================================================
-// Integration tests with coordinator + mock agent
-// ============================================================
-
-#[tokio::test]
-async fn scheduler_happy_path_single_item_all_phases() {
-    let item = make_in_progress_item("WRK-001", "Test feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed, vec!["WRK-001"]);
-    assert!(summary.items_blocked.is_empty());
-    assert_eq!(summary.halt_reason, HaltReason::AllDoneOrBlocked);
+fn result_payload(item_id: &str, result: TrustedResultCode) -> String {
+    serde_json::json!({
+        "item_id": item_id,
+        "phase": PHASE,
+        "result": result,
+        "summary": "executor completed task",
+        "evidence_references": ["artifact:result"]
+    })
+    .to_string()
 }
 
-#[tokio::test]
-async fn scheduler_blocked_result_blocks_item() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![Ok(blocked_result("WRK-001", "build"))]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.is_empty());
-    assert_eq!(summary.items_blocked, vec!["WRK-001"]);
-    assert_eq!(summary.halt_reason, HaltReason::AllDoneOrBlocked);
-}
-
-#[tokio::test]
-async fn scheduler_retry_then_success() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    // First attempt fails, second succeeds (within executor retry)
-    // max_retries=1 means 2 attempts total
-    let runner = MockAgentRunner::new(vec![
-        Ok(failed_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-    config.execution.max_retries = 1;
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed, vec!["WRK-001"]);
-}
-
-#[tokio::test]
-async fn scheduler_retry_exhaustion_blocks_item() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    // Two consecutive failures exhausts retries (max_retries=1)
-    let runner = MockAgentRunner::new(vec![
-        Ok(failed_result("WRK-001", "build")),
-        Ok(failed_result("WRK-001", "build")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-    config.execution.max_retries = 1;
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.is_empty());
-    assert_eq!(summary.items_blocked, vec!["WRK-001"]);
-}
-
-#[tokio::test]
-async fn scheduler_cap_limits_phase_execution() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        // review would need another result, but cap=1 stops after build
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 1); // cap=1
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.halt_reason, HaltReason::CapReached);
-    assert_eq!(summary.phases_executed, 1);
-}
-
-#[tokio::test]
-async fn scheduler_no_actionable_items_exits() {
-    let item = make_item("WRK-001", "Done item", ItemStatus::Done);
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![]);
-
-    let config = default_config();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.halt_reason, HaltReason::AllDoneOrBlocked);
-    assert_eq!(summary.phases_executed, 0);
-}
-
-#[tokio::test]
-async fn scheduler_target_mode_completes_specific_item() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), Some("WRK-001"), 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed, vec!["WRK-001"]);
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-}
-
-#[tokio::test]
-async fn scheduler_subphase_complete_re_executes_phase() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    // First invocation returns SubphaseComplete, second returns PhaseComplete
-    let runner = MockAgentRunner::new(vec![
-        Ok(subphase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed, vec!["WRK-001"]);
-}
-
-#[tokio::test]
-async fn scheduler_follow_ups_are_ingested() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let mut result = phase_complete_result("WRK-001", "build");
-    result.follow_ups = vec![FollowUp {
-        title: "Follow-up task".to_string(),
-        context: Some("A new task from follow-up".to_string()),
-        suggested_size: None,
-        suggested_risk: None,
-    }];
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(result),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.follow_ups_created >= 1);
-}
-
-// ============================================================
-// Triage integration tests
-// ============================================================
-
-#[tokio::test]
-async fn triage_small_low_risk_promotes_to_ready() {
-    let item = make_item("WRK-001", "Small fix", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let config = default_config();
-
-    let triage_result = triage_result_with_assessments("WRK-001");
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    // Small + Low risk -> should be Ready
-    assert_eq!(item.pg_status(), ItemStatus::Ready);
-    assert_eq!(item.size(), Some(SizeLevel::Small));
-    assert_eq!(item.risk(), Some(DimensionLevel::Low));
-}
-
-#[tokio::test]
-async fn triage_below_min_impact_parks_item() {
-    let item = make_item("WRK-001", "Low-value polish", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let mut config = default_config();
-    config.guardrails.min_impact = Some(DimensionLevel::High);
-
-    let triage_result = triage_result_with_assessments("WRK-001");
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    assert_eq!(item.pg_status(), ItemStatus::Parked);
-    assert_eq!(item.impact(), Some(DimensionLevel::Medium));
-}
-
-#[tokio::test]
-async fn triage_at_min_impact_does_not_park_item() {
-    let item = make_item("WRK-001", "Medium-value work", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let mut config = default_config();
-    config.guardrails.min_impact = Some(DimensionLevel::Medium);
-
-    let triage_result = triage_result_with_assessments("WRK-001");
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    assert_eq!(item.pg_status(), ItemStatus::Ready);
-}
-
-#[tokio::test]
-async fn triage_missing_impact_does_not_park_item() {
-    let item = make_item("WRK-001", "Missing impact", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let mut config = default_config();
-    config.guardrails.min_impact = Some(DimensionLevel::Medium);
-
-    let mut triage_result = triage_result_with_assessments("WRK-001");
-    triage_result.updated_assessments = Some(UpdatedAssessments {
-        size: Some(SizeLevel::Small),
-        complexity: Some(DimensionLevel::Low),
-        risk: Some(DimensionLevel::Low),
-        impact: None,
-    });
-
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    assert_eq!(item.pg_status(), ItemStatus::Ready);
-    assert_eq!(item.impact(), None);
-}
-
-#[tokio::test]
-async fn triage_large_item_goes_to_scoping_with_pre_phase() {
-    let item = make_item("WRK-001", "Big feature", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let config = default_config();
-
-    let mut triage_result = triage_result_with_assessments("WRK-001");
-    triage_result.updated_assessments = Some(UpdatedAssessments {
-        size: Some(SizeLevel::Large),
-        complexity: Some(DimensionLevel::High),
-        risk: Some(DimensionLevel::High),
-        impact: Some(DimensionLevel::High),
-    });
-
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    // Large + High risk -> should be Scoping with first pre_phase
-    assert_eq!(item.pg_status(), ItemStatus::Scoping);
-    assert_eq!(item.phase(), Some("research".to_string()));
-    assert_eq!(item.phase_pool(), Some(PhasePool::Pre));
-}
-
-#[tokio::test]
-async fn triage_blocked_result_blocks_item() {
-    let item = make_item("WRK-001", "Unclear item", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let config = default_config();
-
-    let triage_result = blocked_result("WRK-001", "triage");
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    assert_eq!(item.pg_status(), ItemStatus::Blocked);
-}
-
-#[tokio::test]
-async fn triage_with_invalid_pipeline_type_blocks() {
-    let item = make_item("WRK-001", "Item", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let config = default_config();
-
-    let mut triage_result = triage_result_with_assessments("WRK-001");
-    triage_result.pipeline_type = Some("nonexistent_pipeline".to_string());
-
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    assert_eq!(item.pg_status(), ItemStatus::Blocked);
-    assert!(item
-        .blocked_reason()
-        .unwrap()
-        .contains("nonexistent_pipeline"));
-}
-
-// --- Triage description application tests ---
-
-#[tokio::test]
-async fn triage_applies_description_when_present() {
-    let item = make_item("WRK-001", "Item", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let config = default_config();
-
-    let mut triage_result = triage_result_with_assessments("WRK-001");
-    triage_result.description = Some(StructuredDescription {
-        context: "Originated from user feedback".to_string(),
-        problem: "Login fails on mobile".to_string(),
-        solution: "Fix responsive CSS".to_string(),
-        impact: "Unblocks mobile users".to_string(),
-        sizing_rationale: "Single file CSS fix".to_string(),
-    });
-
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    let desc = item.structured_description();
-    assert!(desc.is_some());
-    let desc = desc.unwrap();
-    assert_eq!(desc.context, "Originated from user feedback");
-    assert_eq!(desc.problem, "Login fails on mobile");
-}
-
-#[tokio::test]
-async fn triage_does_not_apply_description_when_none() {
-    let item = make_item("WRK-001", "Item", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let config = default_config();
-
-    let triage_result = triage_result_with_assessments("WRK-001");
-    assert!(triage_result.description.is_none());
-
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    assert!(item.structured_description().is_none());
-}
-
-#[tokio::test]
-async fn triage_does_not_apply_empty_description() {
-    let item = make_item("WRK-001", "Item", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let config = default_config();
-
-    let mut triage_result = triage_result_with_assessments("WRK-001");
-    triage_result.description = Some(StructuredDescription::default());
-
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    assert!(item.structured_description().is_none());
-}
-
-#[tokio::test]
-async fn triage_applies_partial_description() {
-    let item = make_item("WRK-001", "Item", ItemStatus::New);
-    let (coordinator_handle, _coord_task, _dir) = setup_coordinator_with_items(vec![item]);
-
-    let config = default_config();
-
-    let mut triage_result = triage_result_with_assessments("WRK-001");
-    triage_result.description = Some(StructuredDescription {
-        context: "From user feedback".to_string(),
-        problem: "Login broken".to_string(),
-        solution: String::new(),
-        impact: String::new(),
-        sizing_rationale: String::new(),
-    });
-
-    let desc = triage_result.description.as_ref().unwrap();
-    assert!(!desc.is_empty());
-
-    scheduler::apply_triage_result(&coordinator_handle, "WRK-001", &triage_result, &config)
-        .await
-        .expect("apply_triage_result should succeed");
-
-    let snapshot = coordinator_handle.get_snapshot().await.unwrap();
-    let item = snapshot.iter().find(|i| i.id() == "WRK-001").unwrap();
-
-    let desc = item.structured_description();
-    assert!(desc.is_some());
-    let desc = desc.unwrap();
-    assert_eq!(desc.context, "From user feedback");
-    assert_eq!(desc.problem, "Login broken");
-    assert!(desc.solution.is_empty());
-}
-
-// ============================================================
-// Destructive starvation prevention tests
-// ============================================================
-
-#[test]
-fn select_actions_destructive_pending_blocks_new_non_destructive() {
-    let snapshot = vec![
-        make_in_progress_item("WRK-001", "Build task", "build"),
-        make_in_progress_item("WRK-002", "PRD task", "prd"),
-    ];
-    let mut running = RunningTasks::new();
-    running.insert_non_destructive("WRK-099", "prd");
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { .. }))
-        .collect();
-    assert_eq!(
-        run_phases.len(),
-        0,
-        "No phases should be scheduled when destructive is pending but can't run"
-    );
-}
-
-#[test]
-fn select_actions_destructive_pending_blocks_triage() {
-    let snapshot = vec![
-        make_in_progress_item("WRK-001", "Build task", "build"),
-        make_item("WRK-002", "New item", ItemStatus::New),
-    ];
-    let mut running = RunningTasks::new();
-    running.insert_non_destructive("WRK-099", "prd");
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let executor_actions: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| {
-            matches!(
-                a,
-                SchedulerAction::RunPhase { .. } | SchedulerAction::Triage(_)
-            )
-        })
-        .collect();
-    assert_eq!(
-        executor_actions.len(),
-        0,
-        "No executor actions should be scheduled when destructive is pending but can't run"
-    );
-}
-
-// ============================================================
-// Circuit breaker test
-// ============================================================
-
-#[tokio::test]
-async fn scheduler_circuit_breaker_trips_after_consecutive_exhaustions() {
-    // Two items that will both exhaust retries (0 retries = 1 attempt each)
-    let item1 = make_in_progress_item("WRK-001", "Feature 1", "build");
-    let item2 = make_in_progress_item("WRK-002", "Feature 2", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    // Both items fail — 2 consecutive exhaustions trips the breaker
-    let runner = MockAgentRunner::new(vec![
-        Ok(failed_result("WRK-001", "build")),
-        Ok(failed_result("WRK-002", "build")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-    config.execution.max_retries = 0; // 1 attempt only
-    config.execution.max_concurrent = 1; // One at a time to guarantee order
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.halt_reason, HaltReason::CircuitBreakerTripped);
-}
-
-// ============================================================
-// Dependency filtering tests — select_actions()
-// ============================================================
-
-#[test]
-fn test_ready_item_with_unmet_dep_not_promoted() {
-    let mut item_a = make_ready_item("WRK-001", "Depends on WRK-002", Some(DimensionLevel::High));
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let item_b = make_item("WRK-002", "Dependency", ItemStatus::Ready);
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
-    // WRK-001 should NOT be promoted (dep WRK-002 is Ready, not Done)
+fn initialize_task_golem_project(project_root: &std::path::Path) {
+    let output = Command::new("tg")
+        .arg("init")
+        .current_dir(project_root)
+        .output()
+        .expect("run task-golem init");
     assert!(
-        !promotions.contains(&"WRK-001".to_string()),
-        "Item with unmet dep should not be promoted"
+        output.status.success(),
+        "task-golem init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
-#[test]
-fn test_ready_item_with_met_dep_promoted() {
-    let mut item_a = make_ready_item("WRK-001", "Depends on WRK-002", Some(DimensionLevel::High));
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let item_b = make_item("WRK-002", "Done dependency", ItemStatus::Done);
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
+fn commit_task_golem_seed(project_root: &std::path::Path) {
+    let add = Command::new("git")
+        .args(["add", ".task-golem"])
+        .current_dir(project_root)
+        .output()
+        .expect("stage Task Golem seed");
     assert!(
-        promotions.contains(&"WRK-001".to_string()),
-        "Item with met dep should be promoted"
+        add.status.success(),
+        "stage Task Golem seed failed: {}",
+        String::from_utf8_lossy(&add.stderr)
     );
-}
-
-#[test]
-fn test_ready_item_with_absent_dep_promoted() {
-    let mut item_a = make_ready_item(
-        "WRK-001",
-        "Depends on archived item",
-        Some(DimensionLevel::High),
-    );
-    item_a.0.dependencies = vec!["WRK-ARCHIVED".to_string()];
-
-    let snapshot = vec![item_a];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
+    let commit = Command::new("git")
+        .args(["commit", "-m", "Seed Task Golem work"])
+        .current_dir(project_root)
+        .output()
+        .expect("commit Task Golem seed");
     assert!(
-        promotions.contains(&"WRK-001".to_string()),
-        "Item with absent dep should be promoted (absent = archived = met)"
+        commit.status.success(),
+        "commit Task Golem seed failed: {}",
+        String::from_utf8_lossy(&commit.stderr)
     );
 }
 
-#[test]
-fn test_ready_item_with_partial_deps_not_promoted() {
-    let mut item_a = make_ready_item("WRK-001", "Depends on A and B", Some(DimensionLevel::High));
-    item_a.0.dependencies = vec!["WRK-002".to_string(), "WRK-003".to_string()];
-    let item_b = make_item("WRK-002", "Done dep", ItemStatus::Done);
-    let item_c = make_item("WRK-003", "Still Ready dep", ItemStatus::Ready);
-
-    let snapshot = vec![item_a, item_b, item_c];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
-    assert!(
-        !promotions.contains(&"WRK-001".to_string()),
-        "Item with partially met deps should not be promoted"
-    );
-}
-
-#[test]
-fn test_ready_item_with_blocked_dep_not_promoted() {
-    let mut item_a = make_ready_item("WRK-001", "Depends on blocked", Some(DimensionLevel::High));
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let mut item_b = common::make_blocked_pg_item("WRK-002", ItemStatus::InProgress);
-    item_b.0.blocked_reason = Some("needs input".to_string());
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
-    assert!(
-        !promotions.contains(&"WRK-001".to_string()),
-        "Item with Blocked dep should not be promoted"
-    );
-}
-
-#[test]
-fn test_ready_item_with_in_progress_dep_not_promoted() {
-    let mut item_a = make_ready_item(
-        "WRK-001",
-        "Depends on in-progress",
-        Some(DimensionLevel::High),
-    );
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let item_b = make_in_progress_item("WRK-002", "In-progress dep", "build");
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
-    assert!(
-        !promotions.contains(&"WRK-001".to_string()),
-        "Item with InProgress dep should not be promoted"
-    );
-}
-
-#[test]
-fn test_in_progress_with_unmet_dep_no_phase_action() {
-    let mut item_a = make_in_progress_item("WRK-001", "Has unmet dep", "build");
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let item_b = make_item("WRK-002", "Still Ready", ItemStatus::Ready);
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { item_id, .. } if item_id == "WRK-001"))
-        .collect();
-
-    assert!(
-        run_phases.is_empty(),
-        "InProgress item with unmet dep should not get RunPhase action"
-    );
-}
-
-#[test]
-fn test_in_progress_with_met_dep_gets_phase_action() {
-    let mut item_a = make_in_progress_item("WRK-001", "Has met dep", "build");
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let item_b = make_item("WRK-002", "Done dep", ItemStatus::Done);
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { item_id, .. } if item_id == "WRK-001"))
-        .collect();
-
-    assert_eq!(
-        run_phases.len(),
-        1,
-        "InProgress item with met dep should get RunPhase action"
-    );
-}
-
-#[test]
-fn test_scoping_with_unmet_dep_no_phase_action() {
-    let mut item_a = make_scoping_item("WRK-001", "Has unmet dep", "research");
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let item_b = make_item("WRK-002", "Still Ready", ItemStatus::Ready);
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let run_phases: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::RunPhase { item_id, .. } if item_id == "WRK-001"))
-        .collect();
-
-    assert!(
-        run_phases.is_empty(),
-        "Scoping item with unmet dep should not get RunPhase action"
-    );
-}
-
-#[test]
-fn test_new_item_with_unmet_dep_not_triaged() {
-    let mut item_a = make_item("WRK-001", "New with unmet dep", ItemStatus::New);
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let item_b = make_item("WRK-002", "Still Ready", ItemStatus::Ready);
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let triages: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::Triage(id) if id == "WRK-001"))
-        .collect();
-
-    assert!(
-        triages.is_empty(),
-        "New item with unmet dep should not be triaged"
-    );
-}
-
-#[test]
-fn test_new_item_with_met_dep_triaged() {
-    let mut item_a = make_item("WRK-001", "New with met dep", ItemStatus::New);
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let item_b = make_item("WRK-002", "Done dep", ItemStatus::Done);
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let triages: Vec<&SchedulerAction> = actions
-        .iter()
-        .filter(|a| matches!(a, SchedulerAction::Triage(id) if id == "WRK-001"))
-        .collect();
-
-    assert_eq!(triages.len(), 1, "New item with met dep should be triaged");
-}
-
-#[test]
-fn test_no_deps_scheduled_normally() {
-    let item_a = make_ready_item("WRK-001", "No deps", Some(DimensionLevel::High));
-
-    let snapshot = vec![item_a];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
-    assert!(
-        promotions.contains(&"WRK-001".to_string()),
-        "Item with no deps should be scheduled normally"
-    );
-}
-
-#[test]
-fn test_unmet_dep_does_not_consume_wip_slot() {
-    // max_wip=1, two Ready items: WRK-001 has unmet dep, WRK-002 doesn't
-    // WRK-001 should be skipped and WRK-002 should be promoted
-    let mut item_a = make_ready_item("WRK-001", "Has unmet dep", Some(DimensionLevel::High));
-    item_a.0.dependencies = vec!["WRK-003".to_string()];
-    let item_b = make_ready_item("WRK-002", "No deps", Some(DimensionLevel::Low));
-    let item_c = make_item("WRK-003", "Scoping dep", ItemStatus::Scoping);
-
-    let snapshot = vec![item_a, item_b, item_c];
-    let running = RunningTasks::new();
-    let config = ExecutionConfig {
-        max_wip: 1,
-        ..default_execution_config()
-    };
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
-    assert_eq!(promotions.len(), 1, "Exactly one item should be promoted");
-    assert_eq!(
-        promotions[0], "WRK-002",
-        "Item without unmet deps should be promoted, not the one with unmet deps"
-    );
-}
-
-// ============================================================
-// Dependency filtering tests — select_targeted_actions()
-// ============================================================
-
-#[test]
-fn test_targeted_with_unmet_dep_returns_empty() {
-    let mut item_a = make_in_progress_item("WRK-001", "Target with unmet dep", "build");
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let item_b = make_item("WRK-002", "Still Ready", ItemStatus::Ready);
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_targeted_actions(&snapshot, &running, &config, &pipelines, "WRK-001");
-
-    assert!(
-        actions.is_empty(),
-        "Targeted item with unmet dep should return empty actions"
-    );
-}
-
-#[test]
-fn test_targeted_with_met_dep_returns_action() {
-    let mut item_a = make_in_progress_item("WRK-001", "Target with met dep", "build");
-    item_a.0.dependencies = vec!["WRK-002".to_string()];
-    let item_b = make_item("WRK-002", "Done dep", ItemStatus::Done);
-
-    let snapshot = vec![item_a, item_b];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_targeted_actions(&snapshot, &running, &config, &pipelines, "WRK-001");
-
-    assert!(
-        !actions.is_empty(),
-        "Targeted item with met dep should return actions"
-    );
-}
-
-#[test]
-fn test_targeted_with_absent_dep_returns_action() {
-    let mut item_a = make_in_progress_item("WRK-001", "Target with absent dep", "build");
-    item_a.0.dependencies = vec!["WRK-ARCHIVED".to_string()];
-
-    let snapshot = vec![item_a];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_targeted_actions(&snapshot, &running, &config, &pipelines, "WRK-001");
-
-    assert!(
-        !actions.is_empty(),
-        "Targeted item with absent dep should return actions (absent = archived = met)"
-    );
-}
-
-// ============================================================
-// Mixed ID format dependency resolution
-// ============================================================
-
-#[test]
-fn test_mixed_id_formats_resolve_correctly() {
-    // WRK-001 (numeric) depends on WRK-a1b2c (hex) which is Done -> dep satisfied
-    let mut item_a = make_ready_item(
-        "WRK-001",
-        "Depends on hex-format item",
-        Some(DimensionLevel::High),
-    );
-    item_a.0.dependencies = vec!["WRK-a1b2c".to_string()];
-
-    let dep_hex = make_item("WRK-a1b2c", "Hex ID item", ItemStatus::Done);
-
-    let snapshot = vec![item_a, dep_hex];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
-    assert!(
-        promotions.contains(&"WRK-001".to_string()),
-        "Numeric-format item depending on Done hex-format item should be promoted"
-    );
-}
-
-#[test]
-fn test_mixed_id_formats_unmet_dep_blocks() {
-    // WRK-001 (numeric) depends on WRK-a1b2c (hex) which is Ready -> dep NOT satisfied
-    let mut item_a = make_ready_item(
-        "WRK-001",
-        "Depends on hex-format item",
-        Some(DimensionLevel::High),
-    );
-    item_a.0.dependencies = vec!["WRK-a1b2c".to_string()];
-
-    let dep_hex = make_item("WRK-a1b2c", "Hex ID item", ItemStatus::Ready);
-
-    let snapshot = vec![item_a, dep_hex];
-    let running = RunningTasks::new();
-    let config = default_execution_config();
-    let pipelines = default_pipelines();
-
-    let actions = select_actions(&snapshot, &running, &config, &pipelines);
-
-    let promotions: Vec<String> = actions
-        .iter()
-        .filter_map(|a| match a {
-            SchedulerAction::Promote(id) => Some(id.clone()),
-            _ => None,
-        })
-        .collect();
-
-    assert!(
-        !promotions.contains(&"WRK-001".to_string()),
-        "Item with unmet hex-format dep should NOT be promoted"
-    );
-}
-
-// ============================================================
-// unmet_dep_summary() unit tests
-// ============================================================
-
-#[test]
-fn test_unmet_dep_summary_no_unmet_deps() {
-    // All deps are Done -> None
-    let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
-    item.0.dependencies = vec!["WRK-002".to_string()];
-    let dep = make_item("WRK-002", "Done dep", ItemStatus::Done);
-
-    let result = unmet_dep_summary(&item, &[item.clone(), dep]);
-    assert_eq!(result, None, "No unmet deps should return None");
-}
-
-#[test]
-fn test_unmet_dep_summary_parked_dep_is_met() {
-    let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
-    item.0.dependencies = vec!["WRK-002".to_string()];
-    let dep = make_item("WRK-002", "Parked dep", ItemStatus::Parked);
-
-    let result = unmet_dep_summary(&item, &[item.clone(), dep]);
-    assert_eq!(result, None, "Parked deps should count as met");
-}
-
-#[test]
-fn test_unmet_dep_summary_single_unmet_dep() {
-    let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
-    item.0.dependencies = vec!["WRK-002".to_string()];
-    let dep = make_item("WRK-002", "Ready dep", ItemStatus::Ready);
-
-    let result = unmet_dep_summary(&item, &[item.clone(), dep]);
-    let summary = result.expect("Should return Some for unmet deps");
-    assert!(
-        summary.contains("WRK-002"),
-        "Should contain the unmet dep ID"
-    );
-    assert!(summary.contains("Ready"), "Should contain the dep status");
-}
-
-#[test]
-fn test_unmet_dep_summary_multiple_unmet_deps() {
-    let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
-    item.0.dependencies = vec!["WRK-002".to_string(), "WRK-003".to_string()];
-    let dep_a = make_item("WRK-002", "Ready dep", ItemStatus::Ready);
-    let dep_b = make_in_progress_item("WRK-003", "InProgress dep", "build");
-
-    let result = unmet_dep_summary(&item, &[item.clone(), dep_a, dep_b]);
-    let summary = result.expect("Should return Some for unmet deps");
-    assert!(
-        summary.contains("WRK-002"),
-        "Should contain first unmet dep"
-    );
-    assert!(
-        summary.contains("WRK-003"),
-        "Should contain second unmet dep"
-    );
-    assert!(
-        summary.contains(", "),
-        "Multiple deps should be comma-separated"
-    );
-}
-
-#[test]
-fn test_unmet_dep_summary_mix_of_met_and_unmet() {
-    let mut item = make_item("WRK-001", "Item", ItemStatus::Ready);
-    item.0.dependencies = vec![
-        "WRK-002".to_string(),
-        "WRK-003".to_string(),
-        "WRK-004".to_string(),
-    ];
-    let dep_done = make_item("WRK-002", "Done dep", ItemStatus::Done);
-    let dep_ready = make_item("WRK-003", "Ready dep", ItemStatus::Ready);
-    // WRK-004 is absent (not in the list) -> met
-
-    let result = unmet_dep_summary(&item, &[item.clone(), dep_done, dep_ready]);
-    let summary = result.expect("Should return Some for unmet deps");
-    assert!(!summary.contains("WRK-002"), "Done dep should not appear");
-    assert!(!summary.contains("WRK-004"), "Absent dep should not appear");
-    assert!(summary.contains("WRK-003"), "Unmet Ready dep should appear");
-    assert!(
-        !summary.contains(", "),
-        "Only one unmet dep so no comma separator"
-    );
-}
-
-// ============================================================
-// advance_to_next_active_target() unit tests
-// ============================================================
-
-#[test]
-fn test_advance_skips_done_targets() {
-    let done_item = make_item("WRK-001", "Done target", ItemStatus::Done);
-    let active_item = make_in_progress_item("WRK-002", "Active target", "build");
-    let snapshot = vec![done_item, active_item];
-
-    let result = advance_to_next_active_target(
-        &["WRK-001".to_string(), "WRK-002".to_string()],
-        0,
-        &[],
-        &snapshot,
-    );
-    assert_eq!(
-        result, 1,
-        "Should skip Done WRK-001 and return index 1 for active WRK-002"
-    );
-}
-
-#[test]
-fn test_advance_skips_archived_targets() {
-    // WRK-001 not in snapshot (archived), WRK-002 is active
-    let active_item = make_in_progress_item("WRK-002", "Active target", "build");
-    let snapshot = vec![active_item];
-
-    let result = advance_to_next_active_target(
-        &["WRK-001".to_string(), "WRK-002".to_string()],
-        0,
-        &[],
-        &snapshot,
-    );
-    assert_eq!(result, 1, "Should skip archived WRK-001 and return index 1");
-}
-
-#[test]
-fn test_advance_all_exhausted() {
-    let done_item = make_item("WRK-001", "Done", ItemStatus::Done);
-    let snapshot = vec![done_item];
-
-    let result = advance_to_next_active_target(
-        &["WRK-001".to_string(), "WRK-099".to_string()],
-        0,
-        &[],
-        &snapshot,
-    );
-    assert!(
-        result >= 2,
-        "Should return index >= len when all targets exhausted"
-    );
-}
-
-#[test]
-fn test_advance_first_is_active() {
-    let active_item = make_in_progress_item("WRK-001", "Active", "build");
-    let snapshot = vec![active_item];
-
-    let result = advance_to_next_active_target(&["WRK-001".to_string()], 0, &[], &snapshot);
-    assert_eq!(result, 0, "Should return 0 when first target is active");
-}
-
-#[test]
-fn test_advance_mixed_states() {
-    let done_item = make_item("WRK-001", "Done", ItemStatus::Done);
-    // WRK-002 not in snapshot (archived)
-    let active_item = make_in_progress_item("WRK-003", "Active", "build");
-    let snapshot = vec![done_item, active_item];
-
-    let result = advance_to_next_active_target(
-        &[
-            "WRK-001".to_string(),
-            "WRK-002".to_string(),
-            "WRK-003".to_string(),
-        ],
-        0,
-        &[],
-        &snapshot,
-    );
-    assert_eq!(result, 2, "Should skip Done and archived, return index 2");
-}
-
-#[test]
-fn test_advance_empty_targets() {
-    let snapshot: Vec<PgItem> = vec![];
-
-    let result = advance_to_next_active_target(&[], 0, &[], &snapshot);
-    assert_eq!(
-        result, 0,
-        "Empty targets should return 0 (immediately >= len)"
-    );
-}
-
-#[test]
-fn test_advance_skips_pre_blocked_targets() {
-    let blocked_item = common::make_blocked_pg_item("WRK-001", ItemStatus::InProgress);
-    let active_item = make_in_progress_item("WRK-002", "Active target", "build");
-    let snapshot = vec![blocked_item, active_item];
-
-    let result = advance_to_next_active_target(
-        &["WRK-001".to_string(), "WRK-002".to_string()],
-        0,
-        &[],
-        &snapshot,
-    );
-    assert_eq!(
-        result, 1,
-        "Should skip pre-Blocked WRK-001 and return index 1 for active WRK-002"
-    );
-}
-
-#[test]
-fn test_advance_skips_parked_targets() {
-    let parked_item = make_item("WRK-001", "Parked target", ItemStatus::Parked);
-    let active_item = make_in_progress_item("WRK-002", "Active target", "build");
-    let snapshot = vec![parked_item, active_item];
-
-    let result = advance_to_next_active_target(
-        &["WRK-001".to_string(), "WRK-002".to_string()],
-        0,
-        &[],
-        &snapshot,
-    );
-    assert_eq!(
-        result, 1,
-        "Should skip Parked WRK-001 and return index 1 for active WRK-002"
-    );
-}
-
-#[test]
-fn test_advance_skips_items_in_completed_list() {
-    // WRK-001 is in items_completed but still InProgress in snapshot (race condition)
-    let item = make_in_progress_item("WRK-001", "Completed via items_completed", "build");
-    let active_item = make_in_progress_item("WRK-002", "Active", "build");
-    let snapshot = vec![item, active_item];
-
-    let result = advance_to_next_active_target(
-        &["WRK-001".to_string(), "WRK-002".to_string()],
-        0,
-        &["WRK-001".to_string()],
-        &snapshot,
-    );
-    assert_eq!(result, 1, "Should skip WRK-001 that's in items_completed");
-}
-
-// ============================================================
-// Multi-target integration tests
-// ============================================================
-
-#[tokio::test]
-async fn test_multi_target_processes_in_order() {
-    let item1 = make_in_progress_item("WRK-001", "First", "build");
-    let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-        Ok(phase_complete_result("WRK-002", "build")),
-        Ok(phase_complete_result("WRK-002", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.contains(&"WRK-001".to_string()));
-    assert!(summary.items_completed.contains(&"WRK-002".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-}
-
-#[tokio::test]
-async fn test_multi_target_halts_on_block() {
-    let item1 = make_in_progress_item("WRK-001", "First", "build");
-    let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-        Ok(blocked_result("WRK-002", "build")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.contains(&"WRK-001".to_string()));
-    assert!(summary.items_blocked.contains(&"WRK-002".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::TargetBlocked);
-}
-
-#[tokio::test]
-async fn test_multi_target_all_done_at_startup() {
-    let item1 = make_item("WRK-001", "Done 1", ItemStatus::Done);
-    let item2 = make_item("WRK-002", "Done 2", ItemStatus::Done);
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    let runner = MockAgentRunner::new(vec![]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-    assert_eq!(summary.phases_executed, 0);
-}
-
-#[tokio::test]
-async fn test_multi_target_skips_done_targets() {
-    let item1 = make_item("WRK-001", "Already done", ItemStatus::Done);
-    let item2 = make_in_progress_item("WRK-002", "Active", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-002", "build")),
-        Ok(phase_complete_result("WRK-002", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.contains(&"WRK-002".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-}
-
-#[tokio::test]
-async fn test_multi_target_single_element_backward_compat() {
-    // Single target in Vec should behave identically to pre-change behavior
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed, vec!["WRK-001"]);
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-}
-
-#[tokio::test]
-async fn test_multi_target_target_archived_during_run() {
-    // Target not in snapshot should be skipped (treated as done/archived)
-    // Only WRK-002 in backlog; WRK-001 is "archived" (not present)
-    let item2 = make_in_progress_item("WRK-002", "Active", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item2]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-002", "build")),
-        Ok(phase_complete_result("WRK-002", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.contains(&"WRK-002".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-}
-
-#[tokio::test]
-async fn test_multi_target_skips_pre_blocked_targets() {
-    let blocked_item = common::make_blocked_pg_item("WRK-001", ItemStatus::InProgress);
-    let item2 = make_in_progress_item("WRK-002", "Active", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![blocked_item, item2]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-002", "build")),
-        Ok(phase_complete_result("WRK-002", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.contains(&"WRK-002".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-}
-
-// ============================================================
-// Auto-advance integration tests
-// ============================================================
-
-#[tokio::test]
-async fn test_auto_advance_skips_blocked_target() {
-    let item1 = make_in_progress_item("WRK-001", "First", "build");
-    let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(blocked_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-002", "build")),
-        Ok(phase_complete_result("WRK-002", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: true,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed.len(), 1);
-    assert!(summary.items_completed.contains(&"WRK-002".to_string()));
-    assert_eq!(summary.items_blocked.len(), 1);
-    assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-}
-
-#[tokio::test]
-async fn test_auto_advance_all_targets_blocked() {
-    let item1 = make_in_progress_item("WRK-001", "First", "build");
-    let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(blocked_result("WRK-001", "build")),
-        Ok(blocked_result("WRK-002", "build")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: true,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.is_empty());
-    assert_eq!(summary.items_blocked.len(), 2);
-    assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
-    assert!(summary.items_blocked.contains(&"WRK-002".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-}
-
-#[tokio::test]
-async fn test_auto_advance_single_target_blocked() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![Ok(blocked_result("WRK-001", "build"))]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: true,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.is_empty());
-    assert_eq!(summary.items_blocked.len(), 1);
-    assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-}
-
-#[tokio::test]
-async fn test_auto_advance_circuit_breaker_not_tripped() {
-    let item1 = make_in_progress_item("WRK-001", "First", "build");
-    let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    // Each target: initial attempt fails, retry fails -> retries exhausted -> blocked
-    let runner = MockAgentRunner::new(vec![
-        Ok(failed_result("WRK-001", "build")),
-        Ok(failed_result("WRK-001", "build")),
-        Ok(failed_result("WRK-002", "build")),
-        Ok(failed_result("WRK-002", "build")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-    config.execution.max_retries = 1;
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: true,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    // Should NOT be CircuitBreakerTripped -- the reset between targets prevents it
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-    assert_eq!(summary.items_blocked.len(), 2);
-    assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
-    assert!(summary.items_blocked.contains(&"WRK-002".to_string()));
-    assert!(summary.items_completed.is_empty());
-}
-
-#[tokio::test]
-async fn test_auto_advance_backward_compat() {
-    // Without --auto-advance, first blocked target should halt the run
-    let item1 = make_in_progress_item("WRK-001", "First", "build");
-    let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(blocked_result("WRK-001", "build")),
-        // WRK-002 results not needed -- scheduler halts before reaching it
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.halt_reason, HaltReason::TargetBlocked);
-    assert_eq!(summary.items_blocked.len(), 1);
-    assert!(summary.items_blocked.contains(&"WRK-001".to_string()));
-    // WRK-002 should not have been processed
-    assert!(!summary.items_completed.contains(&"WRK-002".to_string()));
-    assert!(!summary.items_blocked.contains(&"WRK-002".to_string()));
-}
-
-// ============================================================
-// Filter scheduling tests
-// ============================================================
-
-#[tokio::test]
-async fn test_filter_restricts_scheduler_to_matching_items() {
-    let mut high_item = make_in_progress_item("WRK-001", "High impact", "build");
-    pg_item::set_impact(&mut high_item.0, Some(&DimensionLevel::High));
-    let mut low_item = make_in_progress_item("WRK-002", "Low impact", "build");
-    pg_item::set_impact(&mut low_item.0, Some(&DimensionLevel::Low));
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![high_item, low_item]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec![],
-        filter: vec![filter::parse_filter("impact=high").unwrap()],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    // Only WRK-001 (high impact) should be processed
-    assert!(summary.items_completed.contains(&"WRK-001".to_string()));
-    assert!(!summary.items_completed.contains(&"WRK-002".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::FilterExhausted);
-}
-
-#[tokio::test]
-async fn test_filter_no_matching_items_halts() {
-    let mut low_item = make_in_progress_item("WRK-001", "Low impact", "build");
-    pg_item::set_impact(&mut low_item.0, Some(&DimensionLevel::Low));
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![low_item]);
-
-    let runner = MockAgentRunner::new(vec![]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec![],
-        filter: vec![filter::parse_filter("impact=high").unwrap()],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.halt_reason, HaltReason::NoMatchingItems);
-    assert_eq!(summary.phases_executed, 0);
-}
-
-#[tokio::test]
-async fn test_filter_all_exhausted_halts() {
-    let mut done_item = make_item("WRK-001", "Done high impact", ItemStatus::Done);
-    pg_item::set_impact(&mut done_item.0, Some(&DimensionLevel::High));
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![done_item]);
-
-    let runner = MockAgentRunner::new(vec![]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec![],
-        filter: vec![filter::parse_filter("impact=high").unwrap()],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.halt_reason, HaltReason::FilterExhausted);
-    assert_eq!(summary.phases_executed, 0);
-}
-
-// ============================================================
-// Phase 4: End-to-end integration tests
-// ============================================================
-
-#[tokio::test]
-async fn test_integration_single_target_backward_compat() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed, vec!["WRK-001"]);
-    assert!(summary.items_blocked.is_empty());
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-    assert!(
-        summary.phases_executed >= 2,
-        "Both build and review phases should execute"
-    );
-}
-
-#[tokio::test]
-async fn test_integration_multi_target_sequential() {
-    let item1 = make_in_progress_item("WRK-001", "First", "build");
-    let item2 = make_in_progress_item("WRK-002", "Second", "build");
-    let item3 = make_in_progress_item("WRK-003", "Third", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2, item3]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-        Ok(phase_complete_result("WRK-002", "build")),
-        Ok(phase_complete_result("WRK-002", "review")),
-        Ok(phase_complete_result("WRK-003", "build")),
-        Ok(phase_complete_result("WRK-003", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec![
-            "WRK-001".to_string(),
-            "WRK-002".to_string(),
-            "WRK-003".to_string(),
-        ],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.contains(&"WRK-001".to_string()));
-    assert!(summary.items_completed.contains(&"WRK-002".to_string()));
-    assert!(summary.items_completed.contains(&"WRK-003".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::TargetCompleted);
-    assert!(
-        summary.phases_executed >= 6,
-        "All 6 phases should execute (2 per item x 3 items)"
-    );
-}
-
-#[tokio::test]
-async fn test_integration_multi_target_with_block() {
-    let item1 = make_in_progress_item("WRK-001", "First", "build");
-    let item2 = make_in_progress_item("WRK-002", "Second (will block)", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-        Ok(blocked_result("WRK-002", "build")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec!["WRK-001".to_string(), "WRK-002".to_string()],
-        filter: vec![],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.contains(&"WRK-001".to_string()));
-    assert!(summary.items_blocked.contains(&"WRK-002".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::TargetBlocked);
-}
-
-#[tokio::test]
-async fn test_integration_filter_impact_high() {
-    let mut high1 = make_in_progress_item("WRK-001", "High impact 1", "build");
-    pg_item::set_impact(&mut high1.0, Some(&DimensionLevel::High));
-    let mut high2 = make_in_progress_item("WRK-002", "High impact 2", "build");
-    pg_item::set_impact(&mut high2.0, Some(&DimensionLevel::High));
-    let mut medium_item = make_in_progress_item("WRK-003", "Medium impact", "build");
-    pg_item::set_impact(&mut medium_item.0, Some(&DimensionLevel::Medium));
-    let mut low_item = make_in_progress_item("WRK-004", "Low impact", "build");
-    pg_item::set_impact(&mut low_item.0, Some(&DimensionLevel::Low));
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![high1, high2, medium_item, low_item]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-        Ok(phase_complete_result("WRK-002", "build")),
-        Ok(phase_complete_result("WRK-002", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec![],
-        filter: vec![filter::parse_filter("impact=high").unwrap()],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.contains(&"WRK-001".to_string()));
-    assert!(summary.items_completed.contains(&"WRK-002".to_string()));
-    assert!(!summary.items_completed.contains(&"WRK-003".to_string()));
-    assert!(!summary.items_completed.contains(&"WRK-004".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::FilterExhausted);
-}
-
-#[tokio::test]
-async fn test_integration_filter_no_matches() {
-    let mut item1 = make_in_progress_item("WRK-001", "Medium impact", "build");
-    pg_item::set_impact(&mut item1.0, Some(&DimensionLevel::Medium));
-    let mut item2 = make_in_progress_item("WRK-002", "Low impact", "build");
-    pg_item::set_impact(&mut item2.0, Some(&DimensionLevel::Low));
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item1, item2]);
-
-    let runner = MockAgentRunner::new(vec![]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec![],
-        filter: vec![filter::parse_filter("impact=high").unwrap()],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.halt_reason, HaltReason::NoMatchingItems);
-    assert_eq!(summary.phases_executed, 0);
-    assert!(summary.items_completed.is_empty());
-}
-
-// ============================================================
-// previous_summaries cleanup tests (WRK-022)
-// ============================================================
-
-#[test]
-fn cleanup_terminal_summary_removes_entry_and_noop_for_missing() {
-    let mut summaries: HashMap<String, String> = HashMap::new();
-    summaries.insert("WRK-001".to_string(), "Phase completed".to_string());
-    summaries.insert("WRK-002".to_string(), "Another phase".to_string());
-
-    // Remove existing entry
-    summaries.remove("WRK-001");
-    assert!(!summaries.contains_key("WRK-001"));
-    assert!(summaries.contains_key("WRK-002"));
-    assert_eq!(summaries.len(), 1);
-
-    // No-op for missing entry
-    summaries.remove("WRK-999");
-    assert_eq!(summaries.len(), 1);
-}
-
-#[tokio::test]
-async fn cleanup_done_via_handle_phase_success() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed, vec!["WRK-001"]);
-    assert!(summary.items_blocked.is_empty());
-    assert_eq!(summary.halt_reason, HaltReason::AllDoneOrBlocked);
-}
-
-#[tokio::test]
-async fn cleanup_blocked_via_handle_phase_failed() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    // Single attempt (max_retries=0) that fails -> handle_phase_failed
-    let runner = MockAgentRunner::new(vec![Ok(failed_result("WRK-001", "build"))]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-    config.execution.max_retries = 0;
-    config.execution.max_concurrent = 1;
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.is_empty());
-    assert_eq!(summary.items_blocked, vec!["WRK-001"]);
-}
-
-#[tokio::test]
-async fn cleanup_blocked_via_handle_phase_blocked() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![Ok(blocked_result("WRK-001", "build"))]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.is_empty());
-    assert_eq!(summary.items_blocked, vec!["WRK-001"]);
-    assert_eq!(summary.halt_reason, HaltReason::AllDoneOrBlocked);
-}
-
-#[tokio::test]
-async fn non_terminal_phase_retains_summary() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    // Subphase -> phase complete -> review complete
-    let runner = MockAgentRunner::new(vec![
-        Ok(subphase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed, vec!["WRK-001"]);
-    assert_eq!(summary.phases_executed, 3);
-}
-
-#[tokio::test]
-async fn many_items_complete_with_bounded_summaries() {
-    // 4 items, max_wip=2 -- items processed in batches
-    let item1 = make_in_progress_item("WRK-001", "Feature 1", "build");
-    let item2 = make_in_progress_item("WRK-002", "Feature 2", "build");
-    let item3 = make_in_progress_item("WRK-003", "Feature 3", "build");
-    let item4 = make_in_progress_item("WRK-004", "Feature 4", "build");
-    let (coordinator_handle, _coord_task, dir) =
-        setup_coordinator_with_items(vec![item1, item2, item3, item4]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-        Ok(phase_complete_result("WRK-002", "build")),
-        Ok(phase_complete_result("WRK-002", "review")),
-        Ok(phase_complete_result("WRK-003", "build")),
-        Ok(phase_complete_result("WRK-003", "review")),
-        Ok(phase_complete_result("WRK-004", "build")),
-        Ok(phase_complete_result("WRK-004", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-    config.execution.max_wip = 2;
-    config.execution.max_concurrent = 1;
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed.len(), 4);
-    assert!(summary.items_blocked.is_empty());
-    assert_eq!(summary.halt_reason, HaltReason::AllDoneOrBlocked);
-}
-
-#[tokio::test]
-async fn retry_then_success_summary_persists() {
-    let item = make_in_progress_item("WRK-001", "Feature", "build");
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    // First attempt fails, second succeeds (executor retries internally)
-    let runner = MockAgentRunner::new(vec![
-        Ok(failed_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-    config.execution.max_retries = 1;
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = run_params(dir.path(), None, 100);
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.items_completed, vec!["WRK-001"]);
-    assert!(summary.items_blocked.is_empty());
-}
-
-#[tokio::test]
-async fn test_multi_filter_no_matching_items_halts() {
-    // Item matches impact=high but not size=small -> AND intersection is empty
-    let mut item = make_in_progress_item("WRK-001", "High impact large", "build");
-    pg_item::set_impact(&mut item.0, Some(&DimensionLevel::High));
-    pg_item::set_size(&mut item.0, Some(&SizeLevel::Large));
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec![],
-        filter: vec![
-            filter::parse_filter("impact=high").unwrap(),
-            filter::parse_filter("size=small").unwrap(),
-        ],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert_eq!(summary.halt_reason, HaltReason::NoMatchingItems);
-    assert_eq!(summary.phases_executed, 0);
-}
-
-#[tokio::test]
-async fn test_multi_filter_exhausted_halts() {
-    // Item matches both impact=high AND size=small
-    let mut item = make_in_progress_item("WRK-001", "High impact small", "build");
-    pg_item::set_impact(&mut item.0, Some(&DimensionLevel::High));
-    pg_item::set_size(&mut item.0, Some(&SizeLevel::Small));
-    let (coordinator_handle, _coord_task, dir) = setup_coordinator_with_items(vec![item]);
-
-    let runner = MockAgentRunner::new(vec![
-        Ok(phase_complete_result("WRK-001", "build")),
-        Ok(phase_complete_result("WRK-001", "review")),
-    ]);
-
-    let mut config = default_config();
-    config.pipelines = simple_pipeline();
-
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let params = RunParams {
-        targets: vec![],
-        filter: vec![
-            filter::parse_filter("impact=high").unwrap(),
-            filter::parse_filter("size=small").unwrap(),
-        ],
-        cap: 100,
-        root: dir.path().to_path_buf(),
-        config_base: dir.path().to_path_buf(),
-        auto_advance: false,
-    };
-
-    let summary =
-        scheduler::run_scheduler(coordinator_handle, Arc::new(runner), config, params, cancel)
-            .await
-            .expect("Scheduler should succeed");
-
-    assert!(summary.items_completed.contains(&"WRK-001".to_string()));
-    assert_eq!(summary.halt_reason, HaltReason::FilterExhausted);
+fn create_discovered_item_through_tg_crud(
+    project_root: &std::path::Path,
+) -> Result<String, String> {
+    let output = Command::new("tg")
+        .args([
+            "--json",
+            "add",
+            "Discovered work",
+            "--set",
+            "x-pg-owner=\"phase-golem\"",
+            "--set",
+            "x-pg-template-node-key=\"build\"",
+            "--set",
+            "x-pg-executor-profile=\"test-executor\"",
+            "--set",
+            "x-pg-execution-policy={\"timeout_minutes\":1,\"max_retries\":0,\"destructive\":false,\"workflows\":[]}",
+            "--set",
+            "x-pg-verification={\"required_checks\":[]}",
+        ])
+        .current_dir(project_root)
+        .output()
+        .map_err(|error| format!("run task-golem add: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "task-golem add failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    serde_json::from_slice::<Item>(&output.stdout)
+        .map(|item| item.id)
+        .map_err(|error| format!("parse task-golem add response: {error}"))
 }

@@ -20,11 +20,12 @@ nix = { version = "0.29", features = ["signal", "process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 signal-hook = "0.3"
-task-golem = { git = "https://github.com/SIRHAMY/task-golem", branch = "main" }
+task-golem = { git = "https://github.com/SIRHAMY/task-golem", rev = "95a346f70f1013ace168bdcf16a943dd7ab05ab5" }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 toml = "0.8"
+uuid = { version = "1", features = ["v7"] }
 
 [dev-dependencies]
 fd-lock = "4"

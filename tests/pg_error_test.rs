@@ -54,9 +54,10 @@ fn from_id_collision_exhausted() {
 
 #[test]
 fn from_item_not_found() {
-    let tg_err = TgError::ItemNotFound("WRK-abc".to_string());
+    let item_id = "019b2e7a-0001-7000-8000-000000000001";
+    let tg_err = TgError::ItemNotFound(item_id.to_string());
     let pg_err = PgError::from(tg_err);
-    assert!(matches!(pg_err, PgError::ItemNotFound(ref id) if id == "WRK-abc"));
+    assert!(matches!(pg_err, PgError::ItemNotFound(ref id) if id == item_id));
 }
 
 #[test]
@@ -77,11 +78,8 @@ fn from_cycle_detected() {
 }
 
 #[test]
-fn from_ambiguous_id_maps_to_unexpected() {
-    let tg_err = TgError::AmbiguousId {
-        prefix: "ab".to_string(),
-        matches: vec!["abc".to_string(), "abd".to_string()],
-    };
+fn from_invalid_id_maps_to_unexpected() {
+    let tg_err = TgError::InvalidId("not-a-canonical-uuid".to_string());
     let pg_err = PgError::from(tg_err);
     assert!(matches!(pg_err, PgError::Unexpected(_)));
 }

@@ -6,6 +6,7 @@ pub mod filter;
 pub mod git;
 pub mod lock;
 pub mod log;
+pub mod materialization;
 pub mod pg_error;
 pub mod pg_item;
 pub mod preflight;

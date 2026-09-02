@@ -61,7 +61,7 @@ pub fn build_backlog_summary(items: &[PgItem], exclude_id: &str) -> Option<Strin
         .iter()
         .filter(|i| i.id() != exclude_id)
         .map(|i| {
-            let status = format!("{:?}", i.pg_status()).to_lowercase();
+            let status = i.status().to_string();
             format!("- {}: {} [{}]", i.id(), i.title(), status)
         })
         .collect();
@@ -76,7 +76,7 @@ pub fn build_backlog_summary(items: &[PgItem], exclude_id: &str) -> Option<Strin
 /// Build a prompt for the triage agent (pre-workflow).
 ///
 /// The triage agent assesses new items for size/complexity/risk/impact,
-/// creates idea files if needed, and promotes small+low-risk items directly.
+/// creates idea files if needed, and routes small low-risk items directly.
 /// Includes available pipeline types from config for classification.
 /// When `backlog_summary` is provided, includes it for duplicate detection.
 pub fn build_triage_prompt(
@@ -139,11 +139,10 @@ pub fn build_triage_prompt(
            - `impact`: Expected benefit or value delivered\n\
            - `sizing_rationale`: Reasoning behind your size/complexity assessment\n\
         6. **Decide routing:**\n\
-           - If the item is **small size AND low risk**: promote directly (no idea file needed).\n\
-             Set `requires_human_review: false` in your result.\n\
+           - If the item is **small size AND low risk**: route directly (no idea file needed).\n\
            - If the item is **medium+ size OR medium+ risk**: create an idea file at\n\
              `_ideas/{{item_id}}_{{slug}}.md` with problem statement, proposed approach, and assessment.\n\
-             Set `requires_human_review` based on risk level (true if high risk).\n\
+             High-risk work should be reported as blocked with a diagnostic.\n\
         7. **Report your assessment** in the structured output.\n\n\
         Also use `blocked` if the work is not needed (e.g., already implemented, obsolete, out of scope).\n\n\
         Use your judgment. When uncertain, err on the side of creating an idea file and flagging for review.",
@@ -185,7 +184,7 @@ fn build_triage_output_suffix(item_id: &str, result_path: &Path) -> String {
         \x20     \"suggested_risk\": \"low | medium | high (optional)\"\n\
         \x20   }}\n\
         \x20 ],\n\
-        \x20 \"duplicates\": [\"WRK-xxx\"],\n\
+        \x20 \"duplicates\": [\"019b2e7a-1234-7abc-8def-0123456789ab\"],\n\
         \x20 \"description\": {{\n\
         \x20   \"context\": \"Background and origin of the work item (optional)\",\n\
         \x20   \"problem\": \"What issue or gap this addresses (optional)\",\n\
@@ -372,7 +371,7 @@ fn build_output_suffix(item_id: &str, phase_str: &str, result_path: &Path) -> St
 /// ## Phase Golem Context
 ///
 /// **Mode:** autonomous
-/// **Item:** WRK-003 — Orchestrator Pipeline Engine v2
+/// **Item:** 019b2e7a-1234-7abc-8def-0123456789ab - Orchestrator Pipeline Engine v2
 /// **Pipeline:** feature
 /// **Phase:** build (4/6, main)
 /// **Description:** [user's free-form description]

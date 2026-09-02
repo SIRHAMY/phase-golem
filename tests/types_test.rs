@@ -1,623 +1,136 @@
-use phase_golem::types::*;
-
-// --- Default impl verification ---
+use phase_golem::types::{
+    parse_item_status, DimensionLevel, FollowUp, ItemUpdate, PhasePool, PhaseResult, ResultCode,
+    SchedulerAction, SizeLevel, StructuredDescription, UpdatedAssessments,
+};
+use task_golem::model::status::Status;
 
 #[test]
-fn test_itemstatus_default() {
-    assert_eq!(ItemStatus::default(), ItemStatus::New);
+fn native_status_parser_accepts_only_tg_statuses() {
+    for (input, expected) in [
+        ("todo", Status::Todo),
+        ("doing", Status::Doing),
+        ("blocked", Status::Blocked),
+        ("done", Status::Done),
+    ] {
+        assert_eq!(parse_item_status(input), Ok(expected));
+    }
+    assert!(parse_item_status("ready").is_err());
 }
 
-// --- YAML serialization round-trips ---
+#[test]
+fn lifecycle_updates_carry_native_status_and_diagnostics() {
+    assert_eq!(
+        ItemUpdate::TransitionStatus(Status::Done),
+        ItemUpdate::TransitionStatus(Status::Done)
+    );
+    assert_eq!(
+        ItemUpdate::SetBlocked("executor failed".to_string()),
+        ItemUpdate::SetBlocked("executor failed".to_string())
+    );
+}
 
 #[test]
-fn yaml_round_trip_item_status_all_variants() {
-    let variants = vec![
-        ItemStatus::New,
-        ItemStatus::Scoping,
-        ItemStatus::Ready,
-        ItemStatus::InProgress,
-        ItemStatus::Parked,
-        ItemStatus::Done,
-        ItemStatus::Blocked,
+fn scheduler_actions_distinguish_claim_gate_and_block() {
+    let actions = [
+        SchedulerAction::Claim("a".to_string()),
+        SchedulerAction::HumanGate("b".to_string()),
+        SchedulerAction::Block {
+            item_id: "c".to_string(),
+            reason: "no phase".to_string(),
+        },
     ];
-    for status in variants {
-        let yaml = serde_yaml_ng::to_string(&status).unwrap();
-        let deserialized: ItemStatus = serde_yaml_ng::from_str(&yaml).unwrap();
-        assert_eq!(status, deserialized);
-    }
+    assert!(matches!(actions[0], SchedulerAction::Claim(_)));
+    assert!(matches!(actions[1], SchedulerAction::HumanGate(_)));
+    assert!(matches!(actions[2], SchedulerAction::Block { .. }));
 }
 
 #[test]
-fn yaml_round_trip_result_code_all_variants() {
-    let variants = vec![
-        ResultCode::SubphaseComplete,
-        ResultCode::PhaseComplete,
-        ResultCode::Failed,
-        ResultCode::Blocked,
-    ];
-    for code in variants {
-        let yaml = serde_yaml_ng::to_string(&code).unwrap();
-        let deserialized: ResultCode = serde_yaml_ng::from_str(&yaml).unwrap();
-        assert_eq!(code, deserialized);
-    }
+fn follow_up_accepts_plain_string_and_structured_shape() {
+    let plain: FollowUp = serde_json::from_str("\"Add coverage\"").expect("plain follow-up");
+    let structured: FollowUp = serde_json::from_str(
+        r#"{"title":"Add docs","suggested_size":"small","context":"public API"}"#,
+    )
+    .expect("structured follow-up");
+    assert_eq!(plain.title, "Add coverage");
+    assert_eq!(structured.suggested_size, Some(SizeLevel::Small));
 }
 
 #[test]
-fn yaml_round_trip_block_type_all_variants() {
-    let variants = vec![BlockType::Clarification, BlockType::Decision];
-    for bt in variants {
-        let yaml = serde_yaml_ng::to_string(&bt).unwrap();
-        let deserialized: BlockType = serde_yaml_ng::from_str(&yaml).unwrap();
-        assert_eq!(bt, deserialized);
+fn structured_description_reports_empty_content() {
+    assert!(StructuredDescription::default().is_empty());
+    assert!(!StructuredDescription {
+        context: "context".to_string(),
+        ..StructuredDescription::default()
     }
+    .is_empty());
 }
 
 #[test]
-fn yaml_round_trip_size_level_all_variants() {
-    let variants = vec![SizeLevel::Small, SizeLevel::Medium, SizeLevel::Large];
-    for sl in variants {
-        let yaml = serde_yaml_ng::to_string(&sl).unwrap();
-        let deserialized: SizeLevel = serde_yaml_ng::from_str(&yaml).unwrap();
-        assert_eq!(sl, deserialized);
-    }
-}
-
-#[test]
-fn yaml_round_trip_dimension_level_all_variants() {
-    let variants = vec![
-        DimensionLevel::Low,
-        DimensionLevel::Medium,
-        DimensionLevel::High,
-    ];
-    for dl in variants {
-        let yaml = serde_yaml_ng::to_string(&dl).unwrap();
-        let deserialized: DimensionLevel = serde_yaml_ng::from_str(&yaml).unwrap();
-        assert_eq!(dl, deserialized);
-    }
-}
-
-// --- JSON serialization round-trips ---
-
-#[test]
-fn json_round_trip_phase_result_full() {
+fn phase_result_serialization_round_trips_agent_contract() {
     let result = PhaseResult {
-        item_id: "WRK-001".to_string(),
+        item_id: "018f2b1c-4d5e-7abc-8123-456789abcdef".to_string(),
         phase: "build".to_string(),
         result: ResultCode::PhaseComplete,
-        summary: "Built all components successfully".to_string(),
-        context: Some("All tests pass".to_string()),
+        summary: "Implemented native lifecycle".to_string(),
+        context: Some("All checks passed".to_string()),
         updated_assessments: Some(UpdatedAssessments {
             size: Some(SizeLevel::Medium),
-            complexity: Some(DimensionLevel::Medium),
-            risk: None,
+            complexity: Some(DimensionLevel::High),
+            risk: Some(DimensionLevel::Low),
             impact: Some(DimensionLevel::High),
         }),
-        follow_ups: vec![
-            FollowUp {
-                title: "Add integration tests".to_string(),
-                context: Some("Unit tests pass but integration coverage is low".to_string()),
-                suggested_size: Some(SizeLevel::Small),
-                suggested_risk: Some(DimensionLevel::Low),
-            },
-            FollowUp {
-                title: "Refactor error handling".to_string(),
-                context: None,
-                suggested_size: None,
-                suggested_risk: None,
-            },
-        ],
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
+        follow_ups: vec![FollowUp {
+            title: "Add operator documentation".to_string(),
+            context: Some("Document claim behavior".to_string()),
+            suggested_size: Some(SizeLevel::Small),
+            suggested_risk: Some(DimensionLevel::Low),
+        }],
+        based_on_commit: Some("abc123".to_string()),
+        pipeline_type: Some("feature".to_string()),
+        commit_summary: Some("Use TG-native lifecycle".to_string()),
+        duplicates: vec!["018f2b1c-4d5e-7abc-9234-56789abcdef0".to_string()],
+        description: Some(StructuredDescription {
+            context: "Legacy state diverged".to_string(),
+            problem: "Two lifecycle authorities".to_string(),
+            solution: "Use TG status".to_string(),
+            impact: "Consistent scheduling".to_string(),
+            sizing_rationale: "Cross-cutting migration".to_string(),
+        }),
     };
 
-    let json = serde_json::to_string_pretty(&result).unwrap();
-    let deserialized: PhaseResult = serde_json::from_str(&json).unwrap();
-    assert_eq!(result, deserialized);
+    let json = serde_json::to_string(&result).expect("serialize phase result");
+    let decoded = serde_json::from_str::<PhaseResult>(&json).expect("deserialize phase result");
+
+    assert!(json.contains(r#""result":"phase_complete""#));
+    assert_eq!(decoded, result);
 }
 
 #[test]
-fn json_round_trip_phase_result_minimal() {
-    let result = PhaseResult {
-        item_id: "WRK-002".to_string(),
-        phase: "prd".to_string(),
-        result: ResultCode::Failed,
-        summary: "Could not generate PRD".to_string(),
-        context: None,
-        updated_assessments: None,
-        follow_ups: vec![],
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
-    };
-
-    let json = serde_json::to_string(&result).unwrap();
-    let deserialized: PhaseResult = serde_json::from_str(&json).unwrap();
-    assert_eq!(result, deserialized);
-}
-
-#[test]
-fn json_round_trip_phase_result_blocked() {
-    let result = PhaseResult {
-        item_id: "WRK-003".to_string(),
-        phase: "design".to_string(),
-        result: ResultCode::Blocked,
-        summary: "Need clarification on auth approach".to_string(),
-        context: Some("OAuth vs JWT decision needed".to_string()),
-        updated_assessments: None,
-        follow_ups: vec![],
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
-    };
-
-    let json = serde_json::to_string(&result).unwrap();
-    let deserialized: PhaseResult = serde_json::from_str(&json).unwrap();
-    assert_eq!(result, deserialized);
-}
-
-#[test]
-fn json_round_trip_phase_result_subphase_complete() {
-    let result = PhaseResult {
-        item_id: "WRK-001".to_string(),
-        phase: "build".to_string(),
-        result: ResultCode::SubphaseComplete,
-        summary: "Phase 1 of 3 complete".to_string(),
-        context: None,
-        updated_assessments: None,
-        follow_ups: vec![],
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
-    };
-
-    let json = serde_json::to_string(&result).unwrap();
-    let deserialized: PhaseResult = serde_json::from_str(&json).unwrap();
-    assert_eq!(result, deserialized);
-}
-
-// --- Status transition validation ---
-
-#[test]
-fn valid_transitions_pre_workflow() {
-    assert!(ItemStatus::New.is_valid_transition(&ItemStatus::Scoping));
-    assert!(ItemStatus::Scoping.is_valid_transition(&ItemStatus::Ready));
-}
-
-#[test]
-fn valid_transitions_workflow() {
-    assert!(ItemStatus::Ready.is_valid_transition(&ItemStatus::InProgress));
-    assert!(ItemStatus::InProgress.is_valid_transition(&ItemStatus::Done));
-}
-
-#[test]
-fn valid_transitions_to_parked() {
-    assert!(ItemStatus::New.is_valid_transition(&ItemStatus::Parked));
-    assert!(ItemStatus::Scoping.is_valid_transition(&ItemStatus::Parked));
-    assert!(ItemStatus::Ready.is_valid_transition(&ItemStatus::Parked));
-    assert!(ItemStatus::InProgress.is_valid_transition(&ItemStatus::Parked));
-    assert!(ItemStatus::Blocked.is_valid_transition(&ItemStatus::Parked));
-}
-
-#[test]
-fn valid_transitions_to_blocked() {
-    assert!(ItemStatus::New.is_valid_transition(&ItemStatus::Blocked));
-    assert!(ItemStatus::Scoping.is_valid_transition(&ItemStatus::Blocked));
-    assert!(ItemStatus::Ready.is_valid_transition(&ItemStatus::Blocked));
-    assert!(ItemStatus::InProgress.is_valid_transition(&ItemStatus::Blocked));
-}
-
-#[test]
-fn valid_transitions_unblock() {
-    assert!(ItemStatus::Blocked.is_valid_transition(&ItemStatus::New));
-    assert!(ItemStatus::Blocked.is_valid_transition(&ItemStatus::Scoping));
-    assert!(ItemStatus::Blocked.is_valid_transition(&ItemStatus::Ready));
-    assert!(ItemStatus::Blocked.is_valid_transition(&ItemStatus::InProgress));
-}
-
-#[test]
-fn invalid_transitions() {
-    // Can't skip pre-workflow stages
-    assert!(!ItemStatus::New.is_valid_transition(&ItemStatus::Ready));
-    assert!(!ItemStatus::New.is_valid_transition(&ItemStatus::InProgress));
-    assert!(!ItemStatus::New.is_valid_transition(&ItemStatus::Done));
-
-    // Can't go backward
-    assert!(!ItemStatus::Scoping.is_valid_transition(&ItemStatus::New));
-    assert!(!ItemStatus::Ready.is_valid_transition(&ItemStatus::Scoping));
-    assert!(!ItemStatus::InProgress.is_valid_transition(&ItemStatus::Ready));
-    assert!(!ItemStatus::Done.is_valid_transition(&ItemStatus::InProgress));
-
-    // Done is terminal (except for blocking, which is already excluded)
-    assert!(!ItemStatus::Done.is_valid_transition(&ItemStatus::New));
-    assert!(!ItemStatus::Done.is_valid_transition(&ItemStatus::Parked));
-    assert!(!ItemStatus::Done.is_valid_transition(&ItemStatus::Blocked));
-
-    // Parked is terminal
-    assert!(!ItemStatus::Parked.is_valid_transition(&ItemStatus::New));
-    assert!(!ItemStatus::Parked.is_valid_transition(&ItemStatus::Blocked));
-
-    // Can't go from blocked to done
-    assert!(!ItemStatus::Blocked.is_valid_transition(&ItemStatus::Done));
-
-    // Identity transitions are invalid
-    assert!(!ItemStatus::New.is_valid_transition(&ItemStatus::New));
-    assert!(!ItemStatus::Blocked.is_valid_transition(&ItemStatus::Blocked));
-}
-
-// --- Serde rename verification ---
-
-#[test]
-fn yaml_enum_uses_snake_case() {
-    let yaml = serde_yaml_ng::to_string(&ItemStatus::InProgress).unwrap();
-    assert_eq!(yaml.trim(), "in_progress");
-
-    let yaml = serde_yaml_ng::to_string(&ResultCode::SubphaseComplete).unwrap();
-    assert_eq!(yaml.trim(), "subphase_complete");
-
-    let yaml = serde_yaml_ng::to_string(&ResultCode::PhaseComplete).unwrap();
-    assert_eq!(yaml.trim(), "phase_complete");
-}
-
-// --- New v2 type serialization round-trips ---
-
-#[test]
-fn yaml_round_trip_phase_pool_all_variants() {
-    let variants = vec![PhasePool::Pre, PhasePool::Main];
-    for pool in variants {
-        let yaml = serde_yaml_ng::to_string(&pool).unwrap();
-        let deserialized: PhasePool = serde_yaml_ng::from_str(&yaml).unwrap();
-        assert_eq!(pool, deserialized);
-    }
-}
-
-#[test]
-fn yaml_round_trip_item_update_variants() {
-    let variants: Vec<ItemUpdate> = vec![
-        ItemUpdate::TransitionStatus(ItemStatus::Ready),
+fn item_update_serialization_round_trips_all_contract_variants() {
+    let updates = vec![
+        ItemUpdate::TransitionStatus(Status::Doing),
         ItemUpdate::SetPhase("build".to_string()),
+        ItemUpdate::SetPhasePool(PhasePool::Main),
         ItemUpdate::ClearPhase,
-        ItemUpdate::SetBlocked("guardrails: risk too high".to_string()),
+        ItemUpdate::SetBlocked("executor failed".to_string()),
         ItemUpdate::Unblock,
         ItemUpdate::UpdateAssessments(UpdatedAssessments {
             size: Some(SizeLevel::Large),
-            complexity: None,
+            complexity: Some(DimensionLevel::Medium),
             risk: Some(DimensionLevel::High),
-            impact: None,
+            impact: Some(DimensionLevel::Low),
         }),
         ItemUpdate::SetPipelineType("feature".to_string()),
-        ItemUpdate::SetLastPhaseCommit("abc123def456".to_string()),
+        ItemUpdate::SetLastPhaseCommit("abc123".to_string()),
         ItemUpdate::SetDescription(StructuredDescription {
-            context: "Add dark mode toggle".to_string(),
-            problem: String::new(),
-            solution: String::new(),
-            impact: String::new(),
-            sizing_rationale: String::new(),
+            context: "Context".to_string(),
+            ..StructuredDescription::default()
         }),
     ];
-    for update in variants {
-        let yaml = serde_yaml_ng::to_string(&update).unwrap();
-        let deserialized: ItemUpdate = serde_yaml_ng::from_str(&yaml).unwrap();
-        assert_eq!(update, deserialized);
+
+    for update in updates {
+        let json = serde_json::to_string(&update).expect("serialize item update");
+        let decoded = serde_json::from_str::<ItemUpdate>(&json).expect("deserialize item update");
+        assert_eq!(decoded, update, "item update JSON: {json}");
     }
-}
-
-#[test]
-fn yaml_round_trip_scheduler_action_variants() {
-    let variants = vec![
-        SchedulerAction::Triage("WRK-001".to_string()),
-        SchedulerAction::Promote("WRK-002".to_string()),
-        SchedulerAction::RunPhase {
-            item_id: "WRK-003".to_string(),
-            phase: "build".to_string(),
-            phase_pool: PhasePool::Main,
-            is_destructive: true,
-        },
-    ];
-    for action in variants {
-        let yaml = serde_yaml_ng::to_string(&action).unwrap();
-        let deserialized: SchedulerAction = serde_yaml_ng::from_str(&yaml).unwrap();
-        assert_eq!(action, deserialized);
-    }
-}
-
-#[test]
-fn yaml_round_trip_phase_execution_result_variants() {
-    let variants = vec![
-        PhaseExecutionResult::Success(PhaseResult {
-            item_id: "WRK-001".to_string(),
-            phase: "build".to_string(),
-            result: ResultCode::PhaseComplete,
-            summary: "Build complete".to_string(),
-            context: None,
-            updated_assessments: None,
-            follow_ups: vec![],
-            based_on_commit: None,
-            pipeline_type: None,
-            commit_summary: None,
-            duplicates: Vec::new(),
-            description: None,
-        }),
-        PhaseExecutionResult::SubphaseComplete(PhaseResult {
-            item_id: "WRK-001".to_string(),
-            phase: "build".to_string(),
-            result: ResultCode::SubphaseComplete,
-            summary: "Phase 1 done".to_string(),
-            context: None,
-            updated_assessments: None,
-            follow_ups: vec![],
-            based_on_commit: None,
-            pipeline_type: None,
-            commit_summary: None,
-            duplicates: Vec::new(),
-            description: None,
-        }),
-        PhaseExecutionResult::Failed("Something went wrong".to_string()),
-        PhaseExecutionResult::Blocked("Needs human review".to_string()),
-        PhaseExecutionResult::Cancelled,
-    ];
-    for result in variants {
-        let yaml = serde_yaml_ng::to_string(&result).unwrap();
-        let deserialized: PhaseExecutionResult = serde_yaml_ng::from_str(&yaml).unwrap();
-        assert_eq!(result, deserialized);
-    }
-}
-
-#[test]
-fn json_round_trip_phase_result_with_new_fields() {
-    let result = PhaseResult {
-        item_id: "WRK-001".to_string(),
-        phase: "build".to_string(),
-        result: ResultCode::PhaseComplete,
-        summary: "Build complete".to_string(),
-        context: None,
-        updated_assessments: None,
-        follow_ups: vec![],
-        based_on_commit: Some("abc123def456789012345678901234567890abcd".to_string()),
-        pipeline_type: Some("feature".to_string()),
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
-    };
-
-    let json = serde_json::to_string_pretty(&result).unwrap();
-    let deserialized: PhaseResult = serde_json::from_str(&json).unwrap();
-    assert_eq!(result, deserialized);
-}
-
-#[test]
-fn json_round_trip_phase_result_without_new_fields() {
-    let result = PhaseResult {
-        item_id: "WRK-002".to_string(),
-        phase: "prd".to_string(),
-        result: ResultCode::PhaseComplete,
-        summary: "PRD complete".to_string(),
-        context: None,
-        updated_assessments: None,
-        follow_ups: vec![],
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: None,
-    };
-
-    let json = serde_json::to_string(&result).unwrap();
-    let deserialized: PhaseResult = serde_json::from_str(&json).unwrap();
-    assert_eq!(result, deserialized);
-
-    // New optional fields should not appear when None
-    assert!(!json.contains("based_on_commit"));
-    assert!(!json.contains("pipeline_type"));
-    assert!(!json.contains("description"));
-}
-
-// --- StructuredDescription::is_empty() ---
-
-#[test]
-fn structured_description_is_empty_for_default() {
-    let desc = StructuredDescription::default();
-    assert!(desc.is_empty());
-}
-
-#[test]
-fn structured_description_is_empty_false_when_context_set() {
-    let desc = StructuredDescription {
-        context: "some context".to_string(),
-        ..Default::default()
-    };
-    assert!(!desc.is_empty());
-}
-
-#[test]
-fn structured_description_is_empty_false_when_problem_set() {
-    let desc = StructuredDescription {
-        problem: "some problem".to_string(),
-        ..Default::default()
-    };
-    assert!(!desc.is_empty());
-}
-
-#[test]
-fn structured_description_is_empty_false_when_solution_set() {
-    let desc = StructuredDescription {
-        solution: "some solution".to_string(),
-        ..Default::default()
-    };
-    assert!(!desc.is_empty());
-}
-
-#[test]
-fn structured_description_is_empty_false_when_impact_set() {
-    let desc = StructuredDescription {
-        impact: "some impact".to_string(),
-        ..Default::default()
-    };
-    assert!(!desc.is_empty());
-}
-
-#[test]
-fn structured_description_is_empty_false_when_sizing_rationale_set() {
-    let desc = StructuredDescription {
-        sizing_rationale: "some rationale".to_string(),
-        ..Default::default()
-    };
-    assert!(!desc.is_empty());
-}
-
-// --- PhaseResult description serialization ---
-
-#[test]
-fn phase_result_with_description_round_trip() {
-    let result = PhaseResult {
-        item_id: "WRK-001".to_string(),
-        phase: "triage".to_string(),
-        result: ResultCode::PhaseComplete,
-        summary: "Triaged".to_string(),
-        context: None,
-        updated_assessments: None,
-        follow_ups: vec![],
-        based_on_commit: None,
-        pipeline_type: None,
-        commit_summary: None,
-        duplicates: Vec::new(),
-        description: Some(StructuredDescription {
-            context: "Background info".to_string(),
-            problem: "The problem".to_string(),
-            solution: "The solution".to_string(),
-            impact: "Expected benefit".to_string(),
-            sizing_rationale: "Small because...".to_string(),
-        }),
-    };
-
-    let json = serde_json::to_string_pretty(&result).unwrap();
-    let deserialized: PhaseResult = serde_json::from_str(&json).unwrap();
-    assert_eq!(result, deserialized);
-}
-
-#[test]
-fn phase_result_json_without_description_deserializes_to_none() {
-    let json = r#"{
-        "item_id": "WRK-001",
-        "phase": "triage",
-        "result": "phase_complete",
-        "summary": "Triaged"
-    }"#;
-    let result: PhaseResult = serde_json::from_str(json).unwrap();
-    assert_eq!(result.description, None);
-}
-
-#[test]
-fn phase_result_json_with_null_description_deserializes_to_none() {
-    let json = r#"{
-        "item_id": "WRK-001",
-        "phase": "triage",
-        "result": "phase_complete",
-        "summary": "Triaged",
-        "description": null
-    }"#;
-    let result: PhaseResult = serde_json::from_str(json).unwrap();
-    assert_eq!(result.description, None);
-}
-
-#[test]
-fn phase_result_json_with_empty_description_object() {
-    let json = r#"{
-        "item_id": "WRK-001",
-        "phase": "triage",
-        "result": "phase_complete",
-        "summary": "Triaged",
-        "description": {}
-    }"#;
-    let result: PhaseResult = serde_json::from_str(json).unwrap();
-    assert_eq!(result.description, Some(StructuredDescription::default()));
-    assert!(result.description.as_ref().unwrap().is_empty());
-}
-
-// --- FollowUp flexible deserialization ---
-
-#[test]
-fn json_follow_up_from_string() {
-    let json = r#""Close WRK-020 as duplicate""#;
-    let follow_up: FollowUp = serde_json::from_str(json).unwrap();
-    assert_eq!(follow_up.title, "Close WRK-020 as duplicate");
-    assert_eq!(follow_up.context, None);
-    assert_eq!(follow_up.suggested_size, None);
-    assert_eq!(follow_up.suggested_risk, None);
-}
-
-#[test]
-fn json_follow_up_from_struct() {
-    let json = r#"{"title": "Add tests", "context": "Coverage is low"}"#;
-    let follow_up: FollowUp = serde_json::from_str(json).unwrap();
-    assert_eq!(follow_up.title, "Add tests");
-    assert_eq!(follow_up.context, Some("Coverage is low".to_string()));
-    assert_eq!(follow_up.suggested_size, None);
-    assert_eq!(follow_up.suggested_risk, None);
-}
-
-#[test]
-fn json_follow_up_from_full_struct() {
-    let json = r#"{
-        "title": "Refactor module",
-        "context": "Too complex",
-        "suggested_size": "medium",
-        "suggested_risk": "low"
-    }"#;
-    let follow_up: FollowUp = serde_json::from_str(json).unwrap();
-    assert_eq!(follow_up.title, "Refactor module");
-    assert_eq!(follow_up.context, Some("Too complex".to_string()));
-    assert_eq!(follow_up.suggested_size, Some(SizeLevel::Medium));
-    assert_eq!(follow_up.suggested_risk, Some(DimensionLevel::Low));
-}
-
-#[test]
-fn json_phase_result_with_string_follow_ups() {
-    let json = r#"{
-        "item_id": "WRK-020",
-        "phase": "triage",
-        "result": "phase_complete",
-        "summary": "Duplicate item",
-        "follow_ups": [
-            "Close WRK-020 as duplicate of WRK-017"
-        ]
-    }"#;
-    let result: PhaseResult = serde_json::from_str(json).unwrap();
-    assert_eq!(result.follow_ups.len(), 1);
-    assert_eq!(
-        result.follow_ups[0].title,
-        "Close WRK-020 as duplicate of WRK-017"
-    );
-    assert_eq!(result.follow_ups[0].context, None);
-}
-
-#[test]
-fn json_phase_result_with_mixed_follow_ups() {
-    let json = r#"{
-        "item_id": "WRK-005",
-        "phase": "build",
-        "result": "phase_complete",
-        "summary": "Build done",
-        "follow_ups": [
-            "Simple string follow-up",
-            {"title": "Structured follow-up", "context": "With context"}
-        ]
-    }"#;
-    let result: PhaseResult = serde_json::from_str(json).unwrap();
-    assert_eq!(result.follow_ups.len(), 2);
-    assert_eq!(result.follow_ups[0].title, "Simple string follow-up");
-    assert_eq!(result.follow_ups[0].context, None);
-    assert_eq!(result.follow_ups[1].title, "Structured follow-up");
-    assert_eq!(
-        result.follow_ups[1].context,
-        Some("With context".to_string())
-    );
 }

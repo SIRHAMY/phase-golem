@@ -1,9 +1,9 @@
 use std::collections::HashSet;
+use task_golem::model::status::Status;
 
 use crate::pg_item::PgItem;
 use crate::types::{
-    parse_dimension_level, parse_item_status, parse_size_level, DimensionLevel, ItemStatus,
-    SizeLevel,
+    parse_dimension_level, parse_item_status, parse_size_level, DimensionLevel, SizeLevel,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -17,16 +17,16 @@ pub enum FilterField {
     PipelineType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterValue {
-    Status(ItemStatus),
+    Status(Status),
     Dimension(DimensionLevel),
     Size(SizeLevel),
     Tag(String),
     PipelineType(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilterCriterion {
     pub field: FilterField,
     pub values: Vec<FilterValue>,
@@ -50,15 +50,7 @@ impl std::fmt::Display for FilterField {
 impl std::fmt::Display for FilterValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FilterValue::Status(s) => match s {
-                ItemStatus::New => write!(f, "new"),
-                ItemStatus::Scoping => write!(f, "scoping"),
-                ItemStatus::Ready => write!(f, "ready"),
-                ItemStatus::InProgress => write!(f, "in_progress"),
-                ItemStatus::Parked => write!(f, "parked"),
-                ItemStatus::Done => write!(f, "done"),
-                ItemStatus::Blocked => write!(f, "blocked"),
-            },
+            FilterValue::Status(status) => write!(f, "{status}"),
             FilterValue::Dimension(d) => write!(f, "{}", d),
             FilterValue::Size(s) => write!(f, "{}", s),
             FilterValue::Tag(t) => write!(f, "{}", t),
@@ -79,7 +71,7 @@ fn parse_single_value(field: &FilterField, token: &str) -> Result<FilterValue, S
         FilterField::Status => {
             let status = parse_item_status(token).map_err(|_| {
                 format!(
-                    "Invalid value '{}' for field 'status'. Valid values: new, scoping, ready, in_progress, parked, done, blocked",
+                    "Invalid value '{}' for field 'status'. Valid values: todo, doing, blocked, done",
                     token
                 )
             })?;
@@ -169,14 +161,15 @@ pub fn parse_filter(raw: &str) -> Result<FilterCriterion, String> {
         parsed.push((trimmed.to_string(), value));
     }
 
-    let mut seen = HashSet::new();
+    let mut seen = Vec::new();
     for (raw_token, value) in &parsed {
-        if !seen.insert(value) {
+        if seen.contains(value) {
             return Err(format!(
                 "Duplicate value '{}' in comma-separated list for field '{}'",
                 raw_token, field
             ));
         }
+        seen.push(value.clone());
     }
 
     let values: Vec<FilterValue> = parsed.into_iter().map(|(_, v)| v).collect();
@@ -186,7 +179,7 @@ pub fn parse_filter(raw: &str) -> Result<FilterCriterion, String> {
 
 fn matches_single_value(field: &FilterField, value: &FilterValue, item: &PgItem) -> bool {
     match (field, value) {
-        (FilterField::Status, FilterValue::Status(target)) => item.pg_status() == *target,
+        (FilterField::Status, FilterValue::Status(target)) => item.status() == *target,
         (FilterField::Impact, FilterValue::Dimension(target)) => {
             item.impact().as_ref() == Some(target)
         }
@@ -215,16 +208,17 @@ pub fn matches_item(criterion: &FilterCriterion, item: &PgItem) -> bool {
 
 pub fn validate_filter_criteria(criteria: &[FilterCriterion]) -> Result<(), String> {
     let mut seen_scalar_fields = HashSet::new();
-    let mut seen_tag_criteria = HashSet::new();
+    let mut seen_tag_criteria = Vec::new();
 
     for criterion in criteria {
         if criterion.field == FilterField::Tag {
-            if !seen_tag_criteria.insert(criterion) {
+            if seen_tag_criteria.contains(criterion) {
                 return Err(format!(
                     "Duplicate filter: {} specified multiple times",
                     criterion
                 ));
             }
+            seen_tag_criteria.push(criterion.clone());
         } else if !seen_scalar_fields.insert(&criterion.field) {
             return Err(format!(
                 "Field '{}' specified multiple times in separate --only flags. Combine values in a single flag: --only {}=value1,value2",

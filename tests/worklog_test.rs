@@ -2,6 +2,9 @@ use std::fs;
 
 use tempfile::TempDir;
 
+const ID_1: &str = "019b2e7a-0001-7000-8000-000000000001";
+const ID_2: &str = "019b2e7a-0002-7000-8000-000000000002";
+
 #[test]
 fn write_entry_creates_file() {
     let dir = TempDir::new().expect("Failed to create temp dir");
@@ -9,7 +12,7 @@ fn write_entry_creates_file() {
 
     phase_golem::worklog::write_entry(
         &worklog_dir,
-        "WRK-001",
+        ID_1,
         "Test item",
         "Review",
         "Complete",
@@ -52,7 +55,7 @@ fn write_entry_contains_expected_fields() {
 
     phase_golem::worklog::write_entry(
         &worklog_dir,
-        "WRK-001",
+        ID_1,
         "Test item",
         "Build",
         "Complete",
@@ -67,7 +70,7 @@ fn write_entry_contains_expected_fields() {
     let file_path = entries[0].as_ref().unwrap().path();
     let contents = fs::read_to_string(file_path).expect("Failed to read worklog file");
 
-    assert!(contents.contains("WRK-001"), "Expected item ID in worklog");
+    assert!(contents.contains(ID_1), "Expected item ID in worklog");
     assert!(
         contents.contains("Test item"),
         "Expected item title in worklog"
@@ -88,7 +91,7 @@ fn write_entry_appends_chronologically() {
     // Write first entry
     phase_golem::worklog::write_entry(
         &worklog_dir,
-        "WRK-001",
+        ID_1,
         "Test item",
         "Build",
         "Complete",
@@ -99,7 +102,7 @@ fn write_entry_appends_chronologically() {
     // Write second entry
     phase_golem::worklog::write_entry(
         &worklog_dir,
-        "WRK-002",
+        ID_2,
         "Second item",
         "Review",
         "Complete",
@@ -115,15 +118,11 @@ fn write_entry_appends_chronologically() {
     let contents = fs::read_to_string(file_path).expect("Failed to read worklog file");
 
     // First entry should appear before the second (chronological order)
-    let pos_first = contents
-        .find("WRK-001")
-        .expect("Expected WRK-001 in worklog");
-    let pos_second = contents
-        .find("WRK-002")
-        .expect("Expected WRK-002 in worklog");
+    let pos_first = contents.find(ID_1).expect("Expected first ID in worklog");
+    let pos_second = contents.find(ID_2).expect("Expected second ID in worklog");
     assert!(
         pos_first < pos_second,
-        "Expected WRK-001 (older) to appear before WRK-002 (newer)"
+        "Expected the older item to appear before the newer item"
     );
 }
 
@@ -134,7 +133,7 @@ fn write_entry_creates_parent_dirs() {
 
     phase_golem::worklog::write_entry(
         &worklog_dir,
-        "WRK-001",
+        ID_1,
         "Test item",
         "Design",
         "Complete",

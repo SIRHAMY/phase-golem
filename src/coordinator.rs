@@ -1,25 +1,47 @@
+use std::collections::HashSet;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use task_golem::model::item::Item;
+use task_golem::model::{deps::DependencyEvaluation, status::Status};
 use task_golem::store::Store;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::config::{PublicExecutionPolicy, VerificationPlan};
 use crate::git::StatusEntry;
 use crate::pg_error::PgError;
 use crate::pg_item::{self, PgItem};
-use crate::types::{FollowUp, ItemStatus, ItemUpdate, PhaseResult, StructuredDescription};
+use crate::types::{
+    FollowUp, ItemUpdate, PhaseResult, StructuredDescription, SupervisedAttempt,
+    SupervisedTransition,
+};
 use crate::{log_error, log_warn};
 
 // --- Aliases for task-golem git module (distinguished from phase-golem's own git) ---
+use task_golem::generate_id;
 use task_golem::git as tg_git;
-use task_golem::model::id::generate_id_with_prefix;
 
 // --- Command enum ---
 
 pub enum CoordinatorCommand {
     GetSnapshot {
-        reply: oneshot::Sender<Result<Vec<PgItem>, PgError>>,
+        reply: oneshot::Sender<Result<WorkSnapshot, PgError>>,
+    },
+    ClaimItem {
+        id: String,
+        reply: oneshot::Sender<Result<(), PgError>>,
+    },
+    ClaimItemWithExpectedExecutionSnapshot {
+        id: String,
+        expected: ExpectedExecutionSnapshot,
+        reply: oneshot::Sender<Result<(), PgError>>,
+    },
+    FinalizeSupervisedAttempt {
+        attempt: Box<SupervisedAttempt>,
+        expected: ExpectedExecutionSnapshot,
+        transition: Option<SupervisedTransition>,
+        reply: oneshot::Sender<Result<(), PgError>>,
     },
     UpdateItem {
         id: String,
@@ -76,6 +98,71 @@ pub enum CoordinatorCommand {
     },
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkSnapshot {
+    pub items: Vec<PgItem>,
+    pub archived_done_ids: HashSet<String>,
+    pub dependency_evaluation: DependencyEvaluation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExpectedExecutionSnapshot {
+    title: String,
+    phase: String,
+    executor_profile: String,
+    policy: PublicExecutionPolicy,
+    verification: VerificationPlan,
+}
+
+impl ExpectedExecutionSnapshot {
+    pub fn new(
+        title: String,
+        phase: String,
+        executor_profile: String,
+        policy: PublicExecutionPolicy,
+        verification: VerificationPlan,
+    ) -> Self {
+        Self {
+            title,
+            phase,
+            executor_profile,
+            policy,
+            verification,
+        }
+    }
+
+    pub fn from_item(item: &PgItem) -> Result<Self, String> {
+        let phase = item
+            .template_node_key()
+            .filter(|phase| !phase.trim().is_empty())
+            .ok_or_else(|| format!("Item '{}' has no valid template node snapshot", item.id()))?;
+        Ok(Self::new(
+            item.title().to_string(),
+            phase,
+            item.executor_profile_snapshot()?,
+            item.execution_policy_snapshot()?,
+            item.verification_snapshot()?,
+        ))
+    }
+
+    fn matches_item(&self, item: &PgItem) -> bool {
+        item.title() == self.title
+            && item.template_node_key().as_deref() == Some(self.phase.as_str())
+            && item.executor_profile_snapshot().ok().as_deref()
+                == Some(self.executor_profile.as_str())
+            && item.execution_policy_snapshot().ok().as_ref() == Some(&self.policy)
+            && item.verification_snapshot().ok().as_ref() == Some(&self.verification)
+    }
+}
+
+impl Deref for WorkSnapshot {
+    type Target = [PgItem];
+
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+
 // --- CoordinatorHandle ---
 
 #[derive(Clone)]
@@ -97,10 +184,58 @@ impl CoordinatorHandle {
             .map_err(|_| PgError::InternalPanic("coordinator dropped reply".to_string()))
     }
 
-    pub async fn get_snapshot(&self) -> Result<Vec<PgItem>, PgError> {
+    pub async fn get_snapshot(&self) -> Result<WorkSnapshot, PgError> {
         let (reply, rx) = oneshot::channel();
         self.send_command(CoordinatorCommand::GetSnapshot { reply }, rx)
             .await?
+    }
+
+    pub async fn claim_item(&self, id: &str) -> Result<(), PgError> {
+        let (reply, rx) = oneshot::channel();
+        self.send_command(
+            CoordinatorCommand::ClaimItem {
+                id: id.to_string(),
+                reply,
+            },
+            rx,
+        )
+        .await?
+    }
+
+    pub async fn claim_item_with_expected_execution_snapshot(
+        &self,
+        id: &str,
+        expected: ExpectedExecutionSnapshot,
+    ) -> Result<(), PgError> {
+        let (reply, rx) = oneshot::channel();
+        self.send_command(
+            CoordinatorCommand::ClaimItemWithExpectedExecutionSnapshot {
+                id: id.to_string(),
+                expected,
+                reply,
+            },
+            rx,
+        )
+        .await?
+    }
+
+    pub async fn finalize_supervised_attempt(
+        &self,
+        attempt: SupervisedAttempt,
+        expected: ExpectedExecutionSnapshot,
+        transition: Option<SupervisedTransition>,
+    ) -> Result<(), PgError> {
+        let (reply, rx) = oneshot::channel();
+        self.send_command(
+            CoordinatorCommand::FinalizeSupervisedAttempt {
+                attempt: Box::new(attempt),
+                expected,
+                transition,
+                reply,
+            },
+            rx,
+        )
+        .await?
     }
 
     pub async fn update_item(&self, id: &str, update: ItemUpdate) -> Result<(), PgError> {
@@ -403,7 +538,6 @@ const CHANNEL_CAPACITY: usize = 32;
 struct CoordinatorState {
     store: Store,
     project_root: PathBuf,
-    prefix: String,
     /// Tracks non-destructive phase completions pending batch commit.
     /// Each entry: (item_id, phase, commit_summary).
     pending_batch_phases: Vec<(String, String, Option<String>)>,
@@ -417,14 +551,137 @@ impl CoordinatorState {
 
 // --- Handler implementations ---
 
-async fn handle_get_snapshot(state: &CoordinatorState) -> Result<Vec<PgItem>, PgError> {
+async fn handle_get_snapshot(state: &CoordinatorState) -> Result<WorkSnapshot, PgError> {
     let store = state.store.clone();
-    let items = tokio::task::spawn_blocking(move || store.load_active())
+    tokio::task::spawn_blocking(move || load_work_snapshot(&store))
         .await
         .map_err(|e| PgError::InternalPanic(format!("{e:?}")))?
-        .map_err(PgError::from)?;
+}
 
-    Ok(items.into_iter().map(PgItem).collect())
+pub fn load_work_snapshot(store: &Store) -> Result<WorkSnapshot, PgError> {
+    store
+        .with_lock(|store| {
+            let active_items = store.load_active()?;
+            let archive_items = store.load_all_archive()?;
+            let archived_done_ids = archive_items
+                .iter()
+                .filter(|item| item.status == Status::Done)
+                .map(|item| item.id.clone())
+                .collect();
+            let dependency_evaluation =
+                task_golem::model::deps::evaluate_dependencies(&active_items, &archive_items);
+            Ok(WorkSnapshot {
+                items: active_items.into_iter().map(PgItem).collect(),
+                archived_done_ids,
+                dependency_evaluation,
+            })
+        })
+        .map_err(PgError::from)
+}
+
+async fn handle_claim_item(
+    state: &CoordinatorState,
+    id: String,
+    expected: Option<ExpectedExecutionSnapshot>,
+) -> Result<(), PgError> {
+    with_store_retry(&state.store, move |store| {
+        store
+            .with_lock(|store| {
+                let mut items = store.load_active()?;
+                let archive_items = store.load_all_archive()?;
+                let evaluation =
+                    task_golem::model::deps::evaluate_dependencies(&items, &archive_items);
+                let index = items
+                    .iter()
+                    .position(|item| item.id == id)
+                    .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(id.clone()))?;
+                let item = PgItem(items[index].clone());
+                if !item.is_pg_owned() || item.is_human_gate() {
+                    return Err(task_golem::errors::TgError::InvalidInput(format!(
+                        "Cannot claim {id}: item must be PG-owned executable work"
+                    )));
+                }
+                if expected
+                    .as_ref()
+                    .is_some_and(|expected| !expected.matches_item(&item))
+                {
+                    return Err(task_golem::errors::TgError::InvalidInput(format!(
+                        "Cannot claim {id}: execution snapshot changed"
+                    )));
+                }
+                if items[index].status != Status::Todo
+                    || !evaluation
+                        .readiness_for(&id)
+                        .is_some_and(|readiness| readiness.is_ready)
+                {
+                    return Err(task_golem::errors::TgError::InvalidInput(format!(
+                        "Cannot claim {id}: item must be todo and ready"
+                    )));
+                }
+
+                let change = items[index].apply_do(Some("phase-golem".to_string()));
+                store.commit_status_change(&items, change)
+            })
+            .map_err(PgError::from)
+    })
+    .await
+}
+
+async fn handle_finalize_supervised_attempt(
+    state: &CoordinatorState,
+    attempt: SupervisedAttempt,
+    expected: ExpectedExecutionSnapshot,
+    transition: Option<SupervisedTransition>,
+) -> Result<(), PgError> {
+    let item_id = attempt.item_id.clone();
+    with_store_retry(&state.store, move |store| {
+        let attempt = attempt.clone();
+        let transition = transition.clone();
+        store
+            .with_lock(|store| {
+                let mut items = store.load_active()?;
+                let index = items
+                    .iter()
+                    .position(|item| item.id == item_id)
+                    .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(item_id.clone()))?;
+                let item = PgItem(items[index].clone());
+                if !item.is_claimed_for_pg_execution() {
+                    return Err(task_golem::errors::TgError::InvalidInput(format!(
+                        "Cannot finalize {item_id}: item is not claimed for PG execution"
+                    )));
+                }
+                if !expected.matches_item(&item) {
+                    return Err(task_golem::errors::TgError::InvalidInput(format!(
+                        "Cannot finalize {item_id}: execution snapshot changed"
+                    )));
+                }
+                if attempt.phase != expected.phase {
+                    return Err(task_golem::errors::TgError::InvalidInput(format!(
+                        "Cannot finalize {item_id}: attempt phase does not match the task snapshot"
+                    )));
+                }
+
+                let evidence = attempt
+                    .validated_note_text()
+                    .map_err(task_golem::errors::TgError::InvalidInput)?;
+                store.append_note(&item_id, &evidence)?;
+
+                match transition {
+                    None => Ok(()),
+                    Some(SupervisedTransition::Complete) => {
+                        let mut done_item = items.remove(index);
+                        let change = done_item.apply_done();
+                        store.commit_done(&items, &done_item, change)
+                    }
+                    Some(SupervisedTransition::Blocked) => {
+                        let change = items[index].apply_block(Some(attempt.summary));
+                        store.commit_status_change(&items, change)
+                    }
+                }
+            })
+            .map_err(PgError::from)
+    })
+    .await
 }
 
 async fn handle_update_item(
@@ -440,8 +697,65 @@ async fn handle_update_item(
                     .iter()
                     .position(|i| i.id == id)
                     .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(id.clone()))?;
-                pg_item::apply_update(&mut items[idx], update.clone());
-                s.save_active(&items)
+                match update.clone() {
+                    ItemUpdate::TransitionStatus(status) => {
+                        let current = items[idx].status;
+                        if !current.can_transition_to(status) {
+                            return Err(task_golem::errors::TgError::InvalidTransition {
+                                from: current,
+                                to: status,
+                            });
+                        }
+                        match status {
+                            Status::Doing => {
+                                let change = items[idx].apply_do(None);
+                                s.commit_status_change(&items, change)
+                            }
+                            Status::Done => {
+                                let mut done_item = items.remove(idx);
+                                let change = done_item.apply_done();
+                                s.commit_done(&items, &done_item, change)
+                            }
+                            Status::Blocked => {
+                                let change = items[idx].apply_block(None);
+                                s.commit_status_change(&items, change)
+                            }
+                            Status::Todo => {
+                                let change = items[idx].apply_todo();
+                                s.commit_status_change(&items, change)
+                            }
+                        }
+                    }
+                    ItemUpdate::SetBlocked(reason) => {
+                        if !items[idx].status.can_transition_to(Status::Blocked) {
+                            return Err(task_golem::errors::TgError::InvalidTransition {
+                                from: items[idx].status,
+                                to: Status::Blocked,
+                            });
+                        }
+                        let change = items[idx].apply_block(Some(reason));
+                        s.commit_status_change(&items, change)
+                    }
+                    ItemUpdate::Unblock => {
+                        if items[idx].status != Status::Blocked {
+                            return Err(task_golem::errors::TgError::InvalidTransition {
+                                from: items[idx].status,
+                                to: Status::Todo,
+                            });
+                        }
+                        let unblock_change = items[idx].apply_unblock();
+                        s.commit_status_change(&items, unblock_change)?;
+                        if items[idx].status != Status::Todo {
+                            let todo_change = items[idx].apply_todo();
+                            s.commit_status_change(&items, todo_change)?;
+                        }
+                        Ok(())
+                    }
+                    metadata_update => {
+                        pg_item::apply_metadata_update(&mut items[idx], metadata_update);
+                        s.save_active(&items)
+                    }
+                }
             })
             .map_err(PgError::from)
     })
@@ -494,9 +808,15 @@ async fn handle_archive_item(state: &CoordinatorState, item_id: String) -> Resul
                     .position(|i| i.id == item_id)
                     .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(item_id.clone()))?;
 
-                let item = items.remove(idx);
-                s.append_to_archive(&item)?;
-                s.save_active(&items)?;
+                if !items[idx].status.can_transition_to(Status::Done) {
+                    return Err(task_golem::errors::TgError::InvalidTransition {
+                        from: items[idx].status,
+                        to: Status::Done,
+                    });
+                }
+                let mut item = items.remove(idx);
+                let change = item.apply_done();
+                s.commit_done(&items, &item, change)?;
                 Ok(item)
             })
             .map_err(PgError::from)
@@ -566,7 +886,6 @@ async fn handle_ingest_follow_ups(
     state: &CoordinatorState,
     follow_ups: Vec<FollowUp>,
     origin: String,
-    prefix: String,
 ) -> Result<Vec<String>, PgError> {
     if follow_ups.is_empty() {
         return Ok(vec![]);
@@ -591,20 +910,14 @@ async fn handle_ingest_follow_ups(
                         continue;
                     }
 
-                    let id =
-                        generate_id_with_prefix(&current_known, &prefix).map_err(|e| match e {
-                            task_golem::errors::TgError::IdCollisionExhausted(n) => {
-                                task_golem::errors::TgError::IdCollisionExhausted(n)
-                            }
-                            other => other,
-                        })?;
+                    let id = generate_id(&current_known)?;
 
                     current_known.insert(id.clone());
 
                     let mut pg = pg_item::new_from_parts(
                         id.clone(),
                         fu.title.clone(),
-                        ItemStatus::New,
+                        Status::Todo,
                         vec![],
                         vec![],
                     );
@@ -685,21 +998,12 @@ async fn handle_unblock_item(
                     .position(|i| i.id == item_id)
                     .ok_or_else(|| task_golem::errors::TgError::ItemNotFound(item_id.clone()))?;
 
-                let pg = PgItem(items[idx].clone());
-                if pg.pg_status() != ItemStatus::Blocked {
+                if items[idx].status != Status::Blocked {
                     return Err(task_golem::errors::TgError::InvalidTransition {
                         from: items[idx].status,
-                        to: task_golem::model::status::Status::Todo,
+                        to: Status::Todo,
                     });
                 }
-
-                // Read the blocked_from_status before clearing
-                let restore_to = pg.pg_blocked_from_status().unwrap_or(ItemStatus::New);
-
-                // Clear all blocked fields (extension and native)
-                pg_item::set_blocked_from_status(&mut items[idx], None);
-                items[idx].blocked_reason = None;
-                items[idx].blocked_from_status = None;
                 pg_item::set_blocked_type(&mut items[idx], None);
                 pg_item::set_unblock_context(&mut items[idx], None);
 
@@ -708,13 +1012,14 @@ async fn handle_unblock_item(
                     pg_item::set_unblock_context(&mut items[idx], Some(ctx));
                 }
 
-                // Restore to the saved status
-                pg_item::set_pg_status(&mut items[idx], restore_to);
-
-                // Reset last_phase_commit for staleness-blocked items
                 pg_item::set_last_phase_commit(&mut items[idx], None);
-
-                s.save_active(&items)
+                let unblock_change = items[idx].apply_unblock();
+                s.commit_status_change(&items, unblock_change)?;
+                if items[idx].status != Status::Todo {
+                    let todo_change = items[idx].apply_todo();
+                    s.commit_status_change(&items, todo_change)?;
+                }
+                Ok(())
             })
             .map_err(PgError::from)
     })
@@ -760,7 +1065,7 @@ async fn handle_merge_item(
                         })?;
 
                 // Remove source first
-                let source = items.remove(source_idx);
+                let mut source = items.remove(source_idx);
 
                 // Build merge context from source
                 let merge_text = build_merge_context(&source);
@@ -798,10 +1103,14 @@ async fn handle_merge_item(
                     item.dependencies.retain(|dep| dep != &source_id);
                 }
 
-                // Archive the source
-                s.append_to_archive(&source)?;
-
-                s.save_active(&items)
+                if !source.status.can_transition_to(Status::Done) {
+                    return Err(task_golem::errors::TgError::InvalidTransition {
+                        from: source.status,
+                        to: Status::Done,
+                    });
+                }
+                let change = source.apply_done();
+                s.commit_done(&items, &source, change)
             })
             .map_err(PgError::from)
     })
@@ -814,7 +1123,6 @@ async fn run_coordinator(
     mut rx: mpsc::Receiver<CoordinatorCommand>,
     store: Store,
     project_root: PathBuf,
-    prefix: String,
 ) {
     // Startup probe: verify the store is accessible
     match store.load_active() {
@@ -856,7 +1164,6 @@ async fn run_coordinator(
     let mut state = CoordinatorState {
         store,
         project_root,
-        prefix,
         pending_batch_phases: Vec::new(),
     };
 
@@ -867,6 +1174,32 @@ async fn run_coordinator(
             CoordinatorCommand::GetSnapshot { reply } => {
                 let result = handle_get_snapshot(&state).await;
                 is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
+                let _ = reply.send(result);
+            }
+            CoordinatorCommand::ClaimItem { id, reply } => {
+                let result = handle_claim_item(&state, id, None).await;
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
+                let _ = reply.send(result);
+            }
+            CoordinatorCommand::ClaimItemWithExpectedExecutionSnapshot {
+                id,
+                expected,
+                reply,
+            } => {
+                let result = handle_claim_item(&state, id, Some(expected)).await;
+                is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
+                let _ = reply.send(result);
+            }
+            CoordinatorCommand::FinalizeSupervisedAttempt {
+                attempt,
+                expected,
+                transition,
+                reply,
+            } => {
+                let result =
+                    handle_finalize_supervised_attempt(&state, *attempt, expected, transition)
+                        .await;
+                is_fatal_result = result.as_ref().err().map(|error| error.is_fatal());
                 let _ = reply.send(result);
             }
             CoordinatorCommand::UpdateItem { id, update, reply } => {
@@ -1110,9 +1443,7 @@ async fn run_coordinator(
                 origin,
                 reply,
             } => {
-                let result =
-                    handle_ingest_follow_ups(&state, follow_ups, origin, state.prefix.clone())
-                        .await;
+                let result = handle_ingest_follow_ups(&state, follow_ups, origin).await;
                 is_fatal_result = result.as_ref().err().map(|e| e.is_fatal());
                 let _ = reply.send(result);
             }
@@ -1151,11 +1482,10 @@ async fn run_coordinator(
 pub fn spawn_coordinator(
     store: Store,
     project_root: PathBuf,
-    prefix: String,
 ) -> (CoordinatorHandle, tokio::task::JoinHandle<()>) {
     let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
 
-    let task_handle = tokio::spawn(run_coordinator(rx, store, project_root, prefix));
+    let task_handle = tokio::spawn(run_coordinator(rx, store, project_root));
 
     (CoordinatorHandle { sender: tx }, task_handle)
 }
@@ -1164,37 +1494,38 @@ pub fn spawn_coordinator(
 mod tests {
     use super::*;
 
+    const ID_1: &str = "019b2e7a-0001-7000-8000-000000000001";
+    const ID_2: &str = "019b2e7a-0002-7000-8000-000000000002";
+    const ID_3: &str = "019b2e7a-0051-7000-8000-000000000051";
+
     // =========================================================================
     // build_phase_commit_message tests
     // =========================================================================
 
     #[test]
     fn phase_commit_message_no_summary() {
-        let msg = build_phase_commit_message("WRK-001", "build", None);
-        assert_eq!(msg, "[WRK-001][build] Phase output");
+        let msg = build_phase_commit_message(ID_1, "build", None);
+        assert_eq!(msg, format!("[{ID_1}][build] Phase output"));
     }
 
     #[test]
     fn phase_commit_message_plain_summary() {
-        let msg = build_phase_commit_message("WRK-001", "build", Some("Add login form"));
-        assert_eq!(msg, "[WRK-001][build] Add login form");
+        let msg = build_phase_commit_message(ID_1, "build", Some("Add login form"));
+        assert_eq!(msg, format!("[{ID_1}][build] Add login form"));
     }
 
     #[test]
     fn phase_commit_message_strips_duplicate_prefix() {
-        let msg = build_phase_commit_message(
-            "WRK-051",
-            "triage",
-            Some("[WRK-051][triage] Assess inbox creation"),
-        );
-        assert_eq!(msg, "[WRK-051][triage] Assess inbox creation");
+        let summary = format!("[{ID_3}][triage] Assess inbox creation");
+        let msg = build_phase_commit_message(ID_3, "triage", Some(&summary));
+        assert_eq!(msg, summary);
     }
 
     #[test]
     fn phase_commit_message_does_not_strip_different_prefix() {
-        let msg =
-            build_phase_commit_message("WRK-001", "build", Some("[WRK-002][design] Wrong prefix"));
-        assert_eq!(msg, "[WRK-001][build] [WRK-002][design] Wrong prefix");
+        let other_summary = format!("[{ID_2}][design] Wrong item");
+        let msg = build_phase_commit_message(ID_1, "build", Some(&other_summary));
+        assert_eq!(msg, format!("[{ID_1}][build] {other_summary}"));
     }
 
     // =========================================================================
@@ -1204,23 +1535,26 @@ mod tests {
     #[test]
     fn batch_commit_message_no_summaries() {
         let phases = vec![
-            ("WRK-001".to_string(), "build".to_string(), None),
-            ("WRK-002".to_string(), "design".to_string(), None),
+            (ID_1.to_string(), "build".to_string(), None),
+            (ID_2.to_string(), "design".to_string(), None),
         ];
         let msg = build_batch_commit_message(&phases);
-        assert_eq!(msg, "[WRK-001][build][WRK-002][design] Phase outputs");
+        assert_eq!(
+            msg,
+            format!("[{ID_1}][build][{ID_2}][design] Phase outputs")
+        );
     }
 
     #[test]
     fn batch_commit_message_with_summaries() {
         let phases = vec![
             (
-                "WRK-001".to_string(),
+                ID_1.to_string(),
                 "build".to_string(),
                 Some("Add form".to_string()),
             ),
             (
-                "WRK-002".to_string(),
+                ID_2.to_string(),
                 "design".to_string(),
                 Some("Layout update".to_string()),
             ),
@@ -1228,26 +1562,28 @@ mod tests {
         let msg = build_batch_commit_message(&phases);
         assert_eq!(
             msg,
-            "[WRK-001][build] Add form | [WRK-002][design] Layout update\n\n[WRK-001][build][WRK-002][design] Phase outputs"
+            format!(
+                "[{ID_1}][build] Add form | [{ID_2}][design] Layout update\n\n[{ID_1}][build][{ID_2}][design] Phase outputs"
+            )
         );
     }
 
     #[test]
     fn batch_commit_single_phase_delegates_to_phase_message() {
         let phases = vec![(
-            "WRK-051".to_string(),
+            ID_3.to_string(),
             "triage".to_string(),
-            Some("[WRK-051][triage] Assess inbox".to_string()),
+            Some(format!("[{ID_3}][triage] Assess inbox")),
         )];
         let msg = build_batch_commit_message(&phases);
-        assert_eq!(msg, "[WRK-051][triage] Assess inbox");
+        assert_eq!(msg, format!("[{ID_3}][triage] Assess inbox"));
     }
 
     #[test]
     fn batch_commit_single_phase_no_summary() {
-        let phases = vec![("WRK-001".to_string(), "build".to_string(), None)];
+        let phases = vec![(ID_1.to_string(), "build".to_string(), None)];
         let msg = build_batch_commit_message(&phases);
-        assert_eq!(msg, "[WRK-001][build] Phase output");
+        assert_eq!(msg, format!("[{ID_1}][build] Phase output"));
     }
 
     // =========================================================================
@@ -1267,8 +1603,7 @@ mod tests {
         )
         .expect("init archive");
 
-        let (handle, task_handle) =
-            spawn_coordinator(store, dir.path().to_path_buf(), "WRK".to_string());
+        let (handle, task_handle) = spawn_coordinator(store, dir.path().to_path_buf());
 
         // Drop the handle to close the channel, which causes the coordinator to exit
         drop(handle);

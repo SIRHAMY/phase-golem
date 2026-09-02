@@ -1,24 +1,115 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::types::{DimensionLevel, SizeLevel};
 
-#[derive(Default, Deserialize, Clone, Debug, PartialEq)]
-#[serde(default)]
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+#[serde(default, deny_unknown_fields)]
 pub struct PhaseGolemConfig {
-    pub project: ProjectConfig,
     pub guardrails: GuardrailsConfig,
     pub execution: ExecutionConfig,
     pub agent: AgentConfig,
+    pub executor_profiles: HashMap<String, TrustedExecutorProfile>,
+    pub workflow_template: Option<WorkflowTemplate>,
     pub pipelines: HashMap<String, PipelineConfig>,
 }
 
-#[derive(Deserialize, Clone, Debug, PartialEq)]
-#[serde(default)]
-pub struct ProjectConfig {
-    pub prefix: String,
+impl Default for PhaseGolemConfig {
+    fn default() -> Self {
+        Self {
+            guardrails: GuardrailsConfig::default(),
+            execution: ExecutionConfig::default(),
+            agent: AgentConfig::default(),
+            executor_profiles: default_executor_profiles(),
+            workflow_template: None,
+            pipelines: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowTemplate {
+    pub id: String,
+    pub provenance: TemplateProvenance,
+    #[serde(default)]
+    pub inputs: Vec<PublicTemplateInput>,
+    pub nodes: Vec<WorkflowNode>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateProvenance {
+    pub source: String,
+    #[serde(default)]
+    pub revision: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PublicTemplateInput {
+    pub name: String,
+    #[serde(default)]
+    pub default: Option<String>,
+}
+
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+pub struct PublicTemplateInputs(BTreeMap<String, String>);
+
+impl PublicTemplateInputs {
+    /// Values may be persisted in materialized task fields and must contain only public data.
+    pub fn new(values: BTreeMap<String, String>) -> Self {
+        Self(values)
+    }
+
+    pub(crate) fn get(&self, name: &str) -> Option<&String> {
+        self.0.get(name)
+    }
+
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &String> {
+        self.0.keys()
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowNode {
+    pub key: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub priority: i64,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub parent: Option<String>,
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+    #[serde(default)]
+    pub human_decision: bool,
+    pub executor_profile: String,
+    #[serde(default)]
+    pub execution_policy: PublicExecutionPolicy,
+    #[serde(default)]
+    pub verification: VerificationPlan,
+}
+
+#[derive(Default, Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct PublicExecutionPolicy {
+    pub timeout_minutes: u32,
+    pub max_retries: u32,
+    pub destructive: bool,
+    pub workflows: Vec<String>,
+}
+
+#[derive(Default, Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct VerificationPlan {
+    pub required_checks: Vec<String>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -110,6 +201,31 @@ pub struct AgentConfig {
     pub model: Option<String>,
 }
 
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct TrustedExecutorProfile {
+    pub command: String,
+    pub args: Vec<String>,
+    pub environment: BTreeMap<String, String>,
+}
+
+impl Default for TrustedExecutorProfile {
+    fn default() -> Self {
+        Self {
+            command: "claude".to_string(),
+            args: vec![
+                "--dangerously-skip-permissions".to_string(),
+                "-p".to_string(),
+            ],
+            environment: BTreeMap::new(),
+        }
+    }
+}
+
+fn default_executor_profiles() -> HashMap<String, TrustedExecutorProfile> {
+    HashMap::from([("agent".to_string(), TrustedExecutorProfile::default())])
+}
+
 #[derive(Default, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StalenessAction {
@@ -153,14 +269,6 @@ impl PhaseConfig {
 pub struct PipelineConfig {
     pub pre_phases: Vec<PhaseConfig>,
     pub phases: Vec<PhaseConfig>,
-}
-
-impl Default for ProjectConfig {
-    fn default() -> Self {
-        Self {
-            prefix: "WRK".to_string(),
-        }
-    }
 }
 
 impl Default for GuardrailsConfig {
@@ -232,6 +340,68 @@ pub fn default_feature_pipeline() -> PipelineConfig {
     }
 }
 
+pub fn default_workflow_template(config: &PhaseGolemConfig) -> WorkflowTemplate {
+    let pipeline = config
+        .pipelines
+        .get("feature")
+        .cloned()
+        .unwrap_or_else(default_feature_pipeline);
+    let nodes = pipeline
+        .pre_phases
+        .iter()
+        .chain(pipeline.phases.iter())
+        .enumerate()
+        .map(|(index, phase)| WorkflowNode {
+            key: phase.name.clone(),
+            title: format!("{} phase", phase.name),
+            description: None,
+            priority: 0,
+            tags: vec!["phase-golem".to_string(), "workflow".to_string()],
+            parent: None,
+            dependencies: index
+                .checked_sub(1)
+                .map(|previous| {
+                    pipeline
+                        .pre_phases
+                        .iter()
+                        .chain(pipeline.phases.iter())
+                        .nth(previous)
+                        .expect("previous default workflow phase must exist")
+                        .name
+                        .clone()
+                })
+                .into_iter()
+                .collect(),
+            human_decision: false,
+            executor_profile: "agent".to_string(),
+            execution_policy: PublicExecutionPolicy {
+                timeout_minutes: config.execution.phase_timeout_minutes,
+                max_retries: config.execution.max_retries,
+                destructive: phase.is_destructive,
+                workflows: phase.workflows.clone(),
+            },
+            verification: VerificationPlan::default(),
+        })
+        .collect();
+
+    WorkflowTemplate {
+        id: "default-feature-workflow".to_string(),
+        provenance: TemplateProvenance {
+            source: "phase-golem/default-feature-pipeline".to_string(),
+            revision: None,
+        },
+        inputs: vec![],
+        nodes,
+    }
+}
+
+pub fn selected_workflow_template(config: &PhaseGolemConfig) -> WorkflowTemplate {
+    config
+        .workflow_template
+        .clone()
+        .unwrap_or_else(|| default_workflow_template(config))
+}
+
 pub fn normalize_agent_config(config: &mut PhaseGolemConfig) {
     if let Some(ref model) = config.agent.model {
         let trimmed = model.trim();
@@ -252,6 +422,22 @@ pub fn validate(config: &PhaseGolemConfig) -> Result<(), Vec<String>> {
 
     if config.execution.max_concurrent < 1 {
         errors.push("execution.max_concurrent must be >= 1".to_string());
+    }
+
+    for (name, profile) in &config.executor_profiles {
+        if name.trim().is_empty() {
+            errors.push("executor_profiles keys must not be empty".to_string());
+        }
+        if profile.command.trim().is_empty() {
+            errors.push(format!(
+                "executor_profiles.{name}.command must not be empty"
+            ));
+        }
+        if profile.environment.keys().any(|key| key.trim().is_empty()) {
+            errors.push(format!(
+                "executor_profiles.{name}.environment keys must not be empty"
+            ));
+        }
     }
 
     if let Some(ref model) = config.agent.model {

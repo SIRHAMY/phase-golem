@@ -1,53 +1,10 @@
 use serde::{Deserialize, Deserializer, Serialize};
+use task_golem::events::{self, Event};
+use task_golem::model::status::Status;
+
+use crate::config::PublicExecutionPolicy;
 
 // --- Enums ---
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ItemStatus {
-    #[default]
-    New,
-    Scoping,
-    Ready,
-    InProgress,
-    Parked,
-    Done,
-    Blocked,
-}
-
-impl ItemStatus {
-    /// Validates whether a transition from this status to `to` is allowed.
-    ///
-    /// Rules:
-    /// - Any non-terminal, non-blocked status can transition to Blocked
-    /// - Blocked can return to any non-terminal status (unblock)
-    /// - Forward progression: New -> Scoping -> Ready -> InProgress -> Done
-    /// - Done is terminal — items cannot leave Done
-    pub fn is_valid_transition(&self, to: &ItemStatus) -> bool {
-        use ItemStatus::*;
-
-        // Any non-terminal, non-blocked status can transition to Blocked
-        if *to == Blocked && *self != Done && *self != Parked && *self != Blocked {
-            return true;
-        }
-
-        // Any active status can be parked as not worth pursuing further.
-        if *to == Parked && *self != Done && *self != Parked {
-            return true;
-        }
-
-        // Blocked can return to any non-terminal status
-        if *self == Blocked && *to != Done && *to != Parked && *to != Blocked {
-            return true;
-        }
-
-        // Forward progression transitions
-        matches!(
-            (self, to),
-            (New, Scoping) | (Scoping, Ready) | (Ready, InProgress) | (InProgress, Done)
-        )
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -55,6 +12,89 @@ pub enum ResultCode {
     SubphaseComplete,
     PhaseComplete,
     Failed,
+    Blocked,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustedResultCode {
+    Complete,
+    Blocked,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TrustedExecutorResult {
+    pub item_id: String,
+    pub phase: String,
+    pub result: TrustedResultCode,
+    pub summary: String,
+    pub evidence_references: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AttemptOutcome {
+    Complete,
+    Blocked,
+    Rejected,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct SupervisedAttempt {
+    pub schema: String,
+    pub item_id: String,
+    pub phase: String,
+    pub executor_profile: String,
+    pub attempt: u32,
+    pub max_attempts: u32,
+    pub public_policy: PublicExecutionPolicy,
+    pub outcome: AttemptOutcome,
+    pub summary: String,
+    pub executor_evidence: Vec<String>,
+    pub verification_evidence: Vec<String>,
+}
+
+pub const MAX_ATTEMPT_NOTE_TEXT_BYTES: usize = 1536;
+const ATTEMPT_NOTE_PREFIX: &str = "phase-golem-attempt ";
+
+impl SupervisedAttempt {
+    pub fn validated_note_text(&self) -> Result<String, String> {
+        let evidence = serde_json::to_string(self)
+            .map_err(|error| format!("Cannot serialize PG attempt evidence: {error}"))?;
+        let note = format!("{ATTEMPT_NOTE_PREFIX}{evidence}");
+        if note.len() > MAX_ATTEMPT_NOTE_TEXT_BYTES {
+            return Err(format!(
+                "PG attempt evidence is {} bytes, exceeding the {}-byte protocol budget",
+                note.len(),
+                MAX_ATTEMPT_NOTE_TEXT_BYTES
+            ));
+        }
+
+        let event = Event::note(&self.item_id, events::author::resolve(), &note);
+        let event_line_bytes = serde_json::to_string(&event)
+            .expect("TG Event serialization must succeed")
+            .len()
+            + 1;
+        if event_line_bytes > events::append::MAX_EVENT_LINE_BYTES {
+            return Err(format!(
+                "PG attempt event is {event_line_bytes} bytes, exceeding TG's {}-byte event limit",
+                events::append::MAX_EVENT_LINE_BYTES
+            ));
+        }
+        Ok(note)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SupervisedTransition {
+    Complete,
+    Blocked,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SupervisedOutcome {
+    Complete,
     Blocked,
 }
 
@@ -125,20 +165,8 @@ pub fn parse_dimension_level(s: &str) -> Result<DimensionLevel, String> {
     }
 }
 
-pub fn parse_item_status(s: &str) -> Result<ItemStatus, String> {
-    match s.to_lowercase().as_str() {
-        "new" => Ok(ItemStatus::New),
-        "scoping" => Ok(ItemStatus::Scoping),
-        "ready" => Ok(ItemStatus::Ready),
-        "in_progress" => Ok(ItemStatus::InProgress),
-        "parked" => Ok(ItemStatus::Parked),
-        "done" => Ok(ItemStatus::Done),
-        "blocked" => Ok(ItemStatus::Blocked),
-        _ => Err(format!(
-            "Invalid status '{}': expected new, scoping, ready, in_progress, parked, done, or blocked",
-            s
-        )),
-    }
+pub fn parse_item_status(s: &str) -> Result<Status, String> {
+    s.to_lowercase().parse()
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -151,7 +179,7 @@ pub enum PhasePool {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemUpdate {
-    TransitionStatus(ItemStatus),
+    TransitionStatus(Status),
     SetPhase(String),
     SetPhasePool(PhasePool),
     ClearPhase,
@@ -171,13 +199,19 @@ pub enum PhaseExecutionResult {
     Failed(String),
     Blocked(String),
     Cancelled,
+    Skipped(String),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum SchedulerAction {
     Triage(String),
-    Promote(String),
+    Claim(String),
+    HumanGate(String),
+    Block {
+        item_id: String,
+        reason: String,
+    },
     RunPhase {
         item_id: String,
         phase: String,

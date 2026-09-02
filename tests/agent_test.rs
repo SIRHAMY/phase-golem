@@ -6,13 +6,19 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
-use phase_golem::agent::{read_result_file, run_subprocess_agent, AgentRunner, MockAgentRunner};
+use phase_golem::agent::{
+    read_result_file, read_trusted_executor_result_file, run_agent_for_claimed_pg_item,
+    run_shell_command, run_subprocess_agent, AgentRunner, MockAgentRunner,
+    MAX_TRUSTED_RESULT_PAYLOAD_BYTES,
+};
+use phase_golem::pg_item::X_PG_OWNER;
 use phase_golem::types::{PhaseResult, ResultCode};
+use task_golem::model::status::Status;
 
 /// Create a valid PhaseResult JSON string.
 fn valid_result_json() -> String {
     serde_json::to_string_pretty(&PhaseResult {
-        item_id: "WRK-001".to_string(),
+        item_id: common::ID_1.to_string(),
         phase: "prd".to_string(),
         result: ResultCode::PhaseComplete,
         summary: "Created PRD with all sections filled".to_string(),
@@ -30,7 +36,7 @@ fn valid_result_json() -> String {
 
 fn make_result(result_code: ResultCode, summary: &str) -> PhaseResult {
     PhaseResult {
-        item_id: "WRK-001".to_string(),
+        item_id: common::ID_1.to_string(),
         phase: "prd".to_string(),
         result: result_code,
         summary: summary.to_string(),
@@ -45,6 +51,40 @@ fn make_result(result_code: ResultCode, summary: &str) -> PhaseResult {
     }
 }
 
+#[tokio::test]
+async fn triage_agent_is_not_invoked_after_execution_claim_revocation() {
+    for revoked_item in [
+        {
+            let mut item = common::make_doing_pg_item(common::ID_1, "build");
+            item.0.claimed_by = None;
+            item
+        },
+        {
+            let mut item = common::make_doing_pg_item(common::ID_1, "build");
+            item.0.status = Status::Todo;
+            item
+        },
+        {
+            let mut item = common::make_doing_pg_item(common::ID_1, "build");
+            item.0.extensions.remove(X_PG_OWNER);
+            item
+        },
+    ] {
+        let runner = MockAgentRunner::new(vec![]);
+
+        let result = run_agent_for_claimed_pg_item(
+            &revoked_item,
+            &runner,
+            "triage prompt",
+            Path::new("result.json"),
+            Duration::from_secs(1),
+        )
+        .await;
+
+        assert!(result.is_none(), "revoked work must not invoke an agent");
+    }
+}
+
 // --- read_result_file tests ---
 
 #[tokio::test]
@@ -56,7 +96,7 @@ async fn read_result_file_valid_json() {
     let result = read_result_file(&result_path).await;
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
     let pr = result.unwrap();
-    assert_eq!(pr.item_id, "WRK-001");
+    assert_eq!(pr.item_id, common::ID_1);
     assert_eq!(pr.phase, "prd");
     assert_eq!(pr.result, ResultCode::PhaseComplete);
 }
@@ -92,10 +132,34 @@ async fn read_result_file_invalid_json() {
 async fn read_result_file_missing_required_fields() {
     let dir = TempDir::new().unwrap();
     let result_path = dir.path().join("partial.json");
-    fs::write(&result_path, r#"{"item_id": "WRK-001", "phase": "prd"}"#).unwrap();
+    fs::write(
+        &result_path,
+        format!(r#"{{"item_id": "{}", "phase": "prd"}}"#, common::ID_1),
+    )
+    .unwrap();
 
     let result = read_result_file(&result_path).await;
     assert!(result.is_err(), "Should fail with missing required fields");
+}
+
+#[tokio::test]
+async fn trusted_result_read_rejects_oversized_files_without_reading_the_full_payload() {
+    // Arrange
+    let dir = TempDir::new().expect("create temp directory");
+    let result_path = dir.path().join("trusted-result.json");
+    fs::write(
+        &result_path,
+        vec![b'x'; MAX_TRUSTED_RESULT_PAYLOAD_BYTES + 4_096],
+    )
+    .expect("write oversized trusted result");
+
+    // Act
+    let result = read_trusted_executor_result_file(&result_path).await;
+
+    // Assert
+    assert!(result
+        .expect_err("oversized trusted result must be rejected")
+        .contains("exceeds the 16384-byte protocol limit"));
 }
 
 // --- run_subprocess_agent tests (using mock shell scripts) ---
@@ -113,7 +177,7 @@ async fn subprocess_success_writes_valid_result() {
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
 
     let pr = result.unwrap();
-    assert_eq!(pr.item_id, "WRK-001");
+    assert_eq!(pr.item_id, common::ID_1);
     assert_eq!(pr.result, ResultCode::PhaseComplete);
 
     // Result file should be cleaned up
@@ -203,7 +267,7 @@ async fn subprocess_stale_result_file_cleaned_before_spawn() {
 
     // Should have the new result, not the stale one
     let pr = result.unwrap();
-    assert_eq!(pr.item_id, "WRK-001");
+    assert_eq!(pr.item_id, common::ID_1);
 }
 
 #[tokio::test]
@@ -350,5 +414,54 @@ async fn process_group_kill_cleans_up_subprocess() {
         elapsed.as_secs() < 15,
         "Should not hang — process group should be killed, took {}s",
         elapsed.as_secs()
+    );
+}
+
+#[tokio::test]
+async fn shell_verification_timeout_kills_the_process_group() {
+    // Arrange
+    let dir = TempDir::new().expect("create temp directory");
+    let child_pid_path = dir.path().join("child.pid");
+
+    // Act
+    let started = std::time::Instant::now();
+    let result = run_shell_command(
+        &format!(
+            "sleep 3600 & printf '%s' $! > '{}' && wait",
+            child_pid_path.display()
+        ),
+        dir.path(),
+        Duration::from_secs(1),
+    )
+    .await;
+
+    // Assert
+    assert!(result
+        .expect_err("shell verification must time out")
+        .contains("timed out"));
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "process-group cleanup must remain finite"
+    );
+}
+
+#[tokio::test]
+async fn shell_verification_uses_project_root_and_a_reduced_environment() {
+    // Arrange
+    let dir = TempDir::new().expect("create temp directory");
+
+    // Act
+    let output = run_shell_command(
+        "pwd && test -n \"$PATH\" && test -z \"${HOME+x}\"",
+        dir.path(),
+        Duration::from_secs(2),
+    )
+    .await;
+
+    // Assert
+    let output = output.expect("shell verification command succeeds");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        dir.path().to_string_lossy()
     );
 }

@@ -1,12 +1,6 @@
 # Phase Golem configuration
 # Copy this file to phase-golem.toml and customize for your project.
 
-[project]
-# Item ID prefix (e.g. WRK-001, WRK-002)
-prefix = "WRK"
-# Path to the backlog file, relative to project root
-# backlog_path = "BACKLOG.yaml"
-
 [guardrails]
 # Items exceeding these thresholds during triage get flagged for human review
 max_size = "medium"         # small, medium, large
@@ -19,7 +13,7 @@ max_risk = "low"            # low, medium, high
 phase_timeout_minutes = 30  # Kill a phase after this many minutes
 max_retries = 2             # Retry failed phases up to N times
 default_phase_cap = 100     # Max total phases executed per run
-max_wip = 1                 # Max items in InProgress status at once
+max_wip = 1                 # Max PG-owned Doing tasks at once
 max_concurrent = 1          # Max phases executing in parallel
 
 # Pipelines define the phase sequence for a type of work.

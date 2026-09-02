@@ -31,63 +31,71 @@ cp target/release/phase-golem ~/.local/bin/
 tg init
 
 # 2. Initialize phase-golem
-phase-golem init --prefix WRK
+phase-golem init
 
-# 3. Add work items via task-golem
-tg add "Build user authentication"
+# 3. Commit the initialized configuration before running
+git add phase-golem.toml .gitignore .task-golem/
+git commit -m "Initialize Phase Golem"
 
-# 4. Run the pipeline
+# 4. Materialize the configured workflow template
+phase-golem materialize
+
+# 5. Commit materialized task state before running
+git add .task-golem/ && git commit -m "Materialize Phase Golem workflow"
+
+# 6. Run the pipeline
 phase-golem run
 ```
 
-That's it. Phase Golem triages new items, promotes them through phases, spawns Claude subagents for each phase, commits results, and stops when everything is done or blocked.
+Phase Golem claims TG-ready work, runs configured phases, commits results, and stops when work completes, blocks, or reaches a planned human gate. A bare `tg add` task remains TG-only until PG ownership metadata is attached.
 
 ## Commands
 
 | Command | What it does |
 |---------|-------------|
-| `init --prefix <PREFIX>` | Create `phase-golem.toml` and working directories (requires `tg init` first) |
+| `init` | Create `phase-golem.toml` and working directories (requires `tg init` first) |
+| `materialize [--input NAME=VALUE] [--run-id RUN_ID]` | Persist the configured/default template as a TG graph and print its run ID and node mapping as JSON |
 | `run [--target ID] [--cap N]` | Execute phases until halted (optionally target one item or cap phase count) |
 | `status` | Show items sorted by priority |
-| `triage` | Assess all `New` items (size, complexity, risk, impact) and route them |
-| `advance <ID> [--to phase]` | Push an `InProgress` item to its next phase (or skip to a specific one) |
-| `unblock <ID>` | Restore a `Blocked` item to its previous status |
+| `advance <ID> [--to phase]` | Push a Doing task to its next phase or a specific configured phase |
+| `unblock <ID>` | Restore a Blocked task through TG's native transition |
 
-Items are added via task-golem: `tg add "title"`. See the [tg CLI safety guide](docs/tg-cli-safety.md) for which `tg` commands are safe to use alongside phase-golem.
+See the [tg CLI safety guide](docs/tg-cli-safety.md) for how direct TG operations interact with PG-owned work.
+
+Repeat `--input` for each public template input. Supplying the same `--run-id` reconstructs an already committed run instead of materializing a duplicate.
 
 ## How It Works
 
 ### Item Lifecycle
 
 ```
-New ──triage──▶ Scoping ──pre-phases──▶ Ready ──promote──▶ InProgress ──phases──▶ Done
-                                                               │
-                                                               ▼
-                                                           Blocked
-                                                    (decision / clarification)
+Todo --TG ready + PG claim--> Doing --explicit completion--> Done
+  |                              |
+  | planned human gate           | attempted but unable
+  v                              v
+Todo (halt, unclaimed)         Blocked --unblock--> prior TG status
 ```
 
-Items enter as `New`, get triaged to assess scope, run pre-phases (research/scoping) during `Scoping`, promote to `Ready` when pre-phases pass guardrails, then execute main phases (PRD, build, review, etc.) while `InProgress` until `Done`.
-
-Any phase can block an item if it needs a human decision. Use `unblock` to resume.
+TG status, claims, dependencies, and readiness are authoritative. Phase-golem only selects PG-owned Todo tasks from TG's ready result and claims them before triage or phase execution. Planned human gates remain unclaimed Todo tasks. Failed work becomes Blocked with diagnostics. Completion never changes a parent or container automatically.
 
 ### The Run Loop
 
 When you call `phase-golem run`, this happens in a loop:
 
 1. **Snapshot** the current item state (read-through from task-golem's JSONL store)
-2. **Schedule** next actions via a pure function (`select_actions`) that picks work based on:
-   - **Advance-furthest-first**: Continue items closest to completion
-   - **Then scope**: Run pre-phases on `Scoping` items
-   - **Then triage**: Assess `New` items last
+2. **Schedule** next actions via a pure function (`select_actions`) that:
+   - Claims TG-ready PG-owned Todo tasks within WIP limits
+   - Stops at a ready planned human gate without claiming it
+   - Halts unrecoverably on pre-existing claimed Doing work so it requires explicit recovery
 3. **Execute** each action:
-   - **Promotions** happen immediately (Ready -> InProgress)
-   - **Phase runs** spawn a Claude subagent with a contextual prompt, wait for completion, and apply the result
+   - Claims use TG's native Todo-to-Doing transition before execution
+   - Phase runs spawn an agent with a contextual prompt, wait for completion, and apply the result
 4. **Commit** results (destructive phases commit immediately; non-destructive batch together)
 5. **Check halt conditions** and repeat or stop
 
 The loop stops when:
-- All items are `Done` or `Blocked`
+- No PG-owned work is actionable
+- A planned human gate is ready
 - Phase cap reached (`--cap`, default 100)
 - Circuit breaker trips (2+ consecutive retry exhaustions)
 - SIGTERM/SIGINT received
@@ -103,7 +111,7 @@ The loop stops when:
 
 **Staleness detection**: Before running a destructive phase, phase-golem checks that the prior phase's commit SHA is still in git history. If a rebase invalidated it, the phase blocks rather than building on stale artifacts.
 
-**Guardrails** set thresholds (max size, complexity, risk) in `phase-golem.toml`. Items exceeding guardrails during triage get flagged for human review instead of auto-promoting.
+**Guardrails** set thresholds (max size, complexity, risk) in `phase-golem.toml`. Items exceeding guardrails during triage become Blocked with diagnostics.
 
 **Follow-ups**: Phases can output discovered issues or improvements. These get ingested as new backlog items automatically.
 
@@ -116,9 +124,9 @@ project-root/
 ├── phase-golem.toml     # Pipeline definitions, guardrails, execution config
 ├── .task-golem/         # task-golem storage (JSONL items, archive, lock)
 ├── changes/             # Per-item directories with PRDs, specs, designs
-│   └── HAMY-a1b2c_auth/
-│       ├── HAMY-a1b2c_auth_PRD.md
-│       ├── HAMY-a1b2c_auth_SPEC.md
+│   └── 019b2e7a-1234-7abc-8def-0123456789ab_auth/
+│       ├── 019b2e7a-1234-7abc-8def-0123456789ab_auth_PRD.md
+│       ├── 019b2e7a-1234-7abc-8def-0123456789ab_auth_SPEC.md
 │       └── ...
 ├── docs/                # Project documentation (not created by init)
 │   └── tg-cli-safety.md # tg CLI safety guide for phase-golem stores
@@ -135,15 +143,9 @@ project-root/
 
 All configuration lives in `phase-golem.toml` at the project root. See [`phase-golem.example.toml`](phase-golem.example.toml) for an annotated starting point.
 
-### `[project]`
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `prefix` | string | `"WRK"` | Item ID prefix for new items generated by phase-golem (e.g. follow-ups) |
-
 ### `[guardrails]`
 
-Items exceeding these thresholds during triage get flagged for human review instead of auto-promoting.
+Items exceeding these thresholds during triage block with diagnostics instead of continuing automatically.
 
 | Key | Type | Default | Values | Description |
 |-----|------|---------|--------|-------------|
@@ -158,7 +160,7 @@ Items exceeding these thresholds during triage get flagged for human review inst
 | `phase_timeout_minutes` | integer | `30` | Kill a phase after this many minutes |
 | `max_retries` | integer | `2` | Retry failed phases up to N times |
 | `default_phase_cap` | integer | `100` | Max total phases executed per `run` invocation |
-| `max_wip` | integer | `1` | Max items in `InProgress` status at once |
+| `max_wip` | integer | `1` | Max PG-owned Doing tasks at once |
 | `max_concurrent` | integer | `1` | Max phases executing in parallel |
 
 ### `[pipelines.<name>]`
@@ -167,8 +169,8 @@ Pipelines define the phase sequence for a type of work. If no pipelines are conf
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `pre_phases` | array | `[]` | Phases run during `Scoping` (cannot be destructive) |
-| `phases` | array | `[]` | Main phases run during `InProgress` (at least one required) |
+| `pre_phases` | array | `[]` | Preliminary phases (cannot be destructive) |
+| `phases` | array | `[]` | Main execution phases (at least one required) |
 
 ### Phase configuration
 
@@ -184,9 +186,6 @@ Each entry in `pre_phases` or `phases` is a table with:
 ### Example
 
 ```toml
-[project]
-prefix = "WRK"
-
 [guardrails]
 max_size = "medium"
 max_complexity = "medium"
@@ -245,7 +244,7 @@ is_destructive = false
 - **Executor** (`executor.rs`): Runs phases with retry, staleness checks, and guardrail enforcement. Resolves what state transition to apply after each phase completes.
 - **Coordinator** (`coordinator.rs`): Tokio channel-based actor that serializes all item mutations via task-golem's `Store` and git operations. Handles commits (immediate for destructive, batched for non-destructive), worklog archiving, and follow-up ingestion.
 - **Agent Runner** (`agent.rs`): Spawns `claude` CLI as a subprocess, manages timeouts and signal handling (SIGTERM graceful shutdown with 5s grace period).
-- **Preflight** (`preflight.rs`): Validates config structure, probes that referenced skills exist, and checks that InProgress items reference valid pipelines before any work begins.
+- **Preflight** (`preflight.rs`): Validates config structure, probes referenced skills, consumes TG integrity issues, and checks that claimed tasks map to valid pipeline phases before work begins.
 
 ## License
 

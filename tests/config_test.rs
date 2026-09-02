@@ -44,7 +44,6 @@ fn load_config_defaults_when_file_missing() {
     let dir = tempfile::tempdir().unwrap();
     let config = load_config(dir.path()).unwrap();
 
-    assert_eq!(config.project.prefix, "WRK");
     assert_eq!(config.guardrails.max_size, SizeLevel::Medium);
     assert_eq!(config.guardrails.max_complexity, DimensionLevel::Medium);
     assert_eq!(config.guardrails.max_risk, DimensionLevel::Low);
@@ -61,9 +60,6 @@ fn load_config_full() {
     std::fs::write(
         &config_path,
         r#"
-[project]
-prefix = "APP"
-
 [guardrails]
 max_size = "large"
 max_complexity = "high"
@@ -80,7 +76,6 @@ default_phase_cap = 50
 
     let config = load_config(dir.path()).unwrap();
 
-    assert_eq!(config.project.prefix, "APP");
     assert_eq!(config.guardrails.max_size, SizeLevel::Large);
     assert_eq!(config.guardrails.max_complexity, DimensionLevel::High);
     assert_eq!(config.guardrails.max_risk, DimensionLevel::Medium);
@@ -97,17 +92,15 @@ fn load_config_partial_uses_defaults_for_missing() {
     std::fs::write(
         &config_path,
         r#"
-[project]
-prefix = "CUSTOM"
+[guardrails]
+max_size = "large"
 "#,
     )
     .unwrap();
 
     let config = load_config(dir.path()).unwrap();
 
-    assert_eq!(config.project.prefix, "CUSTOM");
-    // Guardrails and execution should use defaults
-    assert_eq!(config.guardrails.max_size, SizeLevel::Medium);
+    assert_eq!(config.guardrails.max_size, SizeLevel::Large);
     assert_eq!(config.guardrails.max_risk, DimensionLevel::Low);
     assert_eq!(config.guardrails.min_impact, None);
     assert_eq!(config.execution.phase_timeout_minutes, 30);
@@ -122,7 +115,6 @@ fn load_config_empty_file_uses_all_defaults() {
 
     let config = load_config(dir.path()).unwrap();
 
-    assert_eq!(config.project, ProjectConfig::default());
     assert_eq!(config.guardrails, GuardrailsConfig::default());
     assert_eq!(config.execution, ExecutionConfig::default());
     // Default feature pipeline is auto-generated when no pipelines defined
@@ -226,8 +218,8 @@ fn load_config_missing_pipelines_section_generates_default() {
     std::fs::write(
         &config_path,
         r#"
-[project]
-prefix = "TEST"
+[guardrails]
+max_size = "medium"
 "#,
     )
     .unwrap();
@@ -496,7 +488,6 @@ fn load_config_from_none_delegates_to_load_config() {
     let dir = tempfile::tempdir().unwrap();
     let config = load_config_from(None, dir.path()).unwrap();
 
-    assert_eq!(config.project.prefix, "WRK");
     assert_eq!(config.guardrails.max_size, SizeLevel::Medium);
     assert_eq!(config.guardrails.max_complexity, DimensionLevel::Medium);
     assert_eq!(config.guardrails.max_risk, DimensionLevel::Low);
@@ -513,9 +504,6 @@ fn load_config_from_explicit_path_that_exists() {
     std::fs::write(
         &config_path,
         r#"
-[project]
-prefix = "CUSTOM"
-
 [guardrails]
 max_size = "large"
 max_complexity = "high"
@@ -532,7 +520,6 @@ default_phase_cap = 75
 
     let config = load_config_from(Some(config_path.as_path()), dir.path()).unwrap();
 
-    assert_eq!(config.project.prefix, "CUSTOM");
     assert_eq!(config.guardrails.max_size, SizeLevel::Large);
     assert_eq!(config.guardrails.max_complexity, DimensionLevel::High);
     assert_eq!(config.guardrails.max_risk, DimensionLevel::Medium);
@@ -961,12 +948,8 @@ model = "gpt-4"
 
 #[test]
 fn init_template_round_trip_parses() {
-    // Replicate the handle_init template TOML (with a concrete prefix)
-    let template = r#"[project]
-prefix = "WRK"
-# backlog_path = "BACKLOG.yaml"
-
-[guardrails]
+    // Replicate the handle_init template TOML.
+    let template = r#"[guardrails]
 max_size = "medium"
 max_complexity = "medium"
 max_risk = "low"

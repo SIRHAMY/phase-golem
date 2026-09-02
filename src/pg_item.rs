@@ -1,38 +1,40 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
+use serde::de::DeserializeOwned;
 use task_golem::model::item::Item;
 use task_golem::model::status::Status;
 
+use crate::config::{PublicExecutionPolicy, VerificationPlan};
 use crate::types::{
-    BlockType, DimensionLevel, ItemStatus, ItemUpdate, PhasePool, SizeLevel, StructuredDescription,
+    BlockType, DimensionLevel, ItemUpdate, PhasePool, SizeLevel, StructuredDescription,
     UpdatedAssessments,
 };
 
 // --- Extension key constants ---
 
-pub const X_PG_STATUS: &str = "x-pg-status";
 pub const X_PG_PHASE: &str = "x-pg-phase";
 pub const X_PG_PHASE_POOL: &str = "x-pg-phase-pool";
 pub const X_PG_SIZE: &str = "x-pg-size";
 pub const X_PG_COMPLEXITY: &str = "x-pg-complexity";
 pub const X_PG_RISK: &str = "x-pg-risk";
 pub const X_PG_IMPACT: &str = "x-pg-impact";
-pub const X_PG_REQUIRES_HUMAN_REVIEW: &str = "x-pg-requires-human-review";
 pub const X_PG_PIPELINE_TYPE: &str = "x-pg-pipeline-type";
 pub const X_PG_ORIGIN: &str = "x-pg-origin";
 pub const X_PG_BLOCKED_TYPE: &str = "x-pg-blocked-type";
-pub const X_PG_BLOCKED_FROM_STATUS: &str = "x-pg-blocked-from-status";
 pub const X_PG_UNBLOCK_CONTEXT: &str = "x-pg-unblock-context";
 pub const X_PG_LAST_PHASE_COMMIT: &str = "x-pg-last-phase-commit";
 pub const X_PG_DESCRIPTION: &str = "x-pg-description";
+pub const X_PG_OWNER: &str = "x-pg-owner";
+pub const X_PG_HUMAN_DECISION: &str = "x-pg-human-decision";
+pub const X_PG_TEMPLATE_NODE_KEY: &str = "x-pg-template-node-key";
+pub const X_PG_EXECUTOR_PROFILE: &str = "x-pg-executor-profile";
+pub const X_PG_EXECUTION_POLICY: &str = "x-pg-execution-policy";
+pub const X_PG_VERIFICATION: &str = "x-pg-verification";
 
 // --- PgItem newtype ---
 
-/// Newtype wrapper over task-golem's `Item`, providing typed access
-/// to phase-golem-specific `x-pg-*` extension fields and bidirectional
-/// status mapping between phase-golem's 6-state `ItemStatus` and
-/// task-golem's 4-state `Status`.
+/// Newtype wrapper over task-golem's `Item` with typed PG metadata access.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PgItem(pub Item);
 
@@ -76,45 +78,6 @@ impl PgItem {
 // --- Extension field typed getters ---
 
 impl PgItem {
-    /// Bidirectional status mapping: reads task-golem `Status` and `x-pg-status`
-    /// extension to produce phase-golem's `ItemStatus`.
-    ///
-    /// - `Todo` + `x-pg-status` absent -> `New` (default)
-    /// - `Todo` + `x-pg-status: "new"` -> `New`
-    /// - `Todo` + `x-pg-status: "scoping"` -> `Scoping`
-    /// - `Todo` + `x-pg-status: "ready"` -> `Ready`
-    /// - `Todo` + `x-pg-status: "parked"` -> `Parked`
-    /// - `Doing` -> `InProgress` (ignores stale `x-pg-status`)
-    /// - `Done` -> `Done` (ignores stale `x-pg-status`)
-    /// - `Blocked` -> `Blocked` (ignores stale `x-pg-status`)
-    pub fn pg_status(&self) -> ItemStatus {
-        match self.0.status {
-            Status::Todo => {
-                match self.get_string_ext(X_PG_STATUS) {
-                    Some(s) => match s.as_str() {
-                        "new" => ItemStatus::New,
-                        "scoping" => ItemStatus::Scoping,
-                        "ready" => ItemStatus::Ready,
-                        "parked" => ItemStatus::Parked,
-                        other => {
-                            crate::log_warn!(
-                                "Item {}: invalid x-pg-status value '{}', defaulting to New",
-                                self.0.id,
-                                other
-                            );
-                            ItemStatus::New
-                        }
-                    },
-                    // Absent x-pg-status on Todo defaults to New
-                    None => ItemStatus::New,
-                }
-            }
-            Status::Doing => ItemStatus::InProgress,
-            Status::Done => ItemStatus::Done,
-            Status::Blocked => ItemStatus::Blocked,
-        }
-    }
-
     pub fn phase(&self) -> Option<String> {
         self.get_string_ext(X_PG_PHASE)
     }
@@ -164,15 +127,6 @@ impl PgItem {
         self.get_dimension_ext(X_PG_IMPACT)
     }
 
-    /// Returns `true` if `x-pg-requires-human-review` is `true`; absent defaults to `false`.
-    pub fn requires_human_review(&self) -> bool {
-        self.0
-            .extensions
-            .get(X_PG_REQUIRES_HUMAN_REVIEW)
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-    }
-
     pub fn pipeline_type(&self) -> Option<String> {
         self.get_string_ext(X_PG_PIPELINE_TYPE)
     }
@@ -197,29 +151,54 @@ impl PgItem {
             })
     }
 
-    /// Returns the authoritative `blocked_from_status` from the `x-pg-blocked-from-status`
-    /// extension. Detects divergence: if native `blocked_from_status` is `None` but the
-    /// extension is present, the extension is stale (e.g., after `tg unblock`) -- returns
-    /// `None` with a warning.
-    pub fn pg_blocked_from_status(&self) -> Option<ItemStatus> {
-        let has_native = self.0.blocked_from_status.is_some();
-        let ext_value = self.get_string_ext(X_PG_BLOCKED_FROM_STATUS);
+    pub fn is_pg_owned(&self) -> bool {
+        self.0
+            .extensions
+            .get(X_PG_OWNER)
+            .and_then(|value| value.as_str())
+            == Some("phase-golem")
+    }
 
-        match (has_native, ext_value) {
-            // Normal case: both present, use extension as authoritative
-            (true, Some(s)) => parse_blocked_from_status(&self.0.id, &s),
-            // Extension present but native cleared (tg unblock ran): stale
-            (false, Some(_)) => {
-                crate::log_warn!(
-                    "Item {}: x-pg-blocked-from-status extension is stale (native field cleared), treating as absent",
-                    self.0.id,
-                );
-                None
-            }
-            // No extension: item was not blocked via adapter, or extension was never set
-            (true, None) => None,
-            (false, None) => None,
+    pub fn is_claimed_for_pg_execution(&self) -> bool {
+        self.is_pg_owned()
+            && self.status() == Status::Doing
+            && self.0.claimed_by.as_deref() == Some("phase-golem")
+            && self.0.claimed_at.is_some()
+    }
+
+    pub fn is_human_gate(&self) -> bool {
+        self.is_pg_owned()
+            && self
+                .0
+                .extensions
+                .get(X_PG_HUMAN_DECISION)
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+    }
+
+    pub fn template_node_key(&self) -> Option<String> {
+        self.get_string_ext(X_PG_TEMPLATE_NODE_KEY)
+    }
+
+    pub fn executor_profile_snapshot(&self) -> Result<String, String> {
+        let profile = self
+            .get_string_ext(X_PG_EXECUTOR_PROFILE)
+            .ok_or_else(|| format!("Item {} has no executor profile snapshot", self.id()))?;
+        if profile.trim().is_empty() {
+            return Err(format!(
+                "Item {} has an empty executor profile snapshot",
+                self.id()
+            ));
         }
+        Ok(profile)
+    }
+
+    pub fn execution_policy_snapshot(&self) -> Result<PublicExecutionPolicy, String> {
+        self.deserialize_snapshot(X_PG_EXECUTION_POLICY, "execution policy")
+    }
+
+    pub fn verification_snapshot(&self) -> Result<VerificationPlan, String> {
+        self.deserialize_snapshot(X_PG_VERIFICATION, "verification plan")
     }
 
     pub fn unblock_context(&self) -> Option<String> {
@@ -274,55 +253,27 @@ impl PgItem {
             }
         })
     }
+
+    fn deserialize_snapshot<T: DeserializeOwned>(
+        &self,
+        key: &str,
+        label: &str,
+    ) -> Result<T, String> {
+        let value = self
+            .0
+            .extensions
+            .get(key)
+            .ok_or_else(|| format!("Item {} has no {label} snapshot", self.id()))?;
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!(
+                "Item {} has an invalid {label} snapshot: {error}",
+                self.id()
+            )
+        })
+    }
 }
 
 // --- Free functions for mutation (operate on &mut Item directly) ---
-
-/// Sets both the task-golem native `Status` and the `x-pg-status` extension field.
-///
-/// For `InProgress`, `Done`, `Blocked`: sets the native status directly and clears
-/// the `x-pg-status` extension (it is only meaningful for `Todo` sub-states).
-///
-/// For `New`, `Scoping`, `Ready`, `Parked`: sets native status to `Todo` and writes the
-/// sub-state string to `x-pg-status`.
-pub fn set_pg_status(item: &mut Item, status: ItemStatus) {
-    let now = Utc::now();
-    match status {
-        ItemStatus::New => {
-            item.status = Status::Todo;
-            item.extensions
-                .insert(X_PG_STATUS.to_string(), serde_json::json!("new"));
-        }
-        ItemStatus::Scoping => {
-            item.status = Status::Todo;
-            item.extensions
-                .insert(X_PG_STATUS.to_string(), serde_json::json!("scoping"));
-        }
-        ItemStatus::Ready => {
-            item.status = Status::Todo;
-            item.extensions
-                .insert(X_PG_STATUS.to_string(), serde_json::json!("ready"));
-        }
-        ItemStatus::Parked => {
-            item.status = Status::Todo;
-            item.extensions
-                .insert(X_PG_STATUS.to_string(), serde_json::json!("parked"));
-        }
-        ItemStatus::InProgress => {
-            item.status = Status::Doing;
-            item.extensions.remove(X_PG_STATUS);
-        }
-        ItemStatus::Done => {
-            item.status = Status::Done;
-            item.extensions.remove(X_PG_STATUS);
-        }
-        ItemStatus::Blocked => {
-            item.status = Status::Blocked;
-            item.extensions.remove(X_PG_STATUS);
-        }
-    }
-    item.updated_at = now;
-}
 
 /// Sets the `x-pg-phase` extension field. Pass `None` to clear.
 pub fn set_phase(item: &mut Item, phase: Option<&str>) {
@@ -406,51 +357,9 @@ pub fn set_blocked_type(item: &mut Item, block_type: Option<&BlockType>) {
     );
 }
 
-/// Sets the `x-pg-blocked-from-status` extension field and the native
-/// `blocked_from_status` field. The extension stores the full-fidelity 6-variant
-/// `ItemStatus`; the native field stores a lossy 4-variant `Status` mapping.
-/// Pass `None` to clear both.
-pub fn set_blocked_from_status(item: &mut Item, status: Option<&ItemStatus>) {
-    set_enum_ext(
-        item,
-        X_PG_BLOCKED_FROM_STATUS,
-        status.map(|s| match s {
-            ItemStatus::New => "new",
-            ItemStatus::Scoping => "scoping",
-            ItemStatus::Ready => "ready",
-            ItemStatus::Parked => "parked",
-            ItemStatus::InProgress => "in_progress",
-            ItemStatus::Done => "done",
-            ItemStatus::Blocked => "blocked",
-        }),
-    );
-    // Keep native blocked_from_status in sync (lossy: New/Scoping/Ready -> Todo)
-    item.blocked_from_status = status.map(|s| match s {
-        ItemStatus::New | ItemStatus::Scoping | ItemStatus::Ready | ItemStatus::Parked => {
-            Status::Todo
-        }
-        ItemStatus::InProgress => Status::Doing,
-        ItemStatus::Done => Status::Done,
-        ItemStatus::Blocked => Status::Blocked,
-    });
-}
-
 /// Sets the `x-pg-unblock-context` extension field. Pass `None` to clear.
 pub fn set_unblock_context(item: &mut Item, context: Option<&str>) {
     set_enum_ext(item, X_PG_UNBLOCK_CONTEXT, context);
-}
-
-/// Sets the `x-pg-requires-human-review` extension field.
-pub fn set_requires_human_review(item: &mut Item, value: bool) {
-    if value {
-        item.extensions.insert(
-            X_PG_REQUIRES_HUMAN_REVIEW.to_string(),
-            serde_json::json!(true),
-        );
-    } else {
-        item.extensions.remove(X_PG_REQUIRES_HUMAN_REVIEW);
-    }
-    item.updated_at = Utc::now();
 }
 
 /// Sets the `x-pg-origin` extension field. Pass `None` to clear.
@@ -481,41 +390,11 @@ pub fn set_structured_description(item: &mut Item, desc: Option<&StructuredDescr
     item.updated_at = Utc::now();
 }
 
-/// Dispatches an `ItemUpdate` variant to the appropriate field mutation.
-///
-/// This is the central mutation dispatch used by the coordinator's `UpdateItem`
-/// handler. Operates on `&mut Item` directly to avoid owned-vs-borrow tension
-/// in `with_lock` closures.
-pub fn apply_update(item: &mut Item, update: ItemUpdate) {
+/// Applies a PG metadata update. Lifecycle variants are owned by the coordinator.
+pub fn apply_metadata_update(item: &mut Item, update: ItemUpdate) {
     match update {
-        ItemUpdate::TransitionStatus(new_status) => {
-            let pg = PgItem(item.clone());
-            let current = pg.pg_status();
-
-            if !current.is_valid_transition(&new_status) {
-                crate::log_warn!(
-                    "Item {}: invalid transition {:?} -> {:?}, skipping",
-                    item.id,
-                    current,
-                    new_status
-                );
-                return;
-            }
-
-            // When transitioning to Blocked, save the current status
-            if new_status == ItemStatus::Blocked {
-                set_blocked_from_status(item, Some(&current));
-            }
-
-            // When transitioning from Blocked, clear blocked fields
-            if current == ItemStatus::Blocked {
-                set_blocked_from_status(item, None);
-                item.blocked_reason = None;
-                set_blocked_type(item, None);
-                set_unblock_context(item, None);
-            }
-
-            set_pg_status(item, new_status);
+        ItemUpdate::TransitionStatus(_) | ItemUpdate::SetBlocked(_) | ItemUpdate::Unblock => {
+            unreachable!("lifecycle updates must be applied by the coordinator")
         }
         ItemUpdate::SetPhase(phase) => {
             set_phase(item, Some(&phase));
@@ -526,47 +405,6 @@ pub fn apply_update(item: &mut Item, update: ItemUpdate) {
         ItemUpdate::ClearPhase => {
             set_phase(item, None);
             set_phase_pool(item, None);
-        }
-        ItemUpdate::SetBlocked(reason) => {
-            let pg = PgItem(item.clone());
-            let current = pg.pg_status();
-
-            if !current.is_valid_transition(&ItemStatus::Blocked) {
-                crate::log_warn!(
-                    "Item {}: cannot block from {:?}, skipping",
-                    item.id,
-                    current
-                );
-                return;
-            }
-
-            set_blocked_from_status(item, Some(&current));
-            set_pg_status(item, ItemStatus::Blocked);
-            item.blocked_reason = Some(reason);
-        }
-        ItemUpdate::Unblock => {
-            let pg = PgItem(item.clone());
-            if pg.pg_status() != ItemStatus::Blocked {
-                crate::log_warn!(
-                    "Item {}: cannot unblock, not blocked (status: {:?}), skipping",
-                    item.id,
-                    pg.pg_status()
-                );
-                return;
-            }
-
-            // Read the blocked_from_status before clearing it
-            let restore_to = pg.pg_blocked_from_status().unwrap_or(ItemStatus::New);
-
-            // Clear all blocked fields (extension and native)
-            set_blocked_from_status(item, None);
-            item.blocked_reason = None;
-            item.blocked_from_status = None;
-            set_blocked_type(item, None);
-            set_unblock_context(item, None);
-
-            // Restore to the saved status
-            set_pg_status(item, restore_to);
         }
         ItemUpdate::UpdateAssessments(assessments) => {
             apply_assessments(item, &assessments);
@@ -583,47 +421,21 @@ pub fn apply_update(item: &mut Item, update: ItemUpdate) {
     }
 }
 
-/// Constructs a new `PgItem` from parts with correct extension defaults.
-///
-/// Sets: `created_at`/`updated_at` = `Utc::now()`, `priority` = 0,
-/// status = `Todo`, `x-pg-status` = `"new"`, `claimed_by`/`claimed_at` = `None`.
+/// Constructs a new `PgItem` from generic TG fields and PG metadata defaults.
 pub fn new_from_parts(
     id: String,
     title: String,
-    status: ItemStatus,
+    status: Status,
     dependencies: Vec<String>,
     tags: Vec<String>,
 ) -> PgItem {
     let now = Utc::now();
-    let mut extensions = BTreeMap::new();
-
-    // Set initial x-pg-status based on the provided ItemStatus
-    let native_status = match &status {
-        ItemStatus::New => {
-            extensions.insert(X_PG_STATUS.to_string(), serde_json::json!("new"));
-            Status::Todo
-        }
-        ItemStatus::Scoping => {
-            extensions.insert(X_PG_STATUS.to_string(), serde_json::json!("scoping"));
-            Status::Todo
-        }
-        ItemStatus::Ready => {
-            extensions.insert(X_PG_STATUS.to_string(), serde_json::json!("ready"));
-            Status::Todo
-        }
-        ItemStatus::Parked => {
-            extensions.insert(X_PG_STATUS.to_string(), serde_json::json!("parked"));
-            Status::Todo
-        }
-        ItemStatus::InProgress => Status::Doing,
-        ItemStatus::Done => Status::Done,
-        ItemStatus::Blocked => Status::Blocked,
-    };
+    let extensions = BTreeMap::from([(X_PG_OWNER.to_string(), serde_json::json!("phase-golem"))]);
 
     let item = Item {
         id,
         title,
-        status: native_status,
+        status,
         priority: 0,
         description: None,
         tags,
@@ -634,6 +446,7 @@ pub fn new_from_parts(
         blocked_from_status: None,
         claimed_by: None,
         claimed_at: None,
+        parent: None,
         extensions,
     };
 
@@ -681,22 +494,4 @@ fn apply_assessments(item: &mut Item, assessments: &UpdatedAssessments) {
         set_impact(item, Some(impact));
     }
     item.updated_at = Utc::now();
-}
-
-fn parse_blocked_from_status(item_id: &str, s: &str) -> Option<ItemStatus> {
-    match s {
-        "new" => Some(ItemStatus::New),
-        "scoping" => Some(ItemStatus::Scoping),
-        "ready" => Some(ItemStatus::Ready),
-        "in_progress" => Some(ItemStatus::InProgress),
-        "parked" => Some(ItemStatus::Parked),
-        other => {
-            crate::log_warn!(
-                "Item {}: invalid x-pg-blocked-from-status value '{}', treating as absent",
-                item_id,
-                other
-            );
-            None
-        }
-    }
 }

@@ -94,7 +94,7 @@ impl From<TgError> for PgError {
 
             TgError::CycleDetected(ref msg) => PgError::CycleDetected(msg.clone()),
 
-            TgError::AmbiguousId { .. } => PgError::Unexpected(err),
+            TgError::InvalidId(_) => PgError::Unexpected(err),
 
             TgError::AlreadyClaimed(_) => PgError::Unexpected(err),
 
@@ -102,7 +102,22 @@ impl From<TgError> for PgError {
 
             TgError::DependentExists(_, _) => PgError::Unexpected(err),
 
+            TgError::DependencyMissing { .. } => PgError::Unexpected(err),
+
+            TgError::ParentSelfReference { .. }
+            | TgError::ParentCycle { .. }
+            | TgError::ParentDangling { .. }
+            | TgError::ParentHasChildren { .. } => PgError::Unexpected(err),
+
             TgError::IoError(_) => PgError::Unexpected(err),
+
+            TgError::CacheCorrupt { .. }
+            | TgError::CacheRebuildFailed { .. }
+            | TgError::CacheSchemaVersionMismatch { .. }
+            | TgError::QueryTimeout { .. }
+            | TgError::QueryDenied { .. }
+            | TgError::QuerySyntax { .. }
+            | TgError::GraphApply(_) => PgError::Unexpected(err),
         }
     }
 }

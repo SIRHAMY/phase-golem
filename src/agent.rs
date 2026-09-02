@@ -1,14 +1,19 @@
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use nix::unistd::Pid;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
-use crate::config::CliTool;
+use crate::config::{CliTool, PublicExecutionPolicy, TrustedExecutorProfile};
+use crate::pg_item::PgItem;
 use crate::types::PhaseResult;
 use crate::{log_debug, log_warn};
+
+pub const MAX_TRUSTED_RESULT_PAYLOAD_BYTES: usize = 16 * 1024;
 
 /// Maximum time to wait for graceful shutdown after SIGTERM before sending SIGKILL.
 const SIGTERM_GRACE_PERIOD_SECONDS: u64 = 5;
@@ -122,6 +127,84 @@ pub trait AgentRunner: Send + Sync {
     ) -> impl std::future::Future<Output = Result<PhaseResult, String>> + Send;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TrustedExecutionRequest {
+    pub item_id: String,
+    pub phase: String,
+    pub title: String,
+    pub attempt: u32,
+    pub policy: PublicExecutionPolicy,
+}
+
+pub trait TrustedExecutorAdapter: Send + Sync {
+    fn invoke(
+        &self,
+        profile: &TrustedExecutorProfile,
+        request: &TrustedExecutionRequest,
+    ) -> impl std::future::Future<Output = Result<String, String>> + Send;
+}
+
+pub struct LocalProcessExecutorAdapter {
+    root: PathBuf,
+}
+
+impl LocalProcessExecutorAdapter {
+    pub fn new(root: PathBuf) -> Self {
+        Self { root }
+    }
+}
+
+impl TrustedExecutorAdapter for LocalProcessExecutorAdapter {
+    async fn invoke(
+        &self,
+        profile: &TrustedExecutorProfile,
+        request: &TrustedExecutionRequest,
+    ) -> Result<String, String> {
+        let result_path = self.root.join(".phase-golem").join(format!(
+            "trusted_result_{}_{}.json",
+            request.item_id, request.phase
+        ));
+        let request_json = serde_json::to_string_pretty(request)
+            .map_err(|error| format!("Failed to serialize executor request: {error}"))?;
+        let prompt = format!(
+            "Execute this trusted Phase Golem request:\n{request_json}\n\nWrite one JSON result to {} with exactly: item_id, phase, result (complete or blocked), summary, and evidence_references.",
+            result_path.display()
+        );
+        let timeout = Duration::from_secs(request.policy.timeout_minutes as u64 * 60);
+        let mut command = tokio::process::Command::new(&profile.command);
+        command.args(&profile.args).arg(prompt);
+        command.current_dir(&self.root);
+        command.env_clear();
+        if let Some(path) = std::env::var_os("PATH") {
+            command.env("PATH", path);
+        }
+        command.envs(&profile.environment);
+
+        run_subprocess_json_with_result_payload_limit::<serde_json::Value>(
+            command,
+            &result_path,
+            timeout,
+            MAX_TRUSTED_RESULT_PAYLOAD_BYTES,
+        )
+        .await
+        .map(|value| value.to_string())
+    }
+}
+
+pub async fn run_agent_for_claimed_pg_item(
+    item: &PgItem,
+    runner: &impl AgentRunner,
+    prompt: &str,
+    result_path: &Path,
+    timeout: Duration,
+) -> Option<Result<PhaseResult, String>> {
+    if !item.is_claimed_for_pg_execution() {
+        return None;
+    }
+
+    Some(runner.run_agent(prompt, result_path, timeout).await)
+}
+
 /// Real implementation that spawns a CLI agent as a subprocess.
 pub struct CliAgentRunner {
     pub tool: CliTool,
@@ -181,10 +264,108 @@ impl AgentRunner for CliAgentRunner {
 ///
 /// Note: checks the global `shutdown_flag()` after subprocess completion.
 pub async fn run_subprocess_agent(
-    mut cmd: tokio::process::Command,
+    cmd: tokio::process::Command,
     result_path: &Path,
     timeout: Duration,
 ) -> Result<PhaseResult, String> {
+    run_subprocess_json(cmd, result_path, timeout).await
+}
+
+pub async fn run_subprocess_json<T: DeserializeOwned>(
+    cmd: tokio::process::Command,
+    result_path: &Path,
+    timeout: Duration,
+) -> Result<T, String> {
+    run_subprocess_json_with_result_payload_limit(cmd, result_path, timeout, usize::MAX).await
+}
+
+/// Run a shell verification command in a hermetic project-root process group.
+pub async fn run_shell_command(
+    command_text: &str,
+    root: &Path,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    let mut command = tokio::process::Command::new("sh");
+    command.args(["-c", command_text]).current_dir(root);
+    command.stdin(std::process::Stdio::null());
+    command.stdout(std::process::Stdio::piped());
+    command.stderr(std::process::Stdio::piped());
+    command.env_clear();
+    if let Some(path) = std::env::var_os("PATH") {
+        command.env("PATH", path);
+    }
+    command.kill_on_drop(true);
+
+    // SAFETY: setpgid is async-signal-safe and runs between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            nix::unistd::setpgid(nix::unistd::Pid::from_raw(0), nix::unistd::Pid::from_raw(0))
+                .map_err(std::io::Error::other)?;
+            Ok(())
+        });
+    }
+
+    let child = command
+        .spawn()
+        .map_err(|error| format!("Failed to spawn shell verification command: {error}"))?;
+    let child_pid = child
+        .id()
+        .ok_or_else(|| "Failed to get shell verification process PID".to_string())?
+        as i32;
+    let pgid = Pid::from_raw(child_pid);
+    register_child(pgid);
+
+    let wait_for_output = child.wait_with_output();
+    tokio::pin!(wait_for_output);
+    let timeout_sleep = tokio::time::sleep(timeout);
+    tokio::pin!(timeout_sleep);
+    let shutdown = wait_for_shutdown();
+    tokio::pin!(shutdown);
+
+    let result = tokio::select! {
+        result = &mut wait_for_output => result
+            .map_err(|error| format!("Error waiting for shell verification command: {error}")),
+        _ = &mut timeout_sleep => Err(format!(
+            "Shell verification command timed out after {} seconds",
+            timeout.as_secs()
+        )),
+        _ = &mut shutdown => Err("Shutdown requested".to_string()),
+    };
+
+    match result {
+        Ok(output) => {
+            if is_shutdown_requested() {
+                kill_process_group(child_pid).await;
+                unregister_child(pgid);
+                return Err("Shutdown requested".to_string());
+            }
+            unregister_child(pgid);
+            Ok(output)
+        }
+        Err(error) if error == "Shutdown requested" || error.contains("timed out") => {
+            kill_process_group(child_pid).await;
+            unregister_child(pgid);
+            Err(error)
+        }
+        Err(error) => {
+            unregister_child(pgid);
+            Err(error)
+        }
+    }
+}
+
+async fn wait_for_shutdown() {
+    while !is_shutdown_requested() {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn run_subprocess_json_with_result_payload_limit<T: DeserializeOwned>(
+    mut cmd: tokio::process::Command,
+    result_path: &Path,
+    timeout: Duration,
+    max_result_payload_bytes: usize,
+) -> Result<T, String> {
     // Delete stale result file if it exists (unconditional to avoid TOCTOU)
     match tokio::fs::remove_file(result_path).await {
         Ok(()) => log_warn!(
@@ -260,19 +441,21 @@ pub async fn run_subprocess_agent(
                 exit_status.code()
             );
 
-            unregister_child(pgid);
-
             // Check for shutdown signal
             if is_shutdown_requested() {
                 kill_process_group(child_pid).await;
                 let _ = child.wait().await;
+                unregister_child(pgid);
                 return Err("Shutdown requested".to_string());
             }
 
-            // Read result file and match by value to avoid unnecessary clone
-            let phase_result = read_result_file(result_path).await;
+            unregister_child(pgid);
 
-            match (exit_status.success(), phase_result) {
+            let parsed_result =
+                read_json_result_file_with_payload_limit(result_path, max_result_payload_bytes)
+                    .await;
+
+            match (exit_status.success(), parsed_result) {
                 (true, Ok(result)) => {
                     cleanup_result_file(result_path).await;
                     Ok(result)
@@ -334,16 +517,57 @@ async fn kill_process_group(pgid: i32) {
 
 /// Read and validate a phase result JSON file.
 pub async fn read_result_file(path: &Path) -> Result<PhaseResult, String> {
-    let contents = tokio::fs::read_to_string(path).await.map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
+    read_json_result_file(path).await
+}
+
+pub async fn read_trusted_executor_result_file(path: &Path) -> Result<String, String> {
+    read_json_result_file_with_payload_limit::<serde_json::Value>(
+        path,
+        MAX_TRUSTED_RESULT_PAYLOAD_BYTES,
+    )
+    .await
+    .map(|value| value.to_string())
+}
+
+async fn read_json_result_file<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
+    read_json_result_file_with_payload_limit(path, usize::MAX).await
+}
+
+async fn read_json_result_file_with_payload_limit<T: DeserializeOwned>(
+    path: &Path,
+    max_payload_bytes: usize,
+) -> Result<T, String> {
+    use tokio::io::AsyncReadExt;
+
+    let file = tokio::fs::File::open(path).await.map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
             format!("Result file not found: {}", path.display())
         } else {
-            format!("Failed to read result file {}: {}", path.display(), e)
+            format!("Failed to read result file {}: {}", path.display(), error)
         }
     })?;
+    let mut contents = Vec::with_capacity(max_payload_bytes.min(16 * 1024));
+    file.take(max_payload_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut contents)
+        .await
+        .map_err(|error| format!("Failed to read result file {}: {}", path.display(), error))?;
+    if contents.len() > max_payload_bytes {
+        return Err(format!(
+            "Result file {} exceeds the {}-byte protocol limit",
+            path.display(),
+            max_payload_bytes
+        ));
+    }
+    let contents = String::from_utf8(contents)
+        .map_err(|error| format!("Failed to read result file {}: {}", path.display(), error))?;
 
-    let result: PhaseResult = serde_json::from_str(&contents)
-        .map_err(|e| format!("Failed to parse result JSON from {}: {}", path.display(), e))?;
+    let result = serde_json::from_str(&contents).map_err(|error| {
+        format!(
+            "Failed to parse result JSON from {}: {}",
+            path.display(),
+            error
+        )
+    })?;
 
     Ok(result)
 }
